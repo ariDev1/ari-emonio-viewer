@@ -187,3 +187,48 @@ def test_connect_cancellation_closes_new_http_session_and_reraises_cancellation(
     asyncio.run(exercise())
     assert len(sessions) == 1
     assert sessions[0].close_calls == 1
+
+
+
+def test_scope_connect_allows_field_observed_slow_local_name_resolution(monkeypatch) -> None:
+    async def exercise():
+        app = web.Application()
+
+        async def login(_request: web.Request):
+            response = web.Response(status=302, headers={"Location": "/"})
+            response.set_cookie("LOGIN_SESSION_KEY", "session-123")
+            return response
+
+        async def ok(_request: web.Request):
+            return web.Response(text="ok")
+
+        async def websocket(request: web.Request):
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            await ws.close()
+            return ws
+
+        app.router.add_post("/login", login)
+        app.router.add_get("/", ok)
+        app.router.add_get("/scope", ok)
+        app.router.add_get("/ws", websocket)
+
+        async with TestServer(app) as server:
+            loop = asyncio.get_running_loop()
+            original_getaddrinfo = loop.getaddrinfo
+
+            async def delayed_getaddrinfo(host, port, *args, **kwargs):
+                if host == "emonio-slow.local":
+                    await asyncio.sleep(4.2)
+                    host = "127.0.0.1"
+                return await original_getaddrinfo(host, port, *args, **kwargs)
+
+            monkeypatch.setattr(loop, "getaddrinfo", delayed_getaddrinfo)
+            client = await EmonioScopeClient.connect(
+                f"emonio-slow.local:{server.port}",
+                "u",
+                "p",
+            )
+            await client.close()
+
+    asyncio.run(exercise())

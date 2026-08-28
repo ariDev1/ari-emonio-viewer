@@ -66,7 +66,7 @@ class EmonioScopeClient:
         username: str,
         password: str,
         *,
-        timeout_s: float = 4.0,
+        timeout_s: float = 8.0,
     ) -> "EmonioScopeClient":
         if not isinstance(username, str) or not username:
             raise ValueError("username must not be empty")
