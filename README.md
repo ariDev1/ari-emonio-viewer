@@ -10,6 +10,10 @@ public-source candidate and keeps the v0.3.4 stability hardening.
 Tested hardware evidence currently covers Emonio P3 firmware `3.0.79-release`.
 This is not a claim of universal firmware or hardware compatibility.
 
+![ARI Emonio Viewer main dashboard](ari-emonio-viewer_0.png)
+
+![ARI Emonio Viewer SCOPE display](ari-emonio-viewer_1.png)
+
 ## Features
 
 - Phase A/B/C/TOTAL U, I, P, Q, S, PF, frequency, and energy
