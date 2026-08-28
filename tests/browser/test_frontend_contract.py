@@ -167,9 +167,6 @@ def test_history_view_is_structured_and_explicitly_unfiltered() -> None:
     assert 'id="history-section"' in html
     assert 'id="history-active-plot"' in html
     assert "ROLLING 10 MIN" in html
-    assert "NO FILTERING" in html
-    assert "NO AVERAGING" in html
-    assert "NO INTERPOLATION" in html
     assert "appendHistoryPayload" in source
     assert "renderMeasurementHistory" in source
 
@@ -216,7 +213,24 @@ def test_history_has_metric_selector_and_compact_exact_sample_inspector() -> Non
     assert "initializeHistoryInspection" in app
     assert "history-selector-button" in css
     assert "history-inspection-cursor" in css
-    assert "NO INTERPOLATION" in html
+
+
+def test_history_inspector_keeps_all_four_phase_blocks_visible_without_footer_notes() -> None:
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    css = Path("frontend/css/history.css").read_text(encoding="utf-8")
+
+    for phase in ("A", "B", "C", "TOTAL"):
+        assert f'data-history-inspector-phase="{phase}"' in html
+
+    assert 'class="history-inspector-note"' not in html
+    assert 'class="history-science-note"' not in html
+
+    phase_grid = css[
+        css.index(".history-inspector-phase-grid {"):
+        css.index(".history-inspector-phase-card {", css.index(".history-inspector-phase-grid {"))
+    ]
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in phase_grid
+    assert "grid-template-rows: repeat(2, minmax(0, 1fr));" in phase_grid
 
 
 def test_history_view_contains_metric_selector_for_all_requested_canonical_fields() -> None:
@@ -257,8 +271,6 @@ def test_history_inspection_keyboard_steps_only_exact_stored_samples() -> None:
     assert "event.preventDefault()" in source
     assert "svg.focus" in source
     assert ".history-plot:focus-visible" in css
-    assert "LEFT / RIGHT" in html
-    assert "NO INTERPOLATION" in html
 
 
 def test_workstation_shell_uses_fixed_viewport_layout_without_page_scroll() -> None:
@@ -452,7 +464,7 @@ def test_history_has_selectable_display_windows_without_changing_ten_minute_stor
     assert "visibleHistorySamples" in source
     assert ".history-window-selector" in css
     assert "DISPLAY WINDOW" in html
-    assert "STORED HISTORY REMAINS FIXED AT 10 MIN" in html
+    assert "export const HISTORY_WINDOW_MS = 10 * 60 * 1000;" in source
 
 
 def test_scope_overlay_contract_requires_operator_credentials_and_preserves_workspace_layout() -> None:

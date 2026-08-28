@@ -4,7 +4,7 @@ ARI Emonio Viewer is a local Linux measurement viewer for Emonio P3 devices.
 It provides live three-phase measurements, history, recording, multi-device use,
 and a separate SCOPE waveform view.
 
-The trusted field baseline is **v0.3.3**. **v0.3.5 Candidate** is the current
+The trusted field baseline is **v0.3.3**. **v0.3.6 Candidate** is the current
 public-source candidate and keeps the v0.3.4 stability hardening.
 
 Tested hardware evidence currently covers Emonio P3 firmware `3.0.79-release`.
@@ -49,7 +49,7 @@ python3 -m pip install --upgrade pip
 python3 -m pip install -e '.[dev]'
 ```
 
-The qualified v0.3.5 dependency set includes:
+The qualified dependency set includes:
 
 - `aiohttp==3.14.3`
 - `yarl==1.24.2`
