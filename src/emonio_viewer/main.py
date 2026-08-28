@@ -75,7 +75,7 @@ async def wait_for_initial_device_evidence(
         if ready:
             return
         if loop.time() >= deadline:
-            raise TimeoutError("initial device evidence did not arrive before startup deadline")
+            return
         await asyncio.sleep(0.05)
 
 

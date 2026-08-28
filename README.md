@@ -4,7 +4,7 @@ ARI Emonio Viewer is a local Linux measurement viewer for Emonio P3 devices.
 It provides live three-phase measurements, history, recording, multi-device use,
 and a separate SCOPE waveform view.
 
-The trusted field baseline is **v0.3.3**. **v0.3.7 Candidate** is the current
+The trusted field baseline is **v0.3.3**. **v0.3.8 Candidate** is the current
 public-source candidate and keeps the v0.3.4 stability hardening.
 
 Tested hardware evidence currently covers Emonio P3 firmware `3.0.79-release`.

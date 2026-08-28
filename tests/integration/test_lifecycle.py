@@ -288,3 +288,43 @@ def test_scope_cleanup_failure_does_not_block_canonical_shutdown() -> None:
     message = asyncio.run(exercise())
     assert calls == ["scope", "disable", "recorders", "workers", "server"]
     assert "scope close failed" in message
+
+
+
+def test_startup_grace_expiry_does_not_abort_connecting_device(monkeypatch) -> None:
+    import emonio_viewer.main as main_module
+    from emonio_viewer.config.model import DeviceConfig, RecordingConfig, RuntimeConfig, ViewerConfig
+    from emonio_viewer.runtime.store import RuntimeStore
+
+    device = DeviceConfig(
+        id="slow-meter",
+        name="slow-meter",
+        host="emonio-slow.local",
+        timeout_s=2.0,
+        enabled=True,
+    )
+    config = RuntimeConfig(
+        viewer=ViewerConfig(default_device=device.id),
+        recording=RecordingConfig(default_interval_s=10),
+        devices=(device,),
+    )
+    store = RuntimeStore()
+    store.register_device(device)
+
+    class FakeLoop:
+        def __init__(self) -> None:
+            self._times = iter((0.0, 5.0))
+
+        def time(self) -> float:
+            return next(self._times)
+
+    async def exercise() -> None:
+        fake_loop = FakeLoop()
+        monkeypatch.setattr(main_module.asyncio, "get_running_loop", lambda: fake_loop)
+        await main_module.wait_for_initial_device_evidence(store, config)
+
+    asyncio.run(exercise())
+
+    snapshot = store.get_device(device.id)
+    assert snapshot.state.value == "CONNECTING"
+    assert snapshot.last_sample is None
