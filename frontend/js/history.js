@@ -12,6 +12,16 @@ export const HISTORY_PHASES = Object.freeze([
   Object.freeze({ key: "phase_c", label: "C" }),
   Object.freeze({ key: "total", label: "TOTAL" }),
 ]);
+const HISTORY_CLIPBOARD_FIELDS = Object.freeze([
+  Object.freeze({ key: "vrms", label: "U / V" }),
+  Object.freeze({ key: "irms", label: "I / A" }),
+  Object.freeze({ key: "p", label: "P / W" }),
+  Object.freeze({ key: "q", label: "Q / var" }),
+  Object.freeze({ key: "s", label: "S / VA" }),
+  Object.freeze({ key: "pf", label: "PF / —" }),
+  Object.freeze({ key: "frequency", label: "f / Hz" }),
+]);
+
 export const HISTORY_CHARTS = Object.freeze([
   Object.freeze({ svgId: "history-active-plot", field: "p", unit: "W", scale: "signed", title: "P(t)", scaleNote: "ACTIVE POWER · W · ZERO-CENTERED" }),
   Object.freeze({ svgId: "history-active-plot", field: "q", unit: "var", scale: "signed", title: "Q(t)", scaleNote: "REACTIVE POWER · var · ZERO-CENTERED" }),
@@ -29,6 +39,7 @@ const VIEWBOX = Object.freeze({ width: 760, height: 260 });
 const PLOT = Object.freeze({ left: 70, right: 744, top: 30, bottom: 220 });
 let activeHistoryField = "p";
 let activeHistoryWindowMs = HISTORY_WINDOW_MS;
+let historyCopyFeedbackTimer = null;
 
 function finite(value) {
   return Number.isFinite(value) ? value : null;
@@ -210,6 +221,25 @@ export function historyTimestampForPlotX(plotX, endMs, windowMs = HISTORY_WINDOW
 
 export function formatCanonicalHistoryValue(value) {
   return Number.isFinite(value) ? String(value) : "—";
+}
+
+export function formatHistorySampleClipboardText(deviceId, selectedSample) {
+  if (!deviceId || !selectedSample) return null;
+  const lines = [
+    "ARI Emonio Viewer - Exact Stored Sample",
+    "",
+    `Device: ${deviceId}`,
+    `Cycle: ${selectedSample.cycleId}`,
+    `Finished UTC: ${selectedSample.cycleFinishedUtc}`,
+    `Quality: ${selectedSample.quality ?? "—"}`,
+  ];
+  for (const phase of HISTORY_PHASES) {
+    lines.push("", phase.label);
+    for (const field of HISTORY_CLIPBOARD_FIELDS) {
+      lines.push(`${field.label}: ${formatCanonicalHistoryValue(selectedSample?.[phase.key]?.[field.key])}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 export function projectTimestamp(timestampMs, startMs, endMs, left, right) {
@@ -430,6 +460,26 @@ function setText(id, value) {
   if (node) node.textContent = value;
 }
 
+function resetHistoryCopyButton(button) {
+  if (historyCopyFeedbackTimer !== null) {
+    clearTimeout(historyCopyFeedbackTimer);
+    historyCopyFeedbackTimer = null;
+  }
+  button.textContent = "COPY";
+  delete button.dataset.copyState;
+}
+
+function showHistoryCopyFeedback(button, label, state) {
+  resetHistoryCopyButton(button);
+  button.textContent = label;
+  button.dataset.copyState = state;
+  historyCopyFeedbackTimer = setTimeout(() => {
+    button.textContent = "COPY";
+    delete button.dataset.copyState;
+    historyCopyFeedbackTimer = null;
+  }, state === "error" ? 1800 : 1200);
+}
+
 function renderInspector(deviceId, samples, selectedSample) {
   setText("history-inspector-device", selectedSample ? deviceId : "—");
   setText("history-inspector-cycle", selectedSample ? String(selectedSample.cycleId) : "—");
@@ -443,6 +493,18 @@ function renderInspector(deviceId, samples, selectedSample) {
         ? "NO SAMPLE SELECTED · CLICK THE ACTIVE HISTORY PLOT"
         : "WAITING FOR CANONICAL SAMPLES"
   );
+
+  const copyButton = document.getElementById("history-inspector-copy");
+  if (copyButton) {
+    const selectionKey = selectedSample
+      ? `${deviceId}:${selectedSample.cycleId}:${selectedSample.cycleFinishedUtc}`
+      : "";
+    if (copyButton.dataset.selectionKey !== selectionKey) {
+      copyButton.dataset.selectionKey = selectionKey;
+      resetHistoryCopyButton(copyButton);
+    }
+    copyButton.disabled = !selectedSample;
+  }
 
   for (const phase of HISTORY_PHASES) {
     const row = document.querySelector(`[data-history-inspector-phase="${phase.label}"]`);
@@ -550,6 +612,28 @@ export function initializeHistoryWindowSelector(getActiveDeviceId) {
     });
   }
   updateHistoryWindowSelectorState();
+}
+
+export function initializeHistoryInspectorCopy(getActiveDeviceId) {
+  const button = document.getElementById("history-inspector-copy");
+  if (!button || button.dataset.historyCopyBound === "true") return;
+  button.dataset.historyCopyBound = "true";
+  button.addEventListener("click", async () => {
+    const deviceId = getActiveDeviceId?.();
+    if (!deviceId) return;
+    const selectedSample = selectedHistorySample(deviceId, browserHistory.get(deviceId));
+    const text = formatHistorySampleClipboardText(deviceId, selectedSample);
+    if (!text) return;
+    try {
+      if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API unavailable");
+      }
+      await navigator.clipboard.writeText(text);
+      showHistoryCopyFeedback(button, "COPIED", "success");
+    } catch {
+      showHistoryCopyFeedback(button, "COPY FAILED", "error");
+    }
+  });
 }
 
 export function initializeHistoryInspection(getActiveDeviceId) {

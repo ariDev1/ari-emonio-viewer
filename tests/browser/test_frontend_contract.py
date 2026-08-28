@@ -578,3 +578,38 @@ def test_scope_device_switch_clears_runtime_credentials_before_selecting_another
     assert 'username.value = ""' in switch_block
     assert 'password.value = ""' in switch_block
     assert "deviceSelectionWriter" in switch_block
+
+
+def test_history_inspector_copy_exports_exact_selected_sample_to_clipboard() -> None:
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    source = Path("frontend/js/history.js").read_text(encoding="utf-8")
+    app = Path("frontend/js/app.js").read_text(encoding="utf-8")
+    css = Path("frontend/css/history.css").read_text(encoding="utf-8")
+
+    button_start = html.index('id="history-inspector-copy"')
+    button_tag = html[button_start - 160:button_start + 320]
+    assert 'type="button"' in button_tag
+    assert 'aria-label="Copy selected sample to clipboard"' in button_tag
+    assert "disabled" in button_tag
+
+    assert "export function formatHistorySampleClipboardText" in source
+    assert 'ARI Emonio Viewer - Exact Stored Sample' in source
+    for label in ("Device:", "Cycle:", "Finished UTC:", "Quality:"):
+        assert label in source
+    for field in ("vrms", "irms", "p", "q", "s", "pf", "frequency"):
+        assert f'key: "{field}"' in source
+    for label in ("U / V", "I / A", "P / W", "Q / var", "S / VA", "PF / —", "f / Hz"):
+        assert label in source
+
+    formatter_start = source.index("export function formatHistorySampleClipboardText")
+    formatter_source = source[formatter_start:formatter_start + 2200]
+    assert "formatCanonicalHistoryValue" in formatter_source
+    assert ".toFixed(" not in formatter_source
+
+    assert 'navigator.clipboard.writeText' in source
+    assert 'selectedHistorySample(deviceId, browserHistory.get(deviceId))' in source
+    assert '"COPIED"' in source
+    assert '"COPY FAILED"' in source
+    assert "initializeHistoryInspectorCopy" in source
+    assert "initializeHistoryInspectorCopy" in app
+    assert ".history-inspector-copy" in css

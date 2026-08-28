@@ -105,7 +105,11 @@
   border-bottom: 1px solid var(--border);
 }
 .history-inspector-heading h3 { margin: 1px 0 0; font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.05em; }
-.history-inspector-heading > strong { color: var(--muted); font-family: var(--mono); font-size: 0.54rem; letter-spacing: 0.04em; text-align: right; }
+.history-inspector-actions { display: flex; align-items: flex-start; justify-content: flex-end; gap: 6px; min-width: 0; }
+#history-inspector-state { color: var(--muted); font-family: var(--mono); font-size: 0.54rem; letter-spacing: 0.04em; text-align: right; }
+.history-inspector-copy { min-height: 21px; padding: 2px 7px; flex: none; color: var(--muted); background: #0e141b; border-color: var(--border); font-family: var(--mono); font-size: 0.52rem; letter-spacing: 0.06em; }
+.history-inspector-copy[data-copy-state="success"] { color: var(--good); border-color: var(--good); }
+.history-inspector-copy[data-copy-state="error"] { color: var(--danger); border-color: var(--danger); }
 .history-inspector-meta {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -15,6 +15,7 @@ import { initializeMeasurementPanels, renderBackendStatus, renderMeasurementPayl
 import {
   appendHistoryPayload,
   initializeHistoryInspection,
+  initializeHistoryInspectorCopy,
   initializeHistoryMetricSelector,
   initializeHistoryWindowSelector,
   renderMeasurementHistory,
@@ -358,6 +359,7 @@ async function main() {
   initializeHistoryMetricSelector(() => selectedDevice);
   initializeHistoryWindowSelector(() => selectedDevice);
   initializeHistoryInspection(() => selectedDevice);
+  initializeHistoryInspectorCopy(() => selectedDevice);
   initializeScopeControls(
     () => selectedDevice,
     displayDeviceName,
