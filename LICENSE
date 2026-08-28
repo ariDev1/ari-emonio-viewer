@@ -1,0 +1,62 @@
+ARI Emonio Viewer Source-Available License 1.0
+
+Copyright (c) the ARI Emonio Viewer copyright holder(s).
+All rights reserved except for the rights expressly granted below.
+
+1. Definitions
+
+"Software" means ARI Emonio Viewer and the source code, documentation, and
+other files distributed with this license.
+
+"Natural Person" means one individual human being acting in that person's own
+capacity. A Natural Person may also act as an individual sole proprietor or
+self-employed person under this license, provided the Software is not being
+used on behalf of a separate legal entity.
+
+"Company" means a corporation, limited-liability company, partnership, or
+other separate legal entity that uses the Software for business or commercial
+purposes.
+
+"Company Use" means use, copying, modification, deployment, integration, or
+distribution of the Software by a Company, or by a person acting for or on
+behalf of a Company.
+
+2. Free License for Natural Persons
+
+The Licensor grants each Natural Person a worldwide, non-exclusive,
+royalty-free license to use, copy, study, modify, and redistribute the
+Software, in source or binary form, for personal, educational, scientific,
+research, hobby, or commercial activity performed in that Natural Person's
+own capacity.
+
+Redistribution must preserve this license and all copyright notices. A
+recipient receives rights only under this license.
+
+3. Companies Require a Commercial License
+
+This license grants no right for Company Use. Before any Company Use, the
+Company must obtain a separate commercial license from the copyright holder.
+
+A Natural Person does not obtain Company Use rights by downloading, copying,
+modifying, or redistributing the Software for a Company. Use by an employee,
+contractor, officer, or agent on behalf of a Company is Company Use.
+
+Contact the repository owner to obtain commercial licensing terms.
+
+4. No Trademark Grant
+
+This license does not grant rights to use ARI names, logos, trademarks, or
+service marks except as required to describe the origin of the Software.
+
+5. No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE
+COPYRIGHT HOLDERS ARE NOT LIABLE FOR ANY CLAIM, DAMAGE, OR OTHER LIABILITY
+ARISING FROM THE SOFTWARE OR ITS USE.
+
+6. Source-Available Status
+
+This is a source-available license. It is not an OSI-approved open-source
+license because Company Use requires a separate commercial license.

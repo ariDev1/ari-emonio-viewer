@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ARI Emonio Viewer</title>
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/layout.css">
+  <link rel="stylesheet" href="/static/css/phase-panels.css">
+  <link rel="stylesheet" href="/static/css/quadrant.css">
+  <link rel="stylesheet" href="/static/css/diagnostics.css">
+  <link rel="stylesheet" href="/static/css/recording.css">
+  <link rel="stylesheet" href="/static/css/ct-evidence.css">
+  <link rel="stylesheet" href="/static/css/history.css">
+  <link rel="stylesheet" href="/static/css/scope.css">
+</head>
+<body>
+  <main class="viewer-shell">
+    <header class="status-bar" aria-label="Device and acquisition status">
+      <div class="status-title">
+        <span class="eyebrow">ARI EMONIO VIEWER</span>
+        <strong id="device-name">No device</strong>
+      </div>
+      <div class="status-items">
+        <span><span class="status-label">Target</span><strong id="device-ip">—</strong></span>
+        <span><span class="status-label">Transport</span><strong id="transport-state">—</strong></span>
+        <span><span class="status-label">Device</span><strong id="device-state">STARTING</strong></span>
+        <span><span class="status-label">Stream</span><strong id="stream-state">CONNECTING</strong></span>
+        <span><span class="status-label">Quality</span><strong id="quality-state">NO SAMPLE</strong></span>
+        <span><span class="status-label">Age</span><strong id="sample-age">—</strong></span>
+        <span><span class="status-label">Poll</span><strong id="poll-interval">—</strong></span>
+        <span><span class="status-label">Firmware</span><strong id="firmware-version">—</strong></span>
+      </div>
+
+      <div class="utility-status-controls" aria-label="Utility status and controls">
+        <button id="diagnostics-toggle" class="utility-status-button" type="button" aria-controls="diagnostics-drawer" aria-expanded="false">
+          <span class="utility-status-label">DIAG</span>
+          <strong id="diagnostics-summary-state">NO DATA</strong>
+          <span id="diagnostics-summary-cycles">— VALID</span>
+          <span id="diagnostics-summary-errors">— ERRORS</span>
+        </button>
+        <button id="recording-toggle" class="utility-status-button" type="button" aria-controls="recording-drawer" aria-expanded="false">
+          <span class="utility-status-label">REC</span>
+          <strong id="recording-selected-state" class="recording-state">STATUS UNKNOWN</strong>
+          <span id="recording-selected-device">—</span>
+          <span id="recording-summary-state">STATUS UNKNOWN</span>
+        </button>
+        <button id="scope-toggle" class="utility-status-button" type="button" aria-controls="scope-drawer" aria-expanded="false">
+          <span class="utility-status-label">SCOPE</span>
+          <strong id="scope-summary-state">DISCONNECTED</strong>
+          <span id="scope-summary-device">—</span>
+          <span>WAVEFORM</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="target-strip" aria-label="Emonio target selection">
+      <label for="device-target">EMONIO TARGET</label>
+      <input id="device-target" type="text" spellcheck="false" autocomplete="off" placeholder="192.0.2.10 or emonio-example">
+      <button id="device-connect" type="button">CONNECT</button>
+      <span id="target-status" class="target-status" aria-live="polite">READY</span>
+      <label class="active-device-label" for="device-selector">ACTIVE</label>
+      <select id="device-selector" aria-label="Select connected Emonio device"></select>
+    </section>
+
+    <section class="phase-grid" aria-label="Live phase measurements">
+      <article id="phase-a" class="phase-panel" data-phase="phase_a">
+        <h2>PHASE A</h2>
+        <div class="measurement-table" data-measurements></div>
+      </article>
+      <article id="phase-b" class="phase-panel" data-phase="phase_b">
+        <h2>PHASE B</h2>
+        <div class="measurement-table" data-measurements></div>
+      </article>
+      <article id="phase-c" class="phase-panel" data-phase="phase_c">
+        <h2>PHASE C</h2>
+        <div class="measurement-table" data-measurements></div>
+      </article>
+      <article id="phase-total" class="phase-panel total-panel" data-phase="total">
+        <h2>TOTAL</h2>
+        <div class="measurement-table" data-measurements></div>
+        <div class="derived-values" aria-label="Derived phase sums">
+          <span>ΣP <strong id="derived-sum-p">—</strong></span>
+          <span>ΔP <strong id="derived-delta-p">—</strong></span>
+          <span>ΣQ <strong id="derived-sum-q">—</strong></span>
+          <span>ΔQ <strong id="derived-delta-q">—</strong></span>
+          <span>ΣS <strong id="derived-sum-s">—</strong></span>
+          <span>ΔS <strong id="derived-delta-s">—</strong></span>
+        </div>
+      </article>
+    </section>
+
+    <section class="science-workspace" aria-label="Power vector and measurement history">
+      <section class="quadrant-card" aria-labelledby="quadrant-title">
+        <div class="section-heading compact-heading">
+          <div>
+            <span class="eyebrow">SIGNED P / Q</span>
+            <h2 id="quadrant-title">Four-quadrant vectors</h2>
+          </div>
+        </div>
+        <svg id="pq-plot" viewBox="0 0 430 430" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Four quadrant active and reactive power vector plot">
+          <line class="plot-axis zero-axis" x1="40" y1="225" x2="340" y2="225"></line>
+          <line class="plot-axis zero-axis" x1="190" y1="75" x2="190" y2="375"></line>
+          <text class="axis-label" x="350" y="220">+P</text>
+          <text class="axis-label" x="16" y="220">−P</text>
+          <text class="axis-label" x="196" y="62">+Q</text>
+          <text class="axis-label" x="196" y="402">−Q</text>
+          <text class="quadrant-label" x="270" y="130">Q1</text>
+          <text class="quadrant-label" x="100" y="130">Q2</text>
+          <text class="quadrant-label" x="100" y="330">Q3</text>
+          <text class="quadrant-label" x="270" y="330">Q4</text>
+          <text id="pq-scale" class="plot-scale-text" x="410" y="24">SCALE waiting for data</text>
+          <g id="pq-vectors"></g>
+          <g id="pq-legend" aria-label="Plot vector legend">
+            <g class="plot-legend-item" data-phase="A" transform="translate(350 105)">
+              <circle class="plot-legend-dot" r="4" cx="0" cy="0"></circle>
+              <text class="plot-legend-label" x="10" y="4">A</text>
+            </g>
+            <g class="plot-legend-item" data-phase="B" transform="translate(350 130)">
+              <circle class="plot-legend-dot" r="4" cx="0" cy="0"></circle>
+              <text class="plot-legend-label" x="10" y="4">B</text>
+            </g>
+            <g class="plot-legend-item" data-phase="C" transform="translate(350 155)">
+              <circle class="plot-legend-dot" r="4" cx="0" cy="0"></circle>
+              <text class="plot-legend-label" x="10" y="4">C</text>
+            </g>
+            <g class="plot-legend-item" data-phase="T" transform="translate(350 180)">
+              <circle class="plot-legend-dot" r="4" cx="0" cy="0"></circle>
+              <text class="plot-legend-label" x="10" y="4">TOTAL</text>
+            </g>
+          </g>
+        </svg>
+      </section>
+
+    <section id="history-section" class="history-card" aria-labelledby="history-title">
+      <div class="section-heading compact-heading">
+        <div>
+          <span class="eyebrow">ROLLING 10 MIN · CANONICAL MEASUREMENTS</span>
+          <h2 id="history-title">Measurement history</h2>
+        </div>
+        <span class="history-heading-note">LIVE BROWSER SESSION · UTC TIME BASE</span>
+      </div>
+      <div class="history-meta" aria-label="History acquisition metadata">
+        <span>Display<strong id="history-display-window">10 min</strong></span>
+        <span>Visible / stored<strong id="history-sample-count">0 / 0</strong></span>
+        <span>Last sample<strong id="history-last-utc">—</strong></span>
+        <span>Render mode<strong>DISCRETE SAMPLES</strong></span>
+      </div>
+      <div class="history-controls">
+        <div class="history-selector" role="toolbar" aria-label="Select canonical history metric">
+          <button id="history-select-p" class="history-selector-button is-active" type="button" data-history-select-field="p" aria-pressed="true">P(t)</button>
+          <button id="history-select-q" class="history-selector-button" type="button" data-history-select-field="q" aria-pressed="false">Q(t)</button>
+          <button id="history-select-vrms" class="history-selector-button" type="button" data-history-select-field="vrms" aria-pressed="false">U(t)</button>
+          <button id="history-select-irms" class="history-selector-button" type="button" data-history-select-field="irms" aria-pressed="false">I(t)</button>
+          <button id="history-select-s" class="history-selector-button" type="button" data-history-select-field="s" aria-pressed="false">S(t)</button>
+          <button id="history-select-pf" class="history-selector-button" type="button" data-history-select-field="pf" aria-pressed="false">PF(t)</button>
+          <button id="history-select-frequency" class="history-selector-button" type="button" data-history-select-field="frequency" aria-pressed="false">f(t)</button>
+        </div>
+        <div class="history-window-selector" role="toolbar" aria-label="Select history display window">
+          <span class="history-window-label">DISPLAY WINDOW</span>
+          <button class="history-selector-button history-window-button" type="button" data-history-window-ms="30000" aria-pressed="false">30 s</button>
+          <button class="history-selector-button history-window-button" type="button" data-history-window-ms="60000" aria-pressed="false">1 min</button>
+          <button class="history-selector-button history-window-button" type="button" data-history-window-ms="120000" aria-pressed="false">2 min</button>
+          <button class="history-selector-button history-window-button" type="button" data-history-window-ms="300000" aria-pressed="false">5 min</button>
+          <button class="history-selector-button history-window-button is-active" type="button" data-history-window-ms="600000" aria-pressed="true">10 min</button>
+        </div>
+      </div>
+            <div class="history-workspace">
+        <article class="history-plot-card history-plot-card-active" aria-labelledby="history-active-title">
+                <div class="history-plot-title"><strong id="history-active-title">P(t)</strong><span id="history-active-scale-note">ACTIVE POWER · W · ZERO-CENTERED</span></div>
+                <svg id="history-active-plot" class="history-plot history-plot-active" role="img" tabindex="0" aria-keyshortcuts="ArrowLeft ArrowRight" aria-label="Discrete canonical history for phase A, B, C, and total in the selected display window"></svg>
+              </article>
+        <section id="history-inspector" class="history-inspector" aria-labelledby="history-inspector-title">
+                <div class="history-inspector-heading">
+                  <div>
+                    <span class="eyebrow">EXACT STORED SAMPLE</span>
+                    <h3 id="history-inspector-title">Sample inspector</h3>
+                  </div>
+                  <strong id="history-inspector-state">WAITING FOR CANONICAL SAMPLES</strong>
+                </div>
+                <div class="history-inspector-meta" aria-label="Selected sample identity">
+                  <span>Device<strong id="history-inspector-device">—</strong></span>
+                  <span>Cycle<strong id="history-inspector-cycle">—</strong></span>
+                  <span>Finished UTC<strong id="history-inspector-timestamp">—</strong></span>
+                  <span>Quality<strong id="history-inspector-quality">—</strong></span>
+                </div>
+                <div id="history-inspector-phase-grid" class="history-inspector-phase-grid">
+                  <article class="history-inspector-phase-card" data-history-inspector-phase="A">
+                    <h4>A</h4>
+                    <dl class="history-inspector-values">
+                      <div><dt>U / V</dt><dd data-history-field="vrms">—</dd></div>
+                      <div><dt>I / A</dt><dd data-history-field="irms">—</dd></div>
+                      <div><dt>P / W</dt><dd data-history-field="p">—</dd></div>
+                      <div><dt>Q / var</dt><dd data-history-field="q">—</dd></div>
+                      <div><dt>S / VA</dt><dd data-history-field="s">—</dd></div>
+                      <div><dt>PF / —</dt><dd data-history-field="pf">—</dd></div>
+                      <div><dt>f / Hz</dt><dd data-history-field="frequency">—</dd></div>
+                    </dl>
+                  </article>
+                  <article class="history-inspector-phase-card" data-history-inspector-phase="B">
+                    <h4>B</h4>
+                    <dl class="history-inspector-values">
+                      <div><dt>U / V</dt><dd data-history-field="vrms">—</dd></div>
+                      <div><dt>I / A</dt><dd data-history-field="irms">—</dd></div>
+                      <div><dt>P / W</dt><dd data-history-field="p">—</dd></div>
+                      <div><dt>Q / var</dt><dd data-history-field="q">—</dd></div>
+                      <div><dt>S / VA</dt><dd data-history-field="s">—</dd></div>
+                      <div><dt>PF / —</dt><dd data-history-field="pf">—</dd></div>
+                      <div><dt>f / Hz</dt><dd data-history-field="frequency">—</dd></div>
+                    </dl>
+                  </article>
+                  <article class="history-inspector-phase-card" data-history-inspector-phase="C">
+                    <h4>C</h4>
+                    <dl class="history-inspector-values">
+                      <div><dt>U / V</dt><dd data-history-field="vrms">—</dd></div>
+                      <div><dt>I / A</dt><dd data-history-field="irms">—</dd></div>
+                      <div><dt>P / W</dt><dd data-history-field="p">—</dd></div>
+                      <div><dt>Q / var</dt><dd data-history-field="q">—</dd></div>
+                      <div><dt>S / VA</dt><dd data-history-field="s">—</dd></div>
+                      <div><dt>PF / —</dt><dd data-history-field="pf">—</dd></div>
+                      <div><dt>f / Hz</dt><dd data-history-field="frequency">—</dd></div>
+                    </dl>
+                  </article>
+                  <article class="history-inspector-phase-card" data-history-inspector-phase="TOTAL">
+                    <h4>TOTAL</h4>
+                    <dl class="history-inspector-values">
+                      <div><dt>U / V</dt><dd data-history-field="vrms">—</dd></div>
+                      <div><dt>I / A</dt><dd data-history-field="irms">—</dd></div>
+                      <div><dt>P / W</dt><dd data-history-field="p">—</dd></div>
+                      <div><dt>Q / var</dt><dd data-history-field="q">—</dd></div>
+                      <div><dt>S / VA</dt><dd data-history-field="s">—</dd></div>
+                      <div><dt>PF / —</dt><dd data-history-field="pf">—</dd></div>
+                      <div><dt>f / Hz</dt><dd data-history-field="frequency">—</dd></div>
+                    </dl>
+                  </article>
+                </div>
+                <p class="history-inspector-note">CLICK THE ACTIVE HISTORY PLOT TO SELECT THE NEAREST REAL STORED SAMPLE. THEN USE LEFT / RIGHT TO STEP THROUGH ADJACENT REAL STORED SAMPLES. NO INTERPOLATION · NO RESAMPLING · NO VALUE TRANSFORMATION. Finished UTC is the exact canonical cycle_finished_utc string received from the backend.</p>
+              </section>
+      </div>
+      <p class="history-science-note">NO FILTERING OF STORED HISTORY · NO AVERAGING · NO INTERPOLATION · NO SIGN CORRECTION. DISPLAY WINDOW = EXACT TIMESTAMP SUBSET FOR RENDERING ONLY · STORED HISTORY REMAINS FIXED AT 10 MIN. Each marker is one canonical measured sample. P/Q stay zero-centered. U/I/S/PF/f use visible-sample min/max for display coordinates only. Values are unchanged.</p>
+    </section>
+    </section>
+
+    <section id="recording-strip" class="recording-strip" aria-label="Session recording controls">
+      <div class="recording-strip-identity">
+        <span class="eyebrow">SESSION RECORDING</span>
+        <strong id="recording-strip-device">—</strong>
+      </div>
+      <strong id="recording-state" class="recording-state">STATUS UNKNOWN</strong>
+      <label class="recording-strip-interval">Interval
+        <select id="recording-interval" aria-label="Recording interval"></select>
+      </label>
+      <button id="record-start" type="button" disabled>RECORD</button>
+      <button id="record-stop" type="button" disabled>STOP</button>
+      <button id="recording-more" type="button" data-utility-open="recording-drawer" aria-controls="recording-drawer">MORE…</button>
+    </section>
+  </main>
+
+  <aside id="diagnostics-drawer" class="utility-drawer diagnostics-drawer" aria-labelledby="diagnostics-title" hidden>
+    <div class="utility-drawer-header">
+      <div>
+        <span class="eyebrow">RUNTIME EVIDENCE</span>
+        <h2 id="diagnostics-title">Diagnostics</h2>
+      </div>
+      <button class="utility-drawer-close" type="button" data-utility-close="diagnostics-drawer" aria-label="Close Diagnostics">CLOSE</button>
+    </div>
+    <div class="diagnostics-panel-body">
+      <dl id="diagnostics-grid" class="diagnostics-grid"></dl>
+      <details id="ct-evidence-details" class="ct-evidence-details">
+              <summary class="ct-evidence-summary">
+                <span class="ct-evidence-summary-label">DEVICE EVIDENCE · Current sensor configuration</span>
+                <strong id="ct-evidence-state" class="ct-evidence-heading-state">CT CONFIG: NOT READ</strong>
+              </summary>
+              <div class="ct-evidence-body">
+                <div id="ct-evidence-message" class="ct-evidence-message" aria-live="polite"></div>
+                <div class="ct-evidence-controls">
+                  <label>Emonio admin password
+                    <input id="ct-password" type="password" autocomplete="off" spellcheck="false">
+                  </label>
+                  <button id="ct-read" type="button">READ CT CONFIG</button>
+                </div>
+                <div class="ct-evidence-meta" aria-label="CT evidence metadata">
+                  <span>Source<strong id="ct-source">—</strong></span>
+                  <span>Observed UTC<strong id="ct-observed">—</strong></span>
+                  <span>Physical orientation<strong id="ct-physical-status">NOT VERIFIED</strong></span>
+                </div>
+                <dl id="ct-values" class="ct-values" aria-label="Raw Emonio CT configuration values">
+                  <div class="ct-value-cell"><dt>ct_type</dt><dd data-ct-key="ct_type">—</dd></div>
+                  <div class="ct-value-cell"><dt>ct_voltage</dt><dd data-ct-key="ct_voltage">—</dd></div>
+                  <div class="ct-value-cell"><dt>ct_range</dt><dd data-ct-key="ct_range">—</dd></div>
+                  <div class="ct-value-cell"><dt>ct_invert</dt><dd data-ct-key="ct_invert">—</dd></div>
+                  <div class="ct-value-cell"><dt>ct_didt</dt><dd data-ct-key="ct_didt">—</dd></div>
+                </dl>
+                <p class="ct-evidence-note">RAW DEVICE CONFIGURATION. PHYSICAL CT ORIENTATION IS NOT VERIFIED. The viewer does not infer physical direction from P or Q and does not interpret ct_type, ct_voltage, ct_range, or ct_didt without qualified mapping evidence.</p>
+              </div>
+            </details>
+    </div>
+  </aside>
+
+  <aside id="recording-drawer" class="utility-drawer recording-drawer" aria-labelledby="recording-title" hidden>
+    <div class="utility-drawer-header">
+      <div>
+        <span class="eyebrow">SESSION</span>
+        <h2 id="recording-title">Recording</h2>
+      </div>
+      <button class="utility-drawer-close" type="button" data-utility-close="recording-drawer" aria-label="Close Recording">CLOSE</button>
+    </div>
+    <div class="recording-panel-body">
+      <div class="recording-control-heading">
+        <span>CONTROLLED EMONIO <strong id="recording-control-device">—</strong></span>
+      </div>
+      <div class="recording-active-summary">ACTIVE RECORDINGS <strong id="recording-active-list">UNAVAILABLE</strong></div>
+      <label class="recording-note">Session note for the next recording
+        <input id="session-note" type="text" maxlength="2048" placeholder="Optional operator note">
+      </label>
+      <div id="recording-detail" class="recording-detail" aria-live="polite">No active recording.</div>
+    </div>
+  </aside>
+
+
+  <aside id="scope-drawer" class="utility-drawer scope-drawer" aria-labelledby="scope-title" hidden>
+    <div class="utility-drawer-header">
+      <div>
+        <span class="eyebrow">INSTANTANEOUS WAVEFORM · READ-ONLY</span>
+        <h2 id="scope-title">Emonio Scope</h2>
+      </div>
+      <button class="utility-drawer-close" type="button" data-utility-close="scope-drawer" aria-label="Close Scope">CLOSE</button>
+    </div>
+    <div class="scope-panel-body">
+      <div class="scope-command-bar">
+        <div class="scope-command-device">
+          <label class="scope-command-label" for="scope-device-selector">CONTROLLED EMONIO</label>
+          <select id="scope-device-selector" class="scope-device-selector" aria-label="Select Emonio for Scope"></select>
+        </div>
+        <div class="scope-state-cluster">
+          <span class="scope-command-label">STATE</span>
+          <strong id="scope-state" class="scope-state-badge" data-state="DISCONNECTED">DISCONNECTED</strong>
+        </div>
+        <div class="scope-auth-fields" aria-label="Emonio web authentication">
+          <label>USERNAME
+            <input id="scope-username" type="text" autocomplete="off" spellcheck="false">
+          </label>
+          <label>PASSWORD
+            <input id="scope-password" type="password" autocomplete="off" spellcheck="false">
+          </label>
+        </div>
+        <div class="scope-session-actions" aria-label="Scope session controls">
+          <button id="scope-start" type="button">START LIVE</button>
+          <button id="scope-live" type="button" disabled>LIVE</button>
+          <button id="scope-hold" type="button" disabled>HOLD</button>
+          <button id="scope-stop" type="button" disabled>STOP</button>
+        </div>
+      </div>
+
+      <div id="scope-error" class="scope-error-line" aria-live="polite"></div>
+
+      <div class="scope-owner-strip" aria-label="Active Emonio scope owners">
+        <span class="scope-owner-title">SCOPE SESSIONS</span>
+        <strong id="scope-active-count">0 ACTIVE</strong>
+        <div id="scope-active-owners" class="scope-owner-list">NONE</div>
+      </div>
+
+      <div class="scope-toolbar-row">
+        <div class="scope-toolbar" role="toolbar" aria-label="Scope phase selection">
+          <span class="scope-toolbar-label">PHASE</span>
+          <button class="scope-mode-button is-active" type="button" data-scope-phase="A" aria-pressed="true">A</button>
+          <button class="scope-mode-button" type="button" data-scope-phase="B" aria-pressed="false">B</button>
+          <button class="scope-mode-button" type="button" data-scope-phase="C" aria-pressed="false">C</button>
+          <button class="scope-mode-button" type="button" data-scope-phase="ABC" aria-pressed="false">ABC</button>
+        </div>
+        <div class="scope-toolbar" role="toolbar" aria-label="Scope signal selection">
+          <span class="scope-toolbar-label">SIGNAL</span>
+          <button class="scope-mode-button" type="button" data-scope-signal="U" aria-pressed="false">U</button>
+          <button class="scope-mode-button" type="button" data-scope-signal="I" aria-pressed="false">I</button>
+          <button class="scope-mode-button is-active" type="button" data-scope-signal="U+I" aria-pressed="true">U+I</button>
+        </div>
+      </div>
+
+      <div class="scope-evidence-strip" aria-label="Scope capture evidence">
+        <span>SOURCE <strong>EMONIO_SCOPE</strong></span>
+        <span>CAP <strong id="scope-capture-sequence">—</strong></span>
+        <span>UTC <strong id="scope-received-utc">—</strong></span>
+        <span>AXIS <strong id="scope-capture-ms">—</strong></span>
+        <span>SAMPLES <strong id="scope-samples">—</strong></span>
+        <span>RATE <strong id="scope-rate">—</strong></span>
+        <span>PREFIX <strong id="scope-prefix">—</strong></span>
+      </div>
+
+      <div class="scope-plot-card">
+        <div id="scope-legend" class="scope-legend" aria-label="Scope trace legend">
+          <span class="scope-legend-phase scope-legend-a">A</span>
+          <span class="scope-legend-phase scope-legend-b">B</span>
+          <span class="scope-legend-phase scope-legend-c">C</span>
+          <span class="scope-legend-signal"><i class="scope-legend-line scope-legend-line-u"></i>U</span>
+          <span class="scope-legend-signal"><i class="scope-legend-line scope-legend-line-i"></i>I</span>
+        </div>
+        <svg id="scope-plot" viewBox="0 0 1000 560" preserveAspectRatio="none" role="img" aria-label="Exact Emonio voltage and current waveform samples"></svg>
+      </div>
+
+      <p class="scope-science-note">EMONIO WEBSOCKET SCOPE · EXACT RECEIVED FLOAT32 SAMPLES · MODBUS-INDEPENDENT · NO SMOOTHING · NO AVERAGING · NO RESAMPLING · U/I SCALES ARE DISPLAY-ONLY · RATE DERIVED FROM CAPTURE AXIS.</p>
+    </div>
+  </aside>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

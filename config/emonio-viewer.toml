@@ -1,0 +1,16 @@
+[viewer]
+default_device = "emonio-example"
+
+[recording]
+default_interval_s = 10
+
+[[devices]]
+id = "emonio-example"
+name = "emonio-example"
+host = "192.0.2.10"
+port = 502
+unit_id = 1
+poll_interval_s = 2.0
+timeout_s = 2.0
+enabled = false
+firmware_version = "3.0.79-release"

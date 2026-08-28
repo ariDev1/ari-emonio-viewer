@@ -1,0 +1,419 @@
+.scope-drawer {
+  width: min(1180px, 74vw);
+  overflow: hidden;
+}
+
+.scope-panel-body {
+  display: grid;
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto;
+  gap: 7px;
+  height: calc(100% - 50px);
+  min-height: 0;
+  padding: 9px 10px 10px;
+}
+
+/* Session command surface */
+.scope-command-bar {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(96px, auto) minmax(330px, 1.4fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  background: #0d141b;
+}
+
+.scope-command-device,
+.scope-state-cluster {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.scope-command-label,
+.scope-auth-fields label,
+.scope-owner-title,
+.scope-toolbar-label {
+  color: var(--muted);
+  font-size: 0.54rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.scope-device-selector {
+  width: 100%;
+  min-width: 0;
+  min-height: 27px;
+  padding: 4px 24px 4px 7px;
+  border: 1px solid var(--border);
+  background: #101820;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+}
+
+.scope-device-selector:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.scope-device-selector:disabled {
+  opacity: 0.45;
+}
+
+.scope-state-badge {
+  display: inline-flex;
+  width: fit-content;
+  min-width: 74px;
+  min-height: 25px;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  background: #101820;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+}
+
+.scope-state-badge[data-state="LIVE"] {
+  border-color: #4cbf8a;
+  color: #79e5ad;
+}
+.scope-state-badge[data-state="HOLD"] {
+  border-color: #b99a45;
+  color: #e2c361;
+}
+.scope-state-badge[data-state="CONNECTING"] {
+  border-color: #4f9fcb;
+  color: #70d7ff;
+}
+.scope-state-badge[data-state="ERROR"],
+.scope-state-badge[data-state="UNAVAILABLE"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.scope-auth-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+
+.scope-auth-fields label {
+  display: grid;
+  gap: 3px;
+}
+
+.scope-auth-fields input {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 7px;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+}
+
+.scope-auth-fields input:disabled {
+  opacity: 0.42;
+}
+
+.scope-session-actions {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.scope-session-actions button,
+.scope-mode-button {
+  min-height: 28px;
+  padding: 3px 8px;
+  font-family: var(--mono);
+  font-size: 0.61rem;
+}
+
+.scope-session-actions #scope-start {
+  min-width: 82px;
+}
+
+.scope-error-line {
+  min-height: 22px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--danger);
+  background: rgba(174, 70, 70, 0.08);
+  color: var(--danger);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+}
+.scope-error-line:empty {
+  display: none;
+}
+
+/* Multi-Emonio ownership */
+.scope-owner-strip {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: #0b1218;
+  overflow: hidden;
+}
+
+.scope-owner-strip > strong {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+}
+
+.scope-owner-list {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+}
+
+.scope-owner-chip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-height: 21px;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid #273746;
+  background: #101923;
+  color: #a9bac9;
+  white-space: nowrap;
+}
+
+.scope-owner-chip.is-selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.scope-owner-chip[data-scope-owner-state="HOLD"] {
+  border-style: dashed;
+}
+
+/* View controls */
+.scope-toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 29px;
+}
+
+.scope-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.scope-toolbar-label {
+  margin-right: 4px;
+}
+
+.scope-mode-button {
+  min-width: 46px;
+}
+
+.scope-mode-button.is-active {
+  border-color: var(--accent);
+  background: rgba(80, 183, 219, 0.1);
+  color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* Compact evidence */
+.scope-evidence-strip {
+  display: flex;
+  min-height: 27px;
+  align-items: center;
+  gap: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: #0d141b;
+}
+
+.scope-evidence-strip > span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 5px;
+  padding: 4px 8px;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.5rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.scope-evidence-strip > span:last-child {
+  border-right: 0;
+}
+
+.scope-evidence-strip strong {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+}
+
+/* Oscilloscope plot */
+.scope-plot-card {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #314253;
+  background: #081017;
+  box-shadow: inset 0 0 0 1px rgba(113, 151, 180, 0.04);
+}
+
+#scope-plot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 430px;
+}
+
+.scope-legend {
+  position: absolute;
+  z-index: 2;
+  top: 9px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 7px;
+  border: 1px solid rgba(96, 117, 138, 0.55);
+  background: rgba(8, 16, 23, 0.9);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  pointer-events: none;
+}
+
+.scope-legend-phase {
+  font-weight: 800;
+}
+.scope-legend-a { color: #70d7ff; }
+.scope-legend-b { color: #76e2a0; }
+.scope-legend-c { color: #ffd166; }
+
+.scope-legend-signal {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.scope-legend-line {
+  display: inline-block;
+  width: 18px;
+  border-top: 1.5px solid #a9bac9;
+}
+.scope-legend-line-i {
+  border-top-style: dashed;
+}
+
+.scope-grid-major,
+.scope-grid-minor,
+.scope-zero-axis {
+  vector-effect: non-scaling-stroke;
+}
+
+.scope-grid-major {
+  stroke: #2e4353;
+  stroke-width: 1;
+}
+
+.scope-grid-minor {
+  stroke: #1a2a35;
+  stroke-width: 0.75;
+}
+
+.scope-zero-axis {
+  stroke: #7b92a6;
+  stroke-width: 1.1;
+}
+
+.scope-axis-label,
+.scope-y-label {
+  fill: #8095a7;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.scope-axis-label-end {
+  text-anchor: end;
+}
+
+.scope-y-label-voltage {
+  text-anchor: end;
+  fill: #9dcde2;
+}
+
+.scope-y-label-current {
+  text-anchor: start;
+  fill: #c7b783;
+}
+
+.scope-trace {
+  fill: none;
+  stroke-width: 1.3;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.scope-phase-a { stroke: #70d7ff; }
+.scope-phase-b { stroke: #76e2a0; }
+.scope-phase-c { stroke: #ffd166; }
+.scope-signal-i { stroke-dasharray: 5 3; }
+
+.scope-science-note {
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.5rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px), (max-height: 760px) {
+  .scope-drawer {
+    width: min(980px, calc(100vw - 16px));
+    overflow: auto;
+  }
+  .scope-panel-body {
+    height: auto;
+  }
+  .scope-command-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .scope-auth-fields {
+    grid-column: 1 / -1;
+  }
+  .scope-session-actions {
+    justify-content: flex-start;
+  }
+  .scope-evidence-strip {
+    flex-wrap: wrap;
+  }
+}

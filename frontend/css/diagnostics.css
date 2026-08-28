@@ -1,0 +1,19 @@
+.diagnostics-drawer .diagnostics-panel-body { padding: 8px; }
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0 0 8px;
+  background: rgba(43, 55, 69, 0.55);
+}
+.diagnostic-cell { min-width: 0; padding: 5px 7px; background: var(--surface-2); }
+.diagnostic-cell dt { color: var(--muted); font-size: 0.55rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.diagnostic-cell dd { margin: 1px 0 0; font-family: var(--mono); font-size: 0.70rem; overflow-wrap: anywhere; }
+.state-VALID, .state-ONLINE { color: var(--good); }
+.state-DEGRADED, .state-STALE { color: var(--warning); }
+.state-INVALID, .state-OFFLINE { color: var(--danger); }
+#diagnostics-summary-state { color: var(--good); }
+
+@media (max-width: 560px) {
+  .diagnostics-grid { grid-template-columns: 1fr; }
+}
