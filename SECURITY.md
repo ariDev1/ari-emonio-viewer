@@ -1,46 +1,29 @@
-# Security Policy
+# Security
 
-ARI Emonio Viewer is technical measurement software for local Emonio P3
-systems. Its security boundary is intentionally narrow.
+ARI Emonio Viewer is local technical measurement software.
 
-## Read-only Modbus boundary
+## Device access
 
-Modbus writes are forbidden. The production Modbus path uses holding-register
-reads only. Do not add register-write functions, write-function codes, or
-configuration commands to the Modbus acquisition path.
+- Modbus writes are forbidden. Production Modbus access is read-only.
+- The integrated CT reader exposes only qualified read commands.
+- The viewer HTTP service binds to `127.0.0.1`.
 
-## SCOPE credentials
+## Credentials
 
-SCOPE username and password values are runtime-only. They must not be stored in
-TOML, remembered-device JSON, recordings, logs, waveform captures,
-`localStorage`, `sessionStorage`, repository files, test fixtures, screenshots,
-or documentation. Authentication cookies are also runtime-only and must not be
-committed or logged.
+SCOPE credentials, CT passwords, and authentication cookies are runtime-only.
+Do not store or commit them in configuration, recordings, logs, captures,
+tests, screenshots, browser storage, or repository files.
 
-## CT Telnet credentials
+The CT reader uses the Emonio factory-default administrator username `admin`.
+The device-specific password must remain runtime-only.
 
-The CT configuration reader uses the factory-default Emonio administrator
-username `admin` and accepts the password only for the explicit localhost read
-request. The password must remain runtime-only. Do not commit device-specific
-passwords or device-number credentials. The integrated CT reader exposes only
-the five qualified read commands. It must not expose an arbitrary Telnet CLI
-or configuration-write path.
+## Scientific boundary
 
-## Network boundary
+Modbus and SCOPE are separate measurement sources. Do not merge, substitute,
+correct, average, reconstruct, or infer one from the other. Invalid waveform
+captures must fail closed and exact received samples must remain unchanged.
 
-The viewer HTTP server binds to `127.0.0.1`. The browser communicates with the
-local ARI backend. Emonio device communication takes place from that backend on
-the user's local network.
+## Reporting
 
-## Scientific security boundary
-
-SCOPE and Modbus are separate scientific sources. Do not substitute, merge,
-correct, average, reconstruct, or infer one source from the other. Waveform
-validation must fail closed. Exact received samples must remain unchanged.
-
-## Reporting a security issue
-
-Do not post passwords, authentication cookies, private keys, internal network
-configuration, or other secret material in a public GitHub issue. Use the
-repository owner's private contact method or GitHub private vulnerability
-reporting when it is enabled for the repository.
+Do not post passwords, cookies, private keys, or private network details in a
+public issue. Use GitHub private vulnerability reporting when enabled.

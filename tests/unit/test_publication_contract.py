@@ -83,3 +83,14 @@ def test_pyproject_uses_security_qualified_aiohttp_target_and_direct_yarl_depend
     assert "aiohttp==3.14.3" in dependencies
     assert "aiohttp==3.12.15" not in dependencies
     assert "yarl==1.24.2" in dependencies
+
+
+def test_public_repository_documentation_is_compact_and_excludes_internal_evidence_library() -> None:
+    readme_lines = (ROOT / "README.md").read_text(encoding="utf-8").splitlines()
+    security_lines = (ROOT / "SECURITY.md").read_text(encoding="utf-8").splitlines()
+    contributing_lines = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8").splitlines()
+
+    assert not (ROOT / "docs" / "evidence").exists()
+    assert len(readme_lines) <= 120
+    assert len(security_lines) <= 35
+    assert len(contributing_lines) <= 35
