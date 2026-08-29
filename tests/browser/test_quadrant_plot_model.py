@@ -54,3 +54,24 @@ def test_total_detail_rows_separate_sigma_s_from_resultant_vector() -> None:
         "PF",
         "QUADRANT",
     ]
+
+
+def test_near_vertical_label_layout_separates_components_from_resultant() -> None:
+    result = _run_quadrant_module(
+        "mod.computePowerLabelLayout(-174.1153, -7269.7627, 8200)"
+    )
+    assert result["orientation"] == "near-vertical"
+    assert result["p"]["x"] < 190
+    assert result["q"]["x"] < 190
+    assert result["vector"]["x"] > 190
+    assert result["angle"]["radius"] >= 58
+
+
+def test_near_horizontal_label_layout_moves_q_and_angle_away_from_p_axis() -> None:
+    result = _run_quadrant_module(
+        "mod.computePowerLabelLayout(7200, 120, 8200)"
+    )
+    assert result["orientation"] == "near-horizontal"
+    assert result["q"]["y"] < 225
+    assert result["angle"]["radius"] >= 58
+    assert result["p"]["y"] != result["q"]["y"]
