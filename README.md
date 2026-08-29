@@ -5,6 +5,8 @@ Local Linux measurement viewer for Emonio P3 devices.
 The trusted field baseline is **v0.4.5**.
 Tested device firmware: `3.0.79-release`.
 
+![ARI Emonio Viewer](ari-emonio-viewer_0.png)
+
 ## Measurement paths
 
 - Modbus/TCP: read-only canonical A/B/C/TOTAL measurements
