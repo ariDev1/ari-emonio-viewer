@@ -114,7 +114,7 @@ def test_wide_science_workspace_places_square_quadrant_beside_history() -> None:
     science_first = css.index(".science-workspace {")
     science_start = css.index(".science-workspace {", science_first + 1)
     science = css[science_start:css.index(".quadrant-card {", science_start)]
-    assert "grid-template-columns: clamp(400px, 24vw, 470px) minmax(0, 1fr);" in science
+    assert "grid-template-columns: clamp(480px, 30vw, 560px) minmax(0, 1fr);" in science
     assert "aspect-ratio: 1 / 1;" in quadrant_css
 
 
