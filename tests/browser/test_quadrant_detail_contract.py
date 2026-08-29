@@ -47,3 +47,8 @@ def test_quadrant_css_has_dedicated_styles_for_selector_triangle_and_details() -
         ".plot-detail-value",
     ):
         assert selector in css
+
+
+def test_quadrant_detail_panel_starts_below_positive_p_axis_label() -> None:
+    source = Path("frontend/js/quadrant.js").read_text(encoding="utf-8")
+    assert "const DETAIL_START_Y = 250;" in source
