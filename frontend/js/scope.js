@@ -76,7 +76,6 @@ function scopeStatusResponseIsCurrent(requestedDeviceId, requestGeneration) {
     && requestGeneration === scopeStatusGeneration;
 }
 
-
 export function scopeObservedHeaderPrefixes(capture) {
   if (!capture || typeof capture !== "object") return [];
   const explicit = Array.isArray(capture.observed_header_prefixes)
@@ -196,9 +195,10 @@ export function scopeTraceSpecs(capture, phaseMode, signalMode) {
 }
 
 export function scopeUnitMagnitudes(traces) {
-  const magnitudes = { U: 0, I: 0, P: 0 };
+  const magnitudes = {};
   for (const trace of traces) {
-    if (!(trace.signal in magnitudes)) continue;
+    if (!VALID_SIGNAL_MODES.has(trace.signal) || trace.signal === "U+I") continue;
+    if (!(trace.signal in magnitudes)) magnitudes[trace.signal] = 0;
     for (const value of trace.samples) {
       if (!Number.isFinite(value)) continue;
       magnitudes[trace.signal] = Math.max(magnitudes[trace.signal], Math.abs(value));
