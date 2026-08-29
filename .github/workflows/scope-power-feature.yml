@@ -19,4 +19,13 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -e '.[dev]'
       - name: Run Scope power feature tests
-        run: pytest -q tests/browser/test_scope_power_feature.py
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -q tests/browser/test_scope_power_feature.py 2>&1 | tee scope-power-test.log
+      - name: Preserve Scope power test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scope-power-test-evidence
+          path: scope-power-test.log
