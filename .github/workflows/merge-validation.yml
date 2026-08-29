@@ -1,0 +1,35 @@
+name: Main merge validation
+
+on:
+  push:
+    branches:
+      - feature/detailed-power-vector-plots
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Remove temporary validation workflow
+        run: rm .github/workflows/merge-validation.yml
+      - name: Install test dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Run repository acceptance
+        run: bash tools/ari-emonio-acceptance.sh
+      - name: Build deterministic candidate
+        run: python tools/build-release.py
+      - name: Verify packaged publication content
+        run: |
+          rm -rf /tmp/ari-emonio-merge-candidate
+          mkdir -p /tmp/ari-emonio-merge-candidate
+          unzip -q dist/ARI_Emonio_Viewer_v0.4.5_Candidate.zip -d /tmp/ari-emonio-merge-candidate
+          python /tmp/ari-emonio-merge-candidate/ARI_Emonio_Viewer_v0.4.5_Candidate/tools/publication_gate.py --working-tree
