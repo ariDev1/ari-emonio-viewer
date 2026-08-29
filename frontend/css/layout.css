@@ -85,7 +85,7 @@
 .phase-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; min-width: 0; }
 .science-workspace {
   display: grid;
-  grid-template-columns: clamp(400px, 24vw, 470px) minmax(0, 1fr);
+  grid-template-columns: clamp(480px, 30vw, 560px) minmax(0, 1fr);
   gap: 6px;
   min-width: 0;
   min-height: 0;
