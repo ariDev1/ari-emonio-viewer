@@ -25,10 +25,14 @@ jobs:
         run: bash tools/ari-emonio-acceptance.sh
       - name: Remove temporary workflow from candidate tree
         run: rm .github/workflows/feature-validation.yml
-      - name: Run publication gate
-        run: python tools/publication_gate.py --working-tree
       - name: Build deterministic candidate
         run: python tools/build-release.py
+      - name: Verify packaged publication content
+        run: |
+          rm -rf /tmp/ari-emonio-candidate
+          mkdir -p /tmp/ari-emonio-candidate
+          unzip -q dist/ARI_Emonio_Viewer_v0.4.4_Candidate.zip -d /tmp/ari-emonio-candidate
+          python /tmp/ari-emonio-candidate/ARI_Emonio_Viewer_v0.4.4_Candidate/tools/publication_gate.py --working-tree
       - name: Upload candidate
         uses: actions/upload-artifact@v4
         with:
