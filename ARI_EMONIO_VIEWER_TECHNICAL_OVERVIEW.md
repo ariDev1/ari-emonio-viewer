@@ -228,7 +228,7 @@ $$
 and:
 
 $$
-\varphi = \mathrm{atan2}(Q,P)
+\varphi = \arg(P + jQ)
 $$
 
 The geometric magnitude $S_\mathrm{geom}$ is not the same data object as the meter-reported apparent power $S$.
