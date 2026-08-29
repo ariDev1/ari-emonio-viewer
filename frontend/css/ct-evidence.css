@@ -64,6 +64,18 @@
 .ct-evidence-message:empty { display: none; }
 .ct-evidence-message.error { color: var(--danger); }
 
+.ct-evidence-prerequisite {
+  margin: 0 0 8px;
+  padding: 6px 7px;
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.60rem;
+  line-height: 1.4;
+}
+
+.ct-evidence-prerequisite strong { color: var(--warning); }
+
 .ct-evidence-controls {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) auto;

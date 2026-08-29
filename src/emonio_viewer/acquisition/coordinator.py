@@ -1,6 +1,9 @@
+from concurrent.futures import Future
 import threading
 
 from emonio_viewer.config.model import DeviceConfig
+from emonio_viewer.device_evidence.modbus import ModbusDeviceEvidenceReader
+from emonio_viewer.device_evidence.model import ModbusDeviceEvidenceValues
 from emonio_viewer.measurement.model import MeasurementSample
 from emonio_viewer.modbus.transport import ReadOnlyModbusClient
 from emonio_viewer.runtime.events import DiagnosticEvent, RuntimeEventBus, Severity
@@ -52,6 +55,20 @@ class AcquisitionCoordinator:
                 return self._workers[device_id].device
             except KeyError as exc:
                 raise KeyError(device_id) from exc
+
+    def request_modbus_device_evidence(
+        self,
+        device_id: str,
+        reader: ModbusDeviceEvidenceReader,
+    ) -> Future[ModbusDeviceEvidenceValues]:
+        with self._lock:
+            if not self._started:
+                raise RuntimeError("acquisition coordinator is not started")
+            try:
+                worker = self._workers[device_id]
+            except KeyError as exc:
+                raise KeyError(device_id) from exc
+        return worker.request_device_evidence(reader)
 
     def _start_worker(self, device_id: str, worker: AcquisitionWorker) -> None:
         thread = self._threads.get(device_id)

@@ -22,7 +22,8 @@ function node(value = "") {{
     value,
     disabled: false,
     classList: new ClassList(),
-    addEventListener() {{}},
+    listeners: {{}},
+    addEventListener(type, callback) {{ this.listeners[type] = callback; }},
   }};
 }}
 const nodes = new Map();
@@ -108,4 +109,62 @@ console.log(JSON.stringify({
         "state": "CT CONFIG: READ ERROR",
         "source": "—",
         "invert": "—",
+    }
+
+
+def test_ct_read_reports_telnet_unavailable_and_explains_prerequisite() -> None:
+    result = _run_ct_module(
+        """
+globalThis.fetch = async () => ({
+  ok: false,
+  status: 503,
+  statusText: "Service Unavailable",
+  json: async () => ({
+    status: "TELNET_UNAVAILABLE",
+    stage: "CONNECT",
+    message: "Telnet is unavailable. Enable Telnet on the Emonio before reading CT configuration. Normal Modbus measurements and SCOPE are not affected.",
+  }),
+});
+mod.initializeCtEvidenceControls(() => "device-a");
+nodes.get("ct-password").value = "secret";
+await nodes.get("ct-read").listeners.click();
+console.log(JSON.stringify({
+  state: nodes.get("ct-evidence-state").textContent,
+  message: nodes.get("ct-evidence-message").textContent,
+  password: nodes.get("ct-password").value,
+}));
+"""
+    )
+    assert result == {
+        "state": "CT CONFIG: TELNET UNAVAILABLE",
+        "message": "Telnet is unavailable. Enable Telnet on the Emonio before reading CT configuration. Normal Modbus measurements and SCOPE are not affected.",
+        "password": "",
+    }
+
+
+def test_ct_read_reports_auth_failed_separately() -> None:
+    result = _run_ct_module(
+        """
+globalThis.fetch = async () => ({
+  ok: false,
+  status: 401,
+  statusText: "Unauthorized",
+  json: async () => ({
+    status: "AUTH_FAILED",
+    stage: "AUTH",
+    message: "Telnet authentication failed for user admin. Check the Emonio admin password.",
+  }),
+});
+mod.initializeCtEvidenceControls(() => "device-a");
+nodes.get("ct-password").value = "wrong";
+await nodes.get("ct-read").listeners.click();
+console.log(JSON.stringify({
+  state: nodes.get("ct-evidence-state").textContent,
+  message: nodes.get("ct-evidence-message").textContent,
+}));
+"""
+    )
+    assert result == {
+        "state": "CT CONFIG: AUTH FAILED",
+        "message": "Telnet authentication failed for user admin. Check the Emonio admin password.",
     }

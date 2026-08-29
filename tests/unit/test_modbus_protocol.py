@@ -4,7 +4,9 @@ import pytest
 from emonio_viewer.modbus.protocol import (
     ModbusExceptionResponse,
     ModbusProtocolError,
+    build_read_discrete_inputs_request,
     build_read_holding_request,
+    parse_read_discrete_inputs_response,
     parse_read_holding_response,
 )
 from tests.fixtures.modbus_frames import make_response
@@ -66,3 +68,20 @@ def test_reports_modbus_exception() -> None:
 def test_rejects_invalid_request_register_count() -> None:
     with pytest.raises(ValueError, match="register_count"):
         build_read_holding_request(1, 1, 0, 0)
+
+
+def test_builds_function_02_discrete_input_request() -> None:
+    request = build_read_discrete_inputs_request(9, 1, 0, 3)
+    assert request[7] == 0x02
+    assert request[-4:] == struct.pack(">HH", 0, 3)
+
+
+def test_parses_three_discrete_input_bits_lsb_first() -> None:
+    raw = make_response(9, 1, 0x02, b"\x01\x05")
+    assert parse_read_discrete_inputs_response(raw, 9, 1, 3) == (True, False, True)
+
+
+def test_discrete_input_parser_rejects_nonzero_unused_bits() -> None:
+    raw = make_response(9, 1, 0x02, b"\x01\x85")
+    with pytest.raises(ModbusProtocolError, match="unused"):
+        parse_read_discrete_inputs_response(raw, 9, 1, 3)

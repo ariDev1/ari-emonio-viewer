@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from concurrent.futures import Future
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -7,6 +8,8 @@ import threading
 import time
 
 from emonio_viewer.config.model import DeviceConfig
+from emonio_viewer.device_evidence.modbus import ModbusDeviceEvidenceReader
+from emonio_viewer.device_evidence.model import ModbusDeviceEvidenceValues
 from emonio_viewer.measurement.model import (
     AcquisitionMetadata,
     BlockState,
@@ -61,10 +64,53 @@ class AcquisitionWorker:
         self.client = client
         self._starting_cycle_id = starting_cycle_id
         self._tolerances = Tolerances()
+        self._evidence_lock = threading.Lock()
+        self._pending_evidence: tuple[
+            ModbusDeviceEvidenceReader, Future[ModbusDeviceEvidenceValues]
+        ] | None = None
 
     @property
     def client_is_connected(self) -> bool:
         return self.client.is_connected
+
+    def request_device_evidence(
+        self,
+        reader: ModbusDeviceEvidenceReader,
+    ) -> Future[ModbusDeviceEvidenceValues]:
+        """Queue one read-only evidence operation for the next cycle boundary."""
+        with self._evidence_lock:
+            if self._pending_evidence is not None:
+                return self._pending_evidence[1]
+            future: Future[ModbusDeviceEvidenceValues] = Future()
+            self._pending_evidence = (reader, future)
+            return future
+
+    def _run_pending_device_evidence(self) -> None:
+        with self._evidence_lock:
+            pending = self._pending_evidence
+            self._pending_evidence = None
+        if pending is None:
+            return
+
+        reader, future = pending
+        if future.cancelled():
+            return
+        try:
+            values = reader.read(self.client)
+        except Exception as exc:
+            future.set_exception(exc)
+        else:
+            future.set_result(values)
+
+    def _fail_pending_device_evidence(self) -> None:
+        with self._evidence_lock:
+            pending = self._pending_evidence
+            self._pending_evidence = None
+        if pending is None:
+            return
+        _, future = pending
+        if not future.done():
+            future.set_exception(RuntimeError("acquisition worker stopped"))
 
     def _failure(
         self,
@@ -203,4 +249,7 @@ class AcquisitionWorker:
             except AcquisitionCycleError as exc:
                 publish_event(exc.failure)
 
+            self._run_pending_device_evidence()
+
+        self._fail_pending_device_evidence()
         self.client.close()

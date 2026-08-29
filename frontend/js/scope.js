@@ -122,6 +122,26 @@ function renderScopeDeviceSelector(selectedDeviceId = selectedDeviceReader()) {
   return devices;
 }
 
+export function scopeMetadataRows(capture) {
+  const labels = ["A", "B", "C"];
+  if (!capture || typeof capture !== "object") return [];
+  const rows = [];
+  for (let phase = 0; phase < 3; phase += 1) {
+    const metadata = capture.metadata?.[String(phase)] ?? capture.metadata?.[phase];
+    if (!metadata || typeof metadata !== "object" || metadata.phase !== phase) continue;
+    rows.push({
+      phase: labels[phase],
+      connected: metadata.connected,
+      vrms: metadata.vrms,
+      irms: metadata.irms,
+      frequency: metadata.frequency,
+      pf: metadata.pf,
+    });
+  }
+  return rows;
+}
+
+
 export function scopeTraceSpecs(capture, phaseMode, signalMode) {
   if (!capture || !VALID_PHASE_MODES.has(phaseMode) || !VALID_SIGNAL_MODES.has(signalMode)) return [];
   const phases = phaseMode === "ABC" ? ["A", "B", "C"] : [phaseMode];
@@ -221,6 +241,21 @@ function formatNumber(value, digits = 6) {
   if (!Number.isFinite(Number(value))) return "—";
   return Number(value).toFixed(digits).replace(/0+$/, "").replace(/\.$/, "");
 }
+
+export function renderScopeMetadata(capture) {
+  const rows = scopeMetadataRows(capture);
+  const byPhase = new Map(rows.map((row) => [row.phase, row]));
+  for (const phase of ["A", "B", "C"]) {
+    const row = byPhase.get(phase);
+    const prefix = `scope-meta-${phase.toLowerCase()}-`;
+    setText(`${prefix}connected`, row ? String(row.connected) : "—");
+    setText(`${prefix}vrms`, row ? `${formatNumber(row.vrms, 6)} V` : "—");
+    setText(`${prefix}irms`, row ? `${formatNumber(row.irms, 6)} A` : "—");
+    setText(`${prefix}frequency`, row ? `${formatNumber(row.frequency, 6)} Hz` : "—");
+    setText(`${prefix}pf`, row ? formatNumber(row.pf, 6) : "—");
+  }
+}
+
 
 function setActiveButtons(selector, dataKey, value) {
   for (const button of document.querySelectorAll(selector)) {
@@ -384,6 +419,7 @@ export function renderScopeStatus(payload) {
     setText("scope-samples", "—");
     setText("scope-rate", "—");
     setText("scope-prefix", "—");
+    renderScopeMetadata(null);
     renderScopePlot(null, deviceId);
     return owners;
   }
@@ -397,6 +433,7 @@ export function renderScopeStatus(payload) {
     setText("scope-rate", "—");
     setText("scope-prefix", "—");
     setText("scope-error", `INVALID CAPTURE: ${captureError}`);
+    renderScopeMetadata(null);
     renderScopePlot(null, deviceId);
     return owners;
   }
@@ -409,6 +446,7 @@ export function renderScopeStatus(payload) {
   setText("scope-rate", `${formatNumber(capture.sample_rate_hz, 3)} Hz · DERIVED`);
   const prefixes = scopeObservedHeaderPrefixes(capture);
   setText("scope-prefix", prefixes.length > 0 ? `${prefixes.join(",")} · OBSERVED` : "—");
+  renderScopeMetadata(capture);
   renderScopePlot(capture, deviceId);
   return owners;
 }

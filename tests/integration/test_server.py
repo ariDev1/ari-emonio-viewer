@@ -338,15 +338,13 @@ def test_ct_configuration_read_requires_password_and_known_device(tmp_path, real
     assert unknown_device_status == 404
 
 
-def test_ct_configuration_transport_error_is_reported_as_bad_gateway(tmp_path, real_sample, device_config) -> None:
-    from emonio_viewer.device_evidence.telnet import CtConfigurationReadError
-
+def _ct_failure_app(tmp_path, real_sample, device_config, error):
     class FailedCtService:
         def get(self, _device_id):
             return None
 
         async def read(self, *_args):
-            raise CtConfigurationReadError("simulated transport failure")
+            raise error
 
     frontend = tmp_path / "frontend"
     frontend.mkdir()
@@ -356,12 +354,66 @@ def test_ct_configuration_transport_error_is_reported_as_bad_gateway(tmp_path, r
     store.publish_sample(real_sample, connections_opened=1)
     bus = RuntimeEventBus()
     config = RuntimeConfig(ViewerConfig(device_config.id), RecordingConfig(10.0), (device_config,))
-    app = create_app(config, store, bus, FakeRecordingManager(), frontend, ct_configuration=FailedCtService())
+    return create_app(config, store, bus, FakeRecordingManager(), frontend, ct_configuration=FailedCtService())
 
-    status, _ = asyncio.run(
+
+def test_ct_configuration_telnet_unavailable_is_explicit_service_state(tmp_path, real_sample, device_config) -> None:
+    from emonio_viewer.device_evidence.telnet import CtConfigurationReadError
+
+    error = CtConfigurationReadError(
+        "connection refused",
+        state="TELNET_UNAVAILABLE",
+        stage="CONNECT",
+        user_message="Telnet is unavailable. Enable Telnet on the Emonio before reading CT configuration.",
+    )
+    app = _ct_failure_app(tmp_path, real_sample, device_config, error)
+    status, payload = asyncio.run(
+        post_json(app, f"/api/v1/devices/{device_config.id}/ct-config/read", {"password": "secret"})
+    )
+    assert status == 503
+    assert payload == {
+        "status": "TELNET_UNAVAILABLE",
+        "stage": "CONNECT",
+        "message": "Telnet is unavailable. Enable Telnet on the Emonio before reading CT configuration.",
+    }
+    assert "secret" not in str(payload)
+
+
+def test_ct_configuration_auth_failure_is_distinct_from_telnet_unavailable(tmp_path, real_sample, device_config) -> None:
+    from emonio_viewer.device_evidence.telnet import CtConfigurationReadError
+
+    error = CtConfigurationReadError(
+        "login rejected",
+        state="AUTH_FAILED",
+        stage="AUTH",
+        user_message="Telnet authentication failed for user admin. Check the Emonio admin password.",
+    )
+    app = _ct_failure_app(tmp_path, real_sample, device_config, error)
+    status, payload = asyncio.run(
+        post_json(app, f"/api/v1/devices/{device_config.id}/ct-config/read", {"password": "secret"})
+    )
+    assert status == 401
+    assert payload["status"] == "AUTH_FAILED"
+    assert payload["stage"] == "AUTH"
+    assert "secret" not in str(payload)
+
+
+def test_ct_configuration_other_read_error_is_reported_as_bad_gateway(tmp_path, real_sample, device_config) -> None:
+    from emonio_viewer.device_evidence.telnet import CtConfigurationReadError
+
+    error = CtConfigurationReadError(
+        "simulated transport failure",
+        state="READ_ERROR",
+        stage="CT_RANGE",
+        user_message="CT configuration read failed during CT_RANGE.",
+    )
+    app = _ct_failure_app(tmp_path, real_sample, device_config, error)
+    status, payload = asyncio.run(
         post_json(app, f"/api/v1/devices/{device_config.id}/ct-config/read", {"password": "secret"})
     )
     assert status == 502
+    assert payload["status"] == "READ_ERROR"
+    assert payload["stage"] == "CT_RANGE"
 
 
 def test_ct_configuration_programming_error_is_not_mislabeled_as_transport_failure(tmp_path, real_sample, device_config) -> None:

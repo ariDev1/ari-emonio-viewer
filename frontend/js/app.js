@@ -11,6 +11,7 @@ import {
 } from "./api.js";
 import { renderDiagnostics } from "./diagnostics.js";
 import { initializeCtEvidenceControls, refreshCtEvidence } from "./ct-evidence.js";
+import { initializeModbusEvidenceControls, refreshModbusEvidence } from "./modbus-evidence.js";
 import { initializeMeasurementPanels, renderBackendStatus, renderMeasurementPayload } from "./measurements.js";
 import {
   appendHistoryPayload,
@@ -256,6 +257,7 @@ async function selectDevice(deviceId) {
   await Promise.all([
     refreshBackendState(),
     refreshCtEvidence(deviceId),
+    refreshModbusEvidence(deviceId),
     refreshRecordingState(),
     refreshScopeStatus(deviceId),
   ]);
@@ -356,6 +358,7 @@ async function main() {
   initializeRecordingControls();
   initializeUtilityDrawers();
   initializeCtEvidenceControls(() => selectedDevice);
+  initializeModbusEvidenceControls(() => selectedDevice);
   initializeHistoryMetricSelector(() => selectedDevice);
   initializeHistoryWindowSelector(() => selectedDevice);
   initializeHistoryInspection(() => selectedDevice);

@@ -16,7 +16,8 @@ from emonio_viewer.acquisition.state import DeviceState
 from emonio_viewer.config.device_registry import RememberedDeviceRegistry
 from emonio_viewer.config.loader import load_config, merge_runtime_devices
 from emonio_viewer.config.model import RuntimeConfig
-from emonio_viewer.device_evidence.service import CtConfigurationService
+from emonio_viewer.device_evidence.modbus import ModbusDeviceEvidenceReader
+from emonio_viewer.device_evidence.service import CtConfigurationService, ModbusDeviceEvidenceService
 from emonio_viewer.device_evidence.telnet import TelnetCtConfigurationReader
 from emonio_viewer.recording.recorder import RecordingManager
 from emonio_viewer.runtime.events import RuntimeEventBus
@@ -158,6 +159,10 @@ async def run_viewer(config_path: Path) -> None:
     registry = RememberedDeviceRegistry(config_path.parent / "remembered-devices.json")
     connector = DeviceConnector(coordinator, recording, registry=registry)
     ct_configuration = CtConfigurationService(TelnetCtConfigurationReader())
+    modbus_evidence = ModbusDeviceEvidenceService(
+        ModbusDeviceEvidenceReader(),
+        coordinator=coordinator,
+    )
     scope_service = ScopeService()
     recording.start_background()
 
@@ -182,6 +187,7 @@ async def run_viewer(config_path: Path) -> None:
             frontend_dir,
             connector=connector,
             ct_configuration=ct_configuration,
+            modbus_evidence=modbus_evidence,
             scope_service=scope_service,
         )
         runner = web.AppRunner(app)

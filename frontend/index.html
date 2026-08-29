@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/static/css/diagnostics.css">
   <link rel="stylesheet" href="/static/css/recording.css">
   <link rel="stylesheet" href="/static/css/ct-evidence.css">
+  <link rel="stylesheet" href="/static/css/modbus-evidence.css">
   <link rel="stylesheet" href="/static/css/history.css">
   <link rel="stylesheet" href="/static/css/scope.css">
 </head>
@@ -267,13 +268,52 @@
     </div>
     <div class="diagnostics-panel-body">
       <dl id="diagnostics-grid" class="diagnostics-grid"></dl>
+      <details id="modbus-evidence-details" class="modbus-evidence-details">
+        <summary class="modbus-evidence-summary">
+          <span class="modbus-evidence-summary-label">DEVICE EVIDENCE · Energy, phase activity, error and warning</span>
+          <strong id="modbus-evidence-state" class="modbus-evidence-heading-state">MODBUS EVIDENCE: NOT READ</strong>
+        </summary>
+        <div class="modbus-evidence-body">
+          <div id="modbus-evidence-message" class="modbus-evidence-message" aria-live="polite"></div>
+          <div class="modbus-evidence-controls">
+            <button id="modbus-evidence-read" type="button">READ DEVICE EVIDENCE</button>
+          </div>
+          <div class="modbus-evidence-meta" aria-label="Modbus device evidence metadata">
+            <span class="modbus-evidence-label">Source<strong id="modbus-evidence-source">—</strong></span>
+            <span class="modbus-evidence-label">Observed UTC<strong id="modbus-evidence-observed">—</strong></span>
+          </div>
+          <div class="modbus-energy-grid" aria-label="Emonio import and export energy counters">
+            <article class="modbus-energy-cell" data-modbus-energy-phase="A"><strong>A</strong><dl class="modbus-energy-values"><div><dt>KWH IN</dt><dd data-modbus-energy-field="kwh_in">—</dd></div><div><dt>KWH OUT</dt><dd data-modbus-energy-field="kwh_out">—</dd></div></dl></article>
+            <article class="modbus-energy-cell" data-modbus-energy-phase="B"><strong>B</strong><dl class="modbus-energy-values"><div><dt>KWH IN</dt><dd data-modbus-energy-field="kwh_in">—</dd></div><div><dt>KWH OUT</dt><dd data-modbus-energy-field="kwh_out">—</dd></div></dl></article>
+            <article class="modbus-energy-cell" data-modbus-energy-phase="C"><strong>C</strong><dl class="modbus-energy-values"><div><dt>KWH IN</dt><dd data-modbus-energy-field="kwh_in">—</dd></div><div><dt>KWH OUT</dt><dd data-modbus-energy-field="kwh_out">—</dd></div></dl></article>
+            <article class="modbus-energy-cell" data-modbus-energy-phase="TOTAL"><strong>TOTAL</strong><dl class="modbus-energy-values"><div><dt>KWH IN</dt><dd data-modbus-energy-field="kwh_in">—</dd></div><div><dt>KWH OUT</dt><dd data-modbus-energy-field="kwh_out">—</dd></div></dl></article>
+          </div>
+          <div class="modbus-connected-grid" aria-label="Emonio connected input flags">
+            <div class="modbus-connected-cell"><span class="modbus-evidence-label">CONNECTED A</span><strong data-modbus-connected-phase="A">—</strong></div>
+            <div class="modbus-connected-cell"><span class="modbus-evidence-label">CONNECTED B</span><strong data-modbus-connected-phase="B">—</strong></div>
+            <div class="modbus-connected-cell"><span class="modbus-evidence-label">CONNECTED C</span><strong data-modbus-connected-phase="C">—</strong></div>
+          </div>
+          <dl class="modbus-status-grid" aria-label="Emonio error and warning registers">
+            <div class="modbus-status-cell"><dt>ERROR RAW</dt><dd id="modbus-error-raw">—</dd><dt>ACTIVE FLAGS</dt><dd id="modbus-error-flags">—</dd></div>
+            <div class="modbus-status-cell"><dt>WARNING RAW</dt><dd id="modbus-warning-raw">—</dd><dt>ACTIVE FLAGS</dt><dd id="modbus-warning-flags">—</dd></div>
+          </dl>
+          <div class="modbus-probe-table" aria-label="Modbus evidence probe diagnostics">
+            <div class="modbus-probe-header" aria-hidden="true">
+              <span>PROBE</span><span>FC</span><span>ADDRESS</span><span>COUNT</span><span>RESULT</span><span>ELAPSED</span><span>DETAIL</span>
+            </div>
+            <div id="modbus-evidence-probe-grid" class="modbus-evidence-probe-grid"></div>
+          </div>
+          <p class="modbus-evidence-note">READ-ONLY DEVICE EVIDENCE. Each documented range is probed independently so one failure cannot hide other results. KWH IN/OUT use holding registers 40/42, 140/142, 240/242 and 340/342. CONNECTED uses discrete inputs 0..2. ERROR/WARNING use holding registers 1000..1001. RESET-ON-READ MIN/MAX REGISTERS ARE NOT READ. This evidence is separate from the canonical U/I/P/Q/S/PF/f acquisition path.</p>
+        </div>
+      </details>
       <details id="ct-evidence-details" class="ct-evidence-details">
               <summary class="ct-evidence-summary">
                 <span class="ct-evidence-summary-label">DEVICE EVIDENCE · Current sensor configuration</span>
-                <strong id="ct-evidence-state" class="ct-evidence-heading-state">CT CONFIG: NOT READ</strong>
+                <strong id="ct-evidence-state" class="ct-evidence-heading-state">CT CONFIG: TELNET NOT CHECKED</strong>
               </summary>
               <div class="ct-evidence-body">
                 <div id="ct-evidence-message" class="ct-evidence-message" aria-live="polite"></div>
+                <p class="ct-evidence-prerequisite"><strong>TELNET REQUIRED.</strong> The Emonio Telnet service must be enabled before CT configuration can be read. Telnet is normally disabled. This function uses only five fixed read-only CT commands. Normal Modbus measurements and SCOPE do not require Telnet.</p>
                 <div class="ct-evidence-controls">
                   <label>Emonio admin password
                     <input id="ct-password" type="password" autocomplete="off" spellcheck="false">
@@ -386,6 +426,13 @@
         <span>RATE <strong id="scope-rate">—</strong></span>
         <span>PREFIX <strong id="scope-prefix">—</strong></span>
       </div>
+
+      <section id="scope-metadata-grid" class="scope-metadata-grid" aria-label="Scope per-phase metadata">
+        <span class="scope-metadata-title">SCOPE METADATA · RECEIVED WITH CAPTURE</span>
+        <article class="scope-metadata-phase"><strong>A</strong><span>CONNECTED <b id="scope-meta-a-connected">—</b></span><span>U <b id="scope-meta-a-vrms">—</b></span><span>I <b id="scope-meta-a-irms">—</b></span><span>f <b id="scope-meta-a-frequency">—</b></span><span>PF <b id="scope-meta-a-pf">—</b></span></article>
+        <article class="scope-metadata-phase"><strong>B</strong><span>CONNECTED <b id="scope-meta-b-connected">—</b></span><span>U <b id="scope-meta-b-vrms">—</b></span><span>I <b id="scope-meta-b-irms">—</b></span><span>f <b id="scope-meta-b-frequency">—</b></span><span>PF <b id="scope-meta-b-pf">—</b></span></article>
+        <article class="scope-metadata-phase"><strong>C</strong><span>CONNECTED <b id="scope-meta-c-connected">—</b></span><span>U <b id="scope-meta-c-vrms">—</b></span><span>I <b id="scope-meta-c-irms">—</b></span><span>f <b id="scope-meta-c-frequency">—</b></span><span>PF <b id="scope-meta-c-pf">—</b></span></article>
+      </section>
 
       <div class="scope-plot-card">
         <div id="scope-legend" class="scope-legend" aria-label="Scope trace legend">

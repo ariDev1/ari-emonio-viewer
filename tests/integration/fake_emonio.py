@@ -9,6 +9,8 @@ class FakeEmonioServer:
 
     def __init__(self) -> None:
         self._blocks: dict[int, tuple[int, ...]] = {}
+        self._discrete_inputs: dict[int, bool] = {}
+        self.requested_reads: list[tuple[int, int, int]] = []
         self._fail_once: dict[int, str] = {}
         self._fail_all_mode: str | None = None
         self.requested_bases: list[int] = []
@@ -26,10 +28,18 @@ class FakeEmonioServer:
 
     def set_block(self, base: int, words: tuple[int, ...]) -> None:
         assert len(words) == 16
-        self._blocks[base] = words
+        self.set_holding_registers(base, words)
+
+    def set_holding_registers(self, base: int, words: tuple[int, ...]) -> None:
+        assert len(words) >= 1
+        self._blocks[base] = tuple(words)
+
+    def set_discrete_inputs(self, base: int, values: tuple[bool, ...]) -> None:
+        for offset, value in enumerate(values):
+            self._discrete_inputs[base + offset] = bool(value)
 
     def fail_next_read(self, base: int, mode: str) -> None:
-        assert mode in {"timeout", "exception"}
+        assert mode in {"timeout", "exception", "reset"}
         self._fail_once[base] = mode
 
     def fail_all_reads(self, mode: str) -> None:
@@ -78,20 +88,31 @@ class FakeEmonioServer:
                     return
                 function, base, count = struct.unpack(">BHH", body)
                 assert protocol == 0
-                assert function == 0x03
-                assert count == 16
+                assert function in {0x02, 0x03}
                 self.request_count += 1
                 self.requested_bases.append(base)
+                self.requested_reads.append((function, base, count))
                 mode = self._fail_once.pop(base, None) or self._fail_all_mode
                 if mode == "timeout":
                     time.sleep(0.25)
                     return
+                if mode == "reset":
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                    return
                 if mode == "exception":
-                    pdu = bytes([0x83, 0x02])
-                else:
+                    pdu = bytes([function | 0x80, 0x02])
+                elif function == 0x03:
                     words = self._blocks[base]
-                    payload = struct.pack(">" + "H" * 16, *words)
+                    assert len(words) == count
+                    payload = struct.pack(">" + "H" * count, *words)
                     pdu = bytes([0x03, len(payload)]) + payload
+                else:
+                    byte_count = (count + 7) // 8
+                    packed = bytearray(byte_count)
+                    for index in range(count):
+                        if self._discrete_inputs.get(base + index, False):
+                            packed[index // 8] |= 1 << (index % 8)
+                    pdu = bytes([0x02, byte_count]) + bytes(packed)
                 response = struct.pack(">HHHB", tx, 0, len(pdu) + 1, unit) + pdu
                 conn.sendall(response)
 

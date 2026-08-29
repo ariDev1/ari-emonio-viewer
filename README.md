@@ -4,8 +4,9 @@ ARI Emonio Viewer is a local Linux measurement viewer for Emonio P3 devices.
 It provides live three-phase measurements, history, recording, multi-device use,
 and a separate SCOPE waveform view.
 
-The trusted field baseline is **v0.3.8**. **v0.3.9 Candidate** is the current
-public-source candidate and keeps the v0.3.4 stability hardening.
+The trusted field baseline is **v0.4.3**. It keeps the qualified v0.3.9 canonical measurement model, decoder, validation, sign path, and SCOPE behavior unchanged.
+
+Field evidence from v0.4.0 confirmed the SCOPE waveform and received metadata path on real firmware `3.0.79-release`. Field evidence from v0.4.1 showed that the Emonio reset every auxiliary Modbus connection while the primary measurement connection stayed online. v0.4.2 removes those secondary connections. Auxiliary evidence is queued to the acquisition worker and read on its existing Modbus/TCP client only after a complete canonical cycle. A transport failure aborts the remaining evidence probes, records them as skipped, closes the affected socket, and leaves the existing canonical reconnect path to recover on the next cycle. Real-device v0.4.2 evidence then confirmed all six auxiliary Modbus probes as OK on firmware `3.0.79-release`. v0.4.3 changes only the CT/Telnet evidence diagnostics: it states that Telnet is required and normally disabled, distinguishes unavailable Telnet from authentication and later read failures, and keeps the fixed `admin` username and five read-only CT commands.
 
 Tested hardware evidence currently covers Emonio P3 firmware `3.0.79-release`.
 This is not a claim of universal firmware or hardware compatibility.
@@ -22,18 +23,24 @@ This is not a claim of universal firmware or hardware compatibility.
 - exact-sample inspection and keyboard stepping
 - multi-Emonio runtime connection and isolation
 - session recording
-- read-only CT configuration evidence
-- Emonio SCOPE waveform viewer
+- read-only CT configuration evidence with explicit Telnet prerequisite and failure state
+- read-only Modbus device evidence for KWH IN/OUT, CONNECTED A/B/C, ERROR, and WARNING
+- single-owner Modbus evidence reads serialized at canonical cycle boundaries
+- independent per-range Modbus evidence diagnostics with failed/skipped distinction
+- Emonio SCOPE waveform viewer with per-phase received metadata
 
 ## Safety and scientific boundaries
 
 - Modbus/TCP is read-only. There is no Modbus write path.
-- Canonical Modbus measurements and SCOPE waveforms are separate sources.
+- Canonical Modbus measurements, auxiliary Modbus device evidence, and SCOPE waveforms are separate sources.
+- Auxiliary device evidence never reads the reset-on-read MIN/MAX register ranges.
+- The acquisition worker is the only runtime owner of the Modbus/TCP client during normal operation.
 - SCOPE uses exact received samples only.
 - No smoothing, averaging, interpolation, resampling, gap filling, synthetic
   samples, sign correction, or waveform reconstruction is used.
 - Invalid or non-finite SCOPE captures fail closed.
 - SCOPE credentials and CT passwords are runtime-only and are not stored.
+- CT configuration evidence requires the Emonio Telnet service. Normal Modbus measurements and SCOPE do not require Telnet.
 
 See [SECURITY.md](SECURITY.md) for the security boundary and
 [CONTRIBUTING.md](CONTRIBUTING.md) for development rules.

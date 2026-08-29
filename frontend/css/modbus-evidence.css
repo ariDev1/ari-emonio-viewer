@@ -1,0 +1,168 @@
+.modbus-evidence-details {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.modbus-evidence-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  padding: 5px 7px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.modbus-evidence-summary::-webkit-details-marker { display: none; }
+.modbus-evidence-summary::before { content: "▸"; color: var(--muted); font-family: var(--mono); }
+.modbus-evidence-details[open] > .modbus-evidence-summary::before { content: "▾"; }
+
+.modbus-evidence-summary-label,
+.modbus-evidence-heading-state,
+.modbus-evidence-label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.modbus-evidence-summary-label { flex: 1 1 auto; }
+.modbus-evidence-heading-state { white-space: nowrap; }
+.modbus-evidence-heading-state.observed { color: var(--good); }
+.modbus-evidence-heading-state.error { color: var(--danger); }
+
+.modbus-evidence-body {
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.modbus-evidence-message {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.60rem;
+}
+.modbus-evidence-message:empty { display: none; }
+.modbus-evidence-message.error { color: var(--danger); }
+
+.modbus-evidence-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.modbus-evidence-controls button { min-height: 30px; padding: 4px 8px; font-family: var(--mono); }
+
+.modbus-evidence-meta,
+.modbus-energy-grid,
+.modbus-connected-grid,
+.modbus-status-grid {
+  display: grid;
+  gap: 1px;
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  background: var(--border);
+}
+
+.modbus-evidence-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.modbus-energy-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.modbus-connected-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.modbus-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.modbus-evidence-meta > span,
+.modbus-energy-cell,
+.modbus-connected-cell,
+.modbus-status-cell {
+  min-width: 0;
+  padding: 5px 7px;
+  background: var(--surface-2);
+}
+
+.modbus-evidence-meta strong,
+.modbus-energy-cell dd,
+.modbus-connected-cell strong,
+.modbus-status-cell dd {
+  display: block;
+  margin: 2px 0 0;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  overflow-wrap: anywhere;
+}
+
+.modbus-energy-values {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin: 3px 0 0;
+}
+.modbus-energy-values div { min-width: 0; }
+.modbus-energy-values dt,
+.modbus-status-cell dt {
+  color: var(--muted);
+  font-size: 0.53rem;
+  text-transform: uppercase;
+}
+
+.modbus-evidence-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.62rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .modbus-energy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .modbus-status-grid,
+  .modbus-evidence-meta { grid-template-columns: 1fr; }
+}
+
+.modbus-evidence-heading-state.partial { color: var(--warning); }
+
+.modbus-probe-table {
+  margin: 0 0 8px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.modbus-probe-header,
+.modbus-probe-row {
+  display: grid;
+  grid-template-columns: minmax(76px, 1.2fr) 34px 52px 38px 52px 66px minmax(120px, 2fr);
+  min-width: 500px;
+  align-items: center;
+}
+
+.modbus-probe-header {
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.50rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.modbus-probe-header span,
+.modbus-probe-row span {
+  min-width: 0;
+  padding: 4px 5px;
+  overflow-wrap: anywhere;
+}
+
+.modbus-probe-row {
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.55rem;
+}
+
+.modbus-probe-row:last-child { border-bottom: 0; }
+.modbus-probe-row.error .modbus-probe-result,
+.modbus-probe-row.error .modbus-probe-detail { color: var(--danger); }
+.modbus-probe-row.ok .modbus-probe-result { color: var(--good); }
+.modbus-probe-row.skipped .modbus-probe-result,
+.modbus-probe-row.skipped .modbus-probe-detail { color: var(--warning); }

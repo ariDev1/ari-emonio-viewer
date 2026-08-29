@@ -321,3 +321,18 @@ def test_render_scope_status_rejects_malformed_capture_before_any_waveform_evide
     assert result["sequence"] == "—"
     assert result["samples"] == "—"
     assert result["error"].startswith("INVALID CAPTURE:")
+
+
+def test_scope_metadata_rows_preserve_received_phase_values() -> None:
+    result = _run_scope_module(
+        '''mod.scopeMetadataRows({metadata:{
+          "0":{phase:0,connected:1,vrms:231.1,irms:2.1,frequency:50.01,pf:-0.25},
+          "1":{phase:1,connected:0,vrms:232.2,irms:3.2,frequency:50.02,pf:0.5},
+          "2":{phase:2,connected:1,vrms:233.3,irms:4.3,frequency:50.03,pf:0.75}
+        }})'''
+    )
+    assert result == [
+        {"phase": "A", "connected": 1, "vrms": 231.1, "irms": 2.1, "frequency": 50.01, "pf": -0.25},
+        {"phase": "B", "connected": 0, "vrms": 232.2, "irms": 3.2, "frequency": 50.02, "pf": 0.5},
+        {"phase": "C", "connected": 1, "vrms": 233.3, "irms": 4.3, "frequency": 50.03, "pf": 0.75},
+    ]

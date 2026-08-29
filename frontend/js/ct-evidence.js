@@ -21,8 +21,8 @@ function setMessage(text = "", kind = "") {
 }
 
 function resetEvidenceDisplay() {
-  setState("NOT READ");
-  setMessage();
+  setState("TELNET NOT CHECKED");
+  setMessage("Telnet is required for CT configuration evidence. Enable Telnet on the Emonio before using this function.");
   document.getElementById("ct-source").textContent = "—";
   document.getElementById("ct-observed").textContent = "—";
   document.getElementById("ct-physical-status").textContent = "NOT VERIFIED";
@@ -101,8 +101,9 @@ export function initializeCtEvidenceControls(getSelectedDevice) {
       if (getSelectedDevice() === deviceId) renderCtEvidence(payload);
     } catch (error) {
       if (getSelectedDevice() === deviceId) {
-        setState("READ ERROR", "error");
-        setMessage(`Evidence read failed: ${error.message}`, "error");
+        const state = String(error.ctStatus ?? "READ_ERROR").replaceAll("_", " ");
+        setState(state, "error");
+        setMessage(error.message || "CT configuration read failed.", "error");
       }
     } finally {
       passwordInput.value = "";

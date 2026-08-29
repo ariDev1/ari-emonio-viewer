@@ -8,6 +8,7 @@ from emonio_viewer.scope.service import ScopeServiceError, ScopeSessionConflict
 
 from .keys import (
     CT_CONFIGURATION_SERVICE_KEY,
+    MODBUS_DEVICE_EVIDENCE_SERVICE_KEY,
     DEVICE_CONNECTOR_KEY,
     RECORDING_MANAGER_KEY,
     RUNTIME_CONFIG_KEY,
@@ -74,6 +75,8 @@ def register_api_routes(app: web.Application) -> None:
     app.router.add_get("/api/v1/diagnostics/{device_id}", get_diagnostics)
     app.router.add_get("/api/v1/config/runtime", get_runtime_config)
     app.router.add_get("/api/v1/devices/{device_id}/ct-config", get_ct_configuration)
+    app.router.add_get("/api/v1/devices/{device_id}/modbus-evidence", get_modbus_evidence)
+    app.router.add_post("/api/v1/devices/{device_id}/modbus-evidence/read", read_modbus_evidence)
     app.router.add_post("/api/v1/devices/{device_id}/ct-config/read", read_ct_configuration)
     app.router.add_post("/api/v1/devices/connect", connect_device)
     app.router.add_get("/api/v1/recording/status", get_recording_status)
@@ -103,6 +106,13 @@ def _ct_configuration(request):
     service = request.app.get(CT_CONFIGURATION_SERVICE_KEY)
     if service is None:
         raise web.HTTPServiceUnavailable(text="CT configuration evidence service is unavailable")
+    return service
+
+
+def _modbus_evidence(request):
+    service = request.app.get(MODBUS_DEVICE_EVIDENCE_SERVICE_KEY)
+    if service is None:
+        raise web.HTTPServiceUnavailable(text="Modbus device evidence service is unavailable")
     return service
 
 
@@ -268,6 +278,28 @@ async def get_ct_configuration(request):
     )
 
 
+async def get_modbus_evidence(request):
+    device_id = request.match_info["device_id"]
+    _device_config(request, device_id)
+    evidence = _modbus_evidence(request).get(device_id)
+    if evidence is None:
+        return web.json_response(
+            {"device_id": device_id, "status": "NOT_READ", "evidence": None}
+        )
+    return web.json_response(
+        {"device_id": device_id, "status": evidence.read_status, "evidence": evidence.as_dict()}
+    )
+
+
+async def read_modbus_evidence(request):
+    device_id = request.match_info["device_id"]
+    device = _device_config(request, device_id)
+    evidence = await _modbus_evidence(request).read(device)
+    return web.json_response(
+        {"device_id": device_id, "status": evidence.read_status, "evidence": evidence.as_dict()}
+    )
+
+
 async def read_ct_configuration(request):
     device_id = request.match_info["device_id"]
     device = _device_config(request, device_id)
@@ -278,7 +310,18 @@ async def read_ct_configuration(request):
     try:
         evidence = await _ct_configuration(request).read(device.id, device.host, password)
     except CtConfigurationReadError as exc:
-        raise web.HTTPBadGateway(text="CT configuration read failed") from exc
+        http_status = {
+            "TELNET_UNAVAILABLE": 503,
+            "AUTH_FAILED": 401,
+        }.get(exc.state, 502)
+        return web.json_response(
+            {
+                "status": exc.state,
+                "stage": exc.stage,
+                "message": exc.user_message,
+            },
+            status=http_status,
+        )
     finally:
         password = ""
         body.clear()

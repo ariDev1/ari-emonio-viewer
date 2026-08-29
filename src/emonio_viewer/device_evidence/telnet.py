@@ -28,7 +28,20 @@ SE = 240
 
 
 class CtConfigurationReadError(RuntimeError):
-    """Raised when the read-only Emonio CT configuration read cannot complete."""
+    """Read-only CT evidence failure with a safe operator-facing state."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        state: str = "READ_ERROR",
+        stage: str = "READ",
+        user_message: str = "CT configuration read failed.",
+    ) -> None:
+        super().__init__(message)
+        self.state = state
+        self.stage = stage
+        self.user_message = user_message
 
 
 class _TelnetSocket:
@@ -39,7 +52,15 @@ class _TelnetSocket:
             self._sock = socket.create_connection((host, port), timeout=timeout_s)
             self._sock.settimeout(timeout_s)
         except OSError as exc:
-            raise CtConfigurationReadError("Telnet connection failed") from exc
+            raise CtConfigurationReadError(
+                "Telnet connection failed",
+                state="TELNET_UNAVAILABLE",
+                stage="CONNECT",
+                user_message=(
+                    "Telnet is unavailable. The Emonio Telnet service must be enabled before reading "
+                    "CT configuration. Normal Modbus measurements and SCOPE are not affected."
+                ),
+            ) from exc
         self._clean = bytearray()
         self._pending_iac = False
         self._pending_negotiation: int | None = None
@@ -170,22 +191,50 @@ class TelnetCtConfigurationReader:
         self._port = port
         self._timeout_s = timeout_s
 
+    @staticmethod
+    def _stage(stage: str, operation):
+        try:
+            return operation()
+        except CtConfigurationReadError as exc:
+            if exc.state != "READ_ERROR" or exc.stage != "READ":
+                raise
+            raise CtConfigurationReadError(
+                str(exc),
+                state="READ_ERROR",
+                stage=stage,
+                user_message=f"CT configuration read failed during {stage}.",
+            ) from exc
+
     def read(self, host: str, password: str) -> CtConfigurationValues:
         session = _TelnetSocket(host, self._port, self._timeout_s)
         try:
-            session.read_until_any((b"login:", b"Login:"))
-            session.send_line(ADMIN_USERNAME)
-            session.read_until_any((b"Password:", b"password:"))
-            session.send_line(password)
-            login_response = session.read_until_any((b"$ ", b"# "))
+            self._stage("LOGIN_PROMPT", lambda: session.read_until_any((b"login:", b"Login:")))
+            self._stage("USERNAME", lambda: session.send_line(ADMIN_USERNAME))
+            self._stage("PASSWORD_PROMPT", lambda: session.read_until_any((b"Password:", b"password:")))
+            self._stage("PASSWORD", lambda: session.send_line(password))
+            login_response = self._stage(
+                "AUTH",
+                lambda: session.read_until_any(
+                    (b"$ ", b"# ", b"login:", b"Login:", b"incorrect", b"failed")
+                ),
+            )
             lowered = login_response.lower()
             if b"incorrect" in lowered or b"failed" in lowered or b"login:" in lowered:
-                raise CtConfigurationReadError("Emonio Telnet login failed")
+                raise CtConfigurationReadError(
+                    "Emonio Telnet login failed",
+                    state="AUTH_FAILED",
+                    stage="AUTH",
+                    user_message=(
+                        "Telnet authentication failed for user admin. "
+                        "Check the Emonio admin password."
+                    ),
+                )
 
             raw: dict[str, int] = {}
             for key, command in FIXED_CT_READS:
-                session.send_line(command)
-                raw[key] = session.read_until_integer()
+                stage = key.upper()
+                self._stage(stage, lambda command=command: session.send_line(command))
+                raw[key] = self._stage(stage, session.read_until_integer)
             return CtConfigurationValues(**raw)
         finally:
             session.close()

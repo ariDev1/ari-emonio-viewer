@@ -3,7 +3,7 @@ from aiohttp import web
 from emonio_viewer.config.model import RuntimeConfig
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
-from emonio_viewer.device_evidence.service import CtConfigurationService
+from emonio_viewer.device_evidence.service import CtConfigurationService, ModbusDeviceEvidenceService
 from emonio_viewer.scope.service import ScopeService
 
 
@@ -14,4 +14,5 @@ RECORDING_MANAGER_KEY = web.AppKey("recording_manager", object)
 DEVICE_CONNECTOR_KEY = web.AppKey("device_connector", object)
 
 CT_CONFIGURATION_SERVICE_KEY = web.AppKey("ct_configuration_service", CtConfigurationService)
+MODBUS_DEVICE_EVIDENCE_SERVICE_KEY = web.AppKey("modbus_device_evidence_service", ModbusDeviceEvidenceService)
 SCOPE_SERVICE_KEY = web.AppKey("scope_service", ScopeService)

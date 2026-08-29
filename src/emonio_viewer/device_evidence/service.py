@@ -5,7 +5,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 import threading
 
-from .model import CtConfigurationEvidence
+from .model import CtConfigurationEvidence, ModbusDeviceEvidence
 
 
 class CtConfigurationService:
@@ -34,5 +34,41 @@ class CtConfigurationService:
         return evidence
 
     def get(self, device_id: str) -> CtConfigurationEvidence | None:
+        with self._lock:
+            return self._evidence.get(device_id)
+
+
+class ModbusDeviceEvidenceService:
+    """Read and retain non-canonical Modbus device evidence in memory."""
+
+    def __init__(
+        self,
+        reader,
+        *,
+        coordinator,
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    ) -> None:
+        self._reader = reader
+        self._coordinator = coordinator
+        self._clock = clock
+        self._lock = threading.RLock()
+        self._evidence: dict[str, ModbusDeviceEvidence] = {}
+
+    async def read(self, device) -> ModbusDeviceEvidence:
+        request = self._coordinator.request_modbus_device_evidence(
+            device.id,
+            self._reader,
+        )
+        values = await asyncio.wrap_future(request)
+        evidence = ModbusDeviceEvidence(
+            device_id=device.id,
+            observed_utc=self._clock(),
+            values=values,
+        )
+        with self._lock:
+            self._evidence[device.id] = evidence
+        return evidence
+
+    def get(self, device_id: str) -> ModbusDeviceEvidence | None:
         with self._lock:
             return self._evidence.get(device_id)

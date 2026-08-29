@@ -19,6 +19,7 @@ def test_css_is_split_by_responsibility() -> None:
         "ct-evidence.css",
         "history.css",
         "scope.css",
+        "modbus-evidence.css",
     }
 
 
@@ -26,7 +27,9 @@ def test_frontend_contains_no_emonio_ip_or_modbus_socket_logic() -> None:
     source = "\n".join(p.read_text(encoding="utf-8") for p in Path("frontend/js").glob("*.js"))
     assert "192.168." not in source
     assert ":502" not in source
-    assert "Modbus" not in source
+    assert "build_read_holding_request" not in source
+    assert "read_holding_registers" not in source
+    assert "read_discrete_inputs" not in source
 
 
 def test_frontend_has_explicit_quality_and_sample_age_elements() -> None:
@@ -138,6 +141,10 @@ def test_ct_configuration_is_compact_device_evidence_inside_diagnostics_drawer()
     assert 'id="ct-evidence-state"' in html
     assert '<details id="ct-evidence-details"' in html
     assert 'id="ct-password" type="password"' in html
+    assert "CT CONFIG: TELNET NOT CHECKED" in html
+    assert "TELNET REQUIRED" in html
+    assert "Telnet is normally disabled" in html
+    assert "Normal Modbus measurements and SCOPE do not require Telnet" in html
     assert 'autocomplete="off"' in html
     assert 'id="ct-values"' in html
     assert 'id="ct-physical-status"' in html
@@ -613,3 +620,34 @@ def test_history_inspector_copy_exports_exact_selected_sample_to_clipboard() -> 
     assert "initializeHistoryInspectorCopy" in source
     assert "initializeHistoryInspectorCopy" in app
     assert ".history-inspector-copy" in css
+
+
+def test_modbus_device_evidence_is_isolated_in_diagnostics_drawer() -> None:
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    source = Path("frontend/js/modbus-evidence.js").read_text(encoding="utf-8")
+    api = Path("frontend/js/api.js").read_text(encoding="utf-8")
+    assert 'id="modbus-evidence-details"' in html
+    assert 'id="modbus-evidence-read"' in html
+    for phase in ("A", "B", "C", "TOTAL"):
+        assert f'data-modbus-energy-phase="{phase}"' in html
+    for phase in ("A", "B", "C"):
+        assert f'data-modbus-connected-phase="{phase}"' in html
+    assert 'id="modbus-error-raw"' in html
+    assert 'id="modbus-warning-raw"' in html
+    assert "renderModbusEvidence" in source
+    assert 'modbus-evidence/read' in api
+    assert 'id="modbus-evidence-probe-grid"' in html
+    assert "read_diagnostics" in source
+    for label in ("PROBE", "FC", "ADDRESS", "COUNT", "RESULT", "ELAPSED", "DETAIL"):
+        assert label in html
+
+
+def test_scope_drawer_publishes_existing_per_phase_metadata_without_relabeling_as_modbus() -> None:
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    source = Path("frontend/js/scope.js").read_text(encoding="utf-8")
+    assert 'id="scope-metadata-grid"' in html
+    for phase in ("a", "b", "c"):
+        for field in ("connected", "vrms", "irms", "frequency", "pf"):
+            assert f'id="scope-meta-{phase}-{field}"' in html
+    assert "renderScopeMetadata" in source
+    assert "SCOPE METADATA" in html

@@ -30,11 +30,25 @@ export function getCtConfiguration(deviceId) {
   return requestJson(`/api/v1/devices/${encodeURIComponent(deviceId)}/ct-config`);
 }
 
-export function readCtConfiguration(deviceId, password) {
-  return requestJson(`/api/v1/devices/${encodeURIComponent(deviceId)}/ct-config/read`, {
+export async function readCtConfiguration(deviceId, password) {
+  const response = await fetch(`/api/v1/devices/${encodeURIComponent(deviceId)}/ct-config/read`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password }),
   });
+  if (!response.ok) {
+    let detail = null;
+    try {
+      detail = await response.json();
+    } catch (_error) {
+      detail = null;
+    }
+    const error = new Error(detail?.message ?? `${response.status} ${response.statusText}`);
+    error.ctStatus = detail?.status ?? "READ_ERROR";
+    error.ctStage = detail?.stage ?? "READ";
+    throw error;
+  }
+  return response.json();
 }
 
 export function connectDevice(target) {
@@ -96,6 +110,17 @@ export function liveScope(deviceId) {
 
 export function stopScope(deviceId) {
   return requestJson(`/api/v1/devices/${encodeURIComponent(deviceId)}/scope/stop`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function getModbusEvidence(deviceId) {
+  return requestJson(`/api/v1/devices/${encodeURIComponent(deviceId)}/modbus-evidence`);
+}
+
+export function readModbusEvidence(deviceId) {
+  return requestJson(`/api/v1/devices/${encodeURIComponent(deviceId)}/modbus-evidence/read`, {
     method: "POST",
     body: JSON.stringify({}),
   });

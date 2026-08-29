@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+
+import pytest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -10,6 +12,7 @@ from emonio_viewer.device_evidence.telnet import (
     FIXED_CT_READS,
     IAC,
     WILL,
+    CtConfigurationReadError,
     TelnetCtConfigurationReader,
     extract_integer_if_present,
 )
@@ -99,6 +102,56 @@ def test_telnet_reader_uses_one_login_and_only_fixed_read_commands() -> None:
     assert sent_conf == [command.encode("ascii") + b"\r\n" for _key, command in FIXED_CT_READS]
     assert fake.closed is True
 
+
+
+def test_telnet_connection_failure_is_classified_as_unavailable() -> None:
+    with patch(
+        "emonio_viewer.device_evidence.telnet.socket.create_connection",
+        side_effect=ConnectionRefusedError(111, "Connection refused"),
+    ):
+        with pytest.raises(CtConfigurationReadError) as caught:
+            TelnetCtConfigurationReader(timeout_s=1.0).read("192.0.2.1", "secret")
+
+    assert caught.value.state == "TELNET_UNAVAILABLE"
+    assert caught.value.stage == "CONNECT"
+    assert "Telnet" in caught.value.user_message
+    assert "enabled" in caught.value.user_message
+    assert "secret" not in caught.value.user_message
+
+
+def test_explicit_telnet_login_rejection_is_classified_as_auth_failed() -> None:
+    fake = FakeSocket([
+        b"Emonio login: ",
+        b"Password: ",
+        b"\r\nLogin incorrect\r\nEmonio login: ",
+    ])
+
+    with patch("emonio_viewer.device_evidence.telnet.socket.create_connection", return_value=fake):
+        with pytest.raises(CtConfigurationReadError) as caught:
+            TelnetCtConfigurationReader(timeout_s=1.0).read("192.0.2.1", "wrong-secret")
+
+    assert caught.value.state == "AUTH_FAILED"
+    assert caught.value.stage == "AUTH"
+    assert "admin" in caught.value.user_message
+    assert "wrong-secret" not in caught.value.user_message
+    assert fake.closed is True
+
+
+def test_ct_command_failure_reports_exact_read_stage_without_password() -> None:
+    fake = FakeSocket([
+        b"Emonio login: ",
+        b"Password: ",
+        b"\r\n" + PROMPT,
+        b"",
+    ])
+
+    with patch("emonio_viewer.device_evidence.telnet.socket.create_connection", return_value=fake):
+        with pytest.raises(CtConfigurationReadError) as caught:
+            TelnetCtConfigurationReader(timeout_s=1.0).read("192.0.2.1", "secret")
+
+    assert caught.value.state == "READ_ERROR"
+    assert caught.value.stage == "CT_TYPE"
+    assert "secret" not in caught.value.user_message
 
 def test_evidence_model_reports_raw_device_configuration_and_no_physical_claim() -> None:
     evidence = CtConfigurationEvidence(

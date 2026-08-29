@@ -1,10 +1,15 @@
 import socket
 
-from .protocol import build_read_holding_request, parse_read_holding_response
+from .protocol import (
+    build_read_discrete_inputs_request,
+    build_read_holding_request,
+    parse_read_discrete_inputs_response,
+    parse_read_holding_response,
+)
 
 
 class ReadOnlyModbusClient:
-    """Persistent Modbus/TCP client limited to holding-register reads."""
+    """Persistent Modbus/TCP client limited to read-only function codes 0x02 and 0x03."""
 
     def __init__(self, host: str, port: int, unit_id: int, timeout_s: float) -> None:
         self.host = host
@@ -36,13 +41,17 @@ class ReadOnlyModbusClient:
                 pass
             sock.close()
 
+    def _next_transaction_id(self) -> int:
+        self._transaction_id = (self._transaction_id + 1) & 0xFFFF
+        return self._transaction_id
+
     def read_holding_registers(self, start_register: int, register_count: int) -> tuple[int, ...]:
         self.connect()
         sock = self._socket
         assert sock is not None
-        self._transaction_id = (self._transaction_id + 1) & 0xFFFF
+        transaction_id = self._next_transaction_id()
         request = build_read_holding_request(
-            self._transaction_id,
+            transaction_id,
             self.unit_id,
             start_register,
             register_count,
@@ -55,9 +64,33 @@ class ReadOnlyModbusClient:
         body = self._recv_exact(sock, length - 1)
         return parse_read_holding_response(
             header + body,
-            self._transaction_id,
+            transaction_id,
             self.unit_id,
             register_count,
+        )
+
+    def read_discrete_inputs(self, start_input: int, input_count: int) -> tuple[bool, ...]:
+        self.connect()
+        sock = self._socket
+        assert sock is not None
+        transaction_id = self._next_transaction_id()
+        request = build_read_discrete_inputs_request(
+            transaction_id,
+            self.unit_id,
+            start_input,
+            input_count,
+        )
+        sock.sendall(request)
+        header = self._recv_exact(sock, 7)
+        length = int.from_bytes(header[4:6], "big")
+        if length < 2:
+            raise ConnectionError("invalid Modbus/TCP length field")
+        body = self._recv_exact(sock, length - 1)
+        return parse_read_discrete_inputs_response(
+            header + body,
+            transaction_id,
+            self.unit_id,
+            input_count,
         )
 
     @staticmethod
