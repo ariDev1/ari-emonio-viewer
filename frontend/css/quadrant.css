@@ -30,21 +30,39 @@
 .plot-legend-item[data-phase="C"] { color: #ffd166; }
 .plot-legend-item[data-phase="T"] { color: #ff8bd1; }
 .plot-legend-dot { fill: currentColor; }
-.plot-vector-group { color: var(--text); }
-.plot-vector { stroke: currentColor; stroke-width: 1.8; vector-effect: non-scaling-stroke; }
-.plot-arrowhead { fill: currentColor; }
-.plot-vector-tip { fill: currentColor; stroke: #071016; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+
+.plot-vector-group {
+  --plot-phase-color: var(--text);
+  --plot-p-color: #ffb454;
+  --plot-q-color: #4fd1c5;
+  --plot-angle-color: #c6a0ff;
+  --plot-helper-color: #60758a;
+  color: var(--plot-phase-color);
+}
+.plot-vector-group[data-phase="A"] { --plot-phase-color: #70d7ff; }
+.plot-vector-group[data-phase="B"] { --plot-phase-color: #76e2a0; }
+.plot-vector-group[data-phase="C"] { --plot-phase-color: #ffd166; }
+.plot-vector-group[data-phase="T"] { --plot-phase-color: #ff8bd1; }
+
+.plot-vector {
+  stroke: var(--plot-phase-color);
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+}
+.plot-arrowhead { fill: var(--plot-phase-color); }
+.plot-vector-tip {
+  fill: var(--plot-phase-color);
+  stroke: #071016;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
 .plot-vector-label {
-  fill: currentColor;
+  fill: var(--plot-phase-color);
   font-family: var(--mono);
   font-size: 12px;
   font-weight: 800;
   dominant-baseline: middle;
 }
-.plot-vector-group[data-phase="A"] { color: #70d7ff; }
-.plot-vector-group[data-phase="B"] { color: #76e2a0; }
-.plot-vector-group[data-phase="C"] { color: #ffd166; }
-.plot-vector-group[data-phase="T"] { color: #ff8bd1; }
 
 @media (max-width: 1100px) {
   #pq-plot { width: min(430px, 100%); }
@@ -73,32 +91,41 @@
 .plot-selector-item:focus .plot-legend-label {
   text-decoration: underline;
 }
+
 .plot-p-component,
 .plot-q-component,
 .plot-q-projection,
 .plot-resultant-vector,
 .plot-angle-arc {
-  stroke: currentColor;
   vector-effect: non-scaling-stroke;
 }
-.plot-p-component,
+.plot-p-component {
+  stroke: var(--plot-p-color);
+  stroke-width: 1.35;
+  opacity: 0.92;
+}
 .plot-q-component {
-  stroke-width: 1.25;
-  opacity: 0.78;
+  stroke: var(--plot-q-color);
+  stroke-width: 1.35;
+  opacity: 0.92;
 }
 .plot-q-projection {
+  stroke: var(--plot-helper-color);
   stroke-width: 1;
   stroke-dasharray: 3 4;
-  opacity: 0.34;
+  opacity: 0.55;
 }
 .plot-resultant-vector {
+  stroke: var(--plot-phase-color);
   stroke-width: 2.2;
 }
 .plot-angle-arc {
   fill: none;
-  stroke-width: 1.15;
-  opacity: 0.88;
+  stroke: var(--plot-angle-color);
+  stroke-width: 1.25;
+  opacity: 0.95;
 }
+
 .plot-component-label,
 .plot-angle-label,
 .plot-detail-title,
@@ -109,12 +136,14 @@
 }
 .plot-component-label,
 .plot-angle-label {
-  fill: currentColor;
   font-size: 10px;
   font-weight: 800;
 }
+.plot-p-label { fill: var(--plot-p-color); }
+.plot-q-label { fill: var(--plot-q-color); }
+.plot-angle-label { fill: var(--plot-angle-color); }
 .plot-detail-title {
-  fill: currentColor;
+  fill: var(--plot-phase-color);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -124,7 +153,7 @@
   font-size: 9.5px;
 }
 .plot-detail-value {
-  fill: currentColor;
+  fill: var(--plot-phase-color);
   font-size: 9.5px;
   font-weight: 700;
 }
