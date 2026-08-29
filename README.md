@@ -2,7 +2,7 @@
 
 Local Linux measurement viewer for Emonio P3 devices.
 
-The trusted field baseline is **v0.4.5**.
+The trusted field baseline is **v0.4.7**.
 Tested device firmware: `3.0.79-release`.
 
 ![ARI Emonio Viewer](ari-emonio-viewer_0.png)
@@ -19,6 +19,7 @@ Tested device firmware: `3.0.79-release`.
 - Read-only device evidence: KWH IN/OUT, CONNECTED A/B/C, ERROR, WARNING
 - Read-only CT configuration evidence through Telnet
 - SCOPE waveform acquisition with received per-phase metadata
+- SCOPE-derived instantaneous phase power `p[k] = u[k] * i[k]` for A/B/C visualization
 
 ## Scientific boundary
 
@@ -30,6 +31,7 @@ Tested device firmware: `3.0.79-release`.
 - No smoothing, averaging, interpolation, resampling, gap filling, synthetic samples, sign correction, or waveform reconstruction
 - Invalid or non-finite SCOPE captures fail closed
 - Credentials are runtime-only and are not stored
+- SCOPE-derived instantaneous power is visualization-only and does not replace canonical Modbus P
 
 See [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
