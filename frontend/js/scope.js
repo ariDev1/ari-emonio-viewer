@@ -13,7 +13,7 @@ const PHASE_CHANNELS = Object.freeze({
   C: Object.freeze({ U: 5, I: 4 }),
 });
 const VALID_PHASE_MODES = new Set(["A", "B", "C", "ABC"]);
-const VALID_SIGNAL_MODES = new Set(["U", "I", "U+I"]);
+const VALID_SIGNAL_MODES = new Set(["U", "I", "U+I", "P"]);
 const ACTIVE_SCOPE_STATES = new Set(["CONNECTING", "LIVE", "HOLD"]);
 const DEFAULT_VIEW_MODE = Object.freeze({ phase: "A", signal: "U+I" });
 
@@ -75,7 +75,6 @@ function scopeStatusResponseIsCurrent(requestedDeviceId, requestGeneration) {
   return scopeResponseIsCurrent(requestedDeviceId, selectedDeviceReader())
     && requestGeneration === scopeStatusGeneration;
 }
-
 
 export function scopeObservedHeaderPrefixes(capture) {
   if (!capture || typeof capture !== "object") return [];
@@ -141,10 +140,41 @@ export function scopeMetadataRows(capture) {
   return rows;
 }
 
+export function scopePowerSamples(capture, phase) {
+  const mapping = PHASE_CHANNELS[phase];
+  if (!capture || !mapping) return [];
+  const voltageFrame = capture.channels?.[String(mapping.U)] ?? capture.channels?.[mapping.U];
+  const currentFrame = capture.channels?.[String(mapping.I)] ?? capture.channels?.[mapping.I];
+  const voltage = voltageFrame?.samples;
+  const current = currentFrame?.samples;
+  if (!Array.isArray(voltage) || !Array.isArray(current) || voltage.length === 0 || voltage.length !== current.length) {
+    return [];
+  }
+  if (voltage.some((value) => !Number.isFinite(value)) || current.some((value) => !Number.isFinite(value))) {
+    return [];
+  }
+  return voltage.map((value, index) => value * current[index]);
+}
 
 export function scopeTraceSpecs(capture, phaseMode, signalMode) {
   if (!capture || !VALID_PHASE_MODES.has(phaseMode) || !VALID_SIGNAL_MODES.has(signalMode)) return [];
   const phases = phaseMode === "ABC" ? ["A", "B", "C"] : [phaseMode];
+  if (signalMode === "P") {
+    const traces = [];
+    for (const phase of phases) {
+      const samples = scopePowerSamples(capture, phase);
+      if (samples.length === 0) continue;
+      traces.push({
+        phase,
+        signal: "P",
+        unit: "W",
+        channels: [PHASE_CHANNELS[phase].U, PHASE_CHANNELS[phase].I],
+        samples,
+      });
+    }
+    return traces;
+  }
+
   const signals = signalMode === "U+I" ? ["U", "I"] : [signalMode];
   const traces = [];
   for (const phase of phases) {
@@ -165,9 +195,10 @@ export function scopeTraceSpecs(capture, phaseMode, signalMode) {
 }
 
 export function scopeUnitMagnitudes(traces) {
-  const magnitudes = { U: 0, I: 0 };
+  const magnitudes = {};
   for (const trace of traces) {
-    if (!(trace.signal in magnitudes)) continue;
+    if (!VALID_SIGNAL_MODES.has(trace.signal) || trace.signal === "U+I") continue;
+    if (!(trace.signal in magnitudes)) magnitudes[trace.signal] = 0;
     for (const value of trace.samples) {
       if (!Number.isFinite(value)) continue;
       magnitudes[trace.signal] = Math.max(magnitudes[trace.signal], Math.abs(value));
@@ -256,7 +287,6 @@ export function renderScopeMetadata(capture) {
   }
 }
 
-
 function setActiveButtons(selector, dataKey, value) {
   for (const button of document.querySelectorAll(selector)) {
     const active = button.dataset[dataKey] === value;
@@ -269,6 +299,17 @@ function applyViewButtons(deviceId) {
   const view = scopeViewModeForDevice(deviceId);
   setActiveButtons("[data-scope-phase]", "scopePhase", view.phase);
   setActiveButtons("[data-scope-signal]", "scopeSignal", view.signal);
+}
+
+function renderScopeLegend(view) {
+  const visiblePhases = view.phase === "ABC" ? new Set(["A", "B", "C"]) : new Set([view.phase]);
+  const visibleSignals = view.signal === "U+I" ? new Set(["U", "I"]) : new Set([view.signal]);
+  for (const item of document.querySelectorAll("[data-scope-legend-phase]")) {
+    item.hidden = !visiblePhases.has(item.dataset.scopeLegendPhase);
+  }
+  for (const item of document.querySelectorAll("[data-scope-legend-signal]")) {
+    item.hidden = !visibleSignals.has(item.dataset.scopeLegendSignal);
+  }
 }
 
 function renderScopeOwners(payload) {
@@ -349,15 +390,25 @@ function renderGrid(svg, box, captureMs, magnitudes, traces) {
       }, `${formatNumber(magnitudes.I * fraction, 2)} A`));
     });
   }
+  if (traces.some((trace) => trace.signal === "P")) {
+    scaleFractions.forEach((fraction, index) => {
+      svg.appendChild(svgNode("text", {
+        class: "scope-y-label scope-y-label-power",
+        x: box.left - 12,
+        y: scalePositions[index] + 4,
+      }, `${formatNumber(magnitudes.P * fraction, 1)} W`));
+    });
+  }
 }
 
 function renderScopePlot(capture, deviceId = selectedDeviceReader()) {
   const svg = document.getElementById("scope-plot");
   if (!svg) return;
   svg.replaceChildren();
+  const view = scopeViewModeForDevice(deviceId);
+  renderScopeLegend(view);
   if (!capture) return;
 
-  const view = scopeViewModeForDevice(deviceId);
   const traces = scopeTraceSpecs(capture, view.phase, view.signal);
   const magnitudes = scopeUnitMagnitudes(traces);
   const box = { left: 92, right: 908, top: 56, bottom: 500 };
@@ -437,7 +488,6 @@ export function renderScopeStatus(payload) {
     renderScopePlot(null, deviceId);
     return owners;
   }
-
 
   setText("scope-received-utc", capture.received_utc ?? "—");
   setText("scope-capture-sequence", String(capture.sequence ?? "—"));

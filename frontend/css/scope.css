@@ -372,6 +372,10 @@
   fill: #c7b783;
 }
 
+.scope-y-label-power {
+  text-anchor: end;
+}
+
 .scope-trace {
   fill: none;
   stroke-width: 1.3;
