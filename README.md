@@ -1,53 +1,43 @@
 # ARI Emonio Viewer
 
-ARI Emonio Viewer is a local Linux measurement viewer for Emonio P3 devices.
-It provides live three-phase measurements, history, recording, multi-device use,
-and a separate SCOPE waveform view.
+Local Linux measurement viewer for Emonio P3 devices.
 
-The trusted field baseline is **v0.4.3**. It keeps the qualified v0.3.9 canonical measurement model, decoder, validation, sign path, and SCOPE behavior unchanged.
+The trusted field baseline is **v0.4.3**.
+Tested device firmware: `3.0.79-release`.
 
-Field evidence from v0.4.0 confirmed the SCOPE waveform and received metadata path on real firmware `3.0.79-release`. Field evidence from v0.4.1 showed that the Emonio reset every auxiliary Modbus connection while the primary measurement connection stayed online. v0.4.2 removes those secondary connections. Auxiliary evidence is queued to the acquisition worker and read on its existing Modbus/TCP client only after a complete canonical cycle. A transport failure aborts the remaining evidence probes, records them as skipped, closes the affected socket, and leaves the existing canonical reconnect path to recover on the next cycle. Real-device v0.4.2 evidence then confirmed all six auxiliary Modbus probes as OK on firmware `3.0.79-release`. v0.4.3 changes only the CT/Telnet evidence diagnostics: it states that Telnet is required and normally disabled, distinguishes unavailable Telnet from authentication and later read failures, and keeps the fixed `admin` username and five read-only CT commands.
+## Measurement paths
 
-Tested hardware evidence currently covers Emonio P3 firmware `3.0.79-release`.
-This is not a claim of universal firmware or hardware compatibility.
+- Modbus/TCP: read-only canonical A/B/C/TOTAL measurements
+- Measurements: U, I, P, Q, S, PF, frequency, energy
+- Signed P/Q with four-quadrant representation
+- 30 s, 1 min, 2 min, 5 min, and 10 min history windows
+- Exact stored samples only
+- Multi-device runtime isolation
+- Per-device session recording
+- Read-only device evidence: KWH IN/OUT, CONNECTED A/B/C, ERROR, WARNING
+- Read-only CT configuration evidence through Telnet
+- SCOPE waveform acquisition with received per-phase metadata
 
-![ARI Emonio Viewer main dashboard](ari-emonio-viewer_0.png)
+## Scientific boundary
 
-![ARI Emonio Viewer SCOPE display](ari-emonio-viewer_1.png)
+- No Modbus write path
+- One runtime owner for the Modbus/TCP client
+- Auxiliary Modbus evidence reads occur only at canonical cycle boundaries
+- Reset-on-read MIN/MAX register ranges are not read
+- Canonical Modbus measurements and SCOPE data remain separate sources
+- No smoothing, averaging, interpolation, resampling, gap filling, synthetic samples, sign correction, or waveform reconstruction
+- Invalid or non-finite SCOPE captures fail closed
+- Credentials are runtime-only and are not stored
 
-## Features
+See [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- Phase A/B/C/TOTAL U, I, P, Q, S, PF, frequency, and energy
-- signed P/Q with four-quadrant display
-- selectable 30 s, 1 min, 2 min, 5 min, and 10 min history windows
-- exact-sample inspection and keyboard stepping
-- multi-Emonio runtime connection and isolation
-- session recording
-- read-only CT configuration evidence with explicit Telnet prerequisite and failure state
-- read-only Modbus device evidence for KWH IN/OUT, CONNECTED A/B/C, ERROR, and WARNING
-- single-owner Modbus evidence reads serialized at canonical cycle boundaries
-- independent per-range Modbus evidence diagnostics with failed/skipped distinction
-- Emonio SCOPE waveform viewer with per-phase received metadata
+## Requirements
 
-## Safety and scientific boundaries
-
-- Modbus/TCP is read-only. There is no Modbus write path.
-- Canonical Modbus measurements, auxiliary Modbus device evidence, and SCOPE waveforms are separate sources.
-- Auxiliary device evidence never reads the reset-on-read MIN/MAX register ranges.
-- The acquisition worker is the only runtime owner of the Modbus/TCP client during normal operation.
-- SCOPE uses exact received samples only.
-- No smoothing, averaging, interpolation, resampling, gap filling, synthetic
-  samples, sign correction, or waveform reconstruction is used.
-- Invalid or non-finite SCOPE captures fail closed.
-- SCOPE credentials and CT passwords are runtime-only and are not stored.
-- CT configuration evidence requires the Emonio Telnet service. Normal Modbus measurements and SCOPE do not require Telnet.
-
-See [SECURITY.md](SECURITY.md) for the security boundary and
-[CONTRIBUTING.md](CONTRIBUTING.md) for development rules.
+- Python >= 3.10
+- `aiohttp==3.14.3`
+- `yarl==1.24.2`
 
 ## Install
-
-Python 3.10 or newer is required.
 
 ```bash
 python3 -m venv .venv
@@ -56,63 +46,22 @@ python3 -m pip install --upgrade pip
 python3 -m pip install -e '.[dev]'
 ```
 
-The qualified dependency set includes:
-
-- `aiohttp==3.14.3`
-- `yarl==1.24.2`
-
 ## Start
 
 ```bash
 ./start-emonio-viewer.sh
 ```
 
-The viewer opens on localhost. Enter the Emonio IP address or hostname in the
-`EMONIO TARGET` field and select `CONNECT`.
+Default server binding: `127.0.0.1`.
 
-The public default configuration contains only a disabled documentation device
-at `192.0.2.10`. Keep real local configuration out of Git.
-
-## SCOPE
-
-Open the `SCOPE` drawer, enter the Emonio web username and password, and select
-`START LIVE`. Credentials are used only for the active runtime session.
-
-Field-qualified waveform structure for firmware `3.0.79-release`:
-
-- channels `0..5`
-- 232 Float32 samples per channel
-- 932 bytes per waveform frame
-- 35.6 ms capture duration
-- derived display-axis rate `6488.764045 Hz`
-
-Channel mapping is A current, A voltage, B current, B voltage, C current,
-C voltage. The first three frame bytes are observational evidence only and are
-not a universal validity signature.
-
-## Recording
-
-Recordings are written below `recordings/` as session metadata, measurements,
-and events. Missing measurements are recorded as events, not fabricated rows.
-
-## Tests
-
-Run the complete acceptance suite with:
+## Acceptance
 
 ```bash
 ./tools/ari-emonio-acceptance.sh
 ```
 
-The suite covers unit, integration, frontend, read-only source, Python
-compilation, and scientific sign-path gates. Software tests do not replace
-real-device qualification.
+The acceptance script executes unit, integration, frontend, read-only, Python compilation, and scientific sign-path gates.
 
 ## License
 
-ARI Emonio Viewer is **source-available** software.
-
-Natural persons may use it free of charge under the included [LICENSE](LICENSE),
-including use in their own commercial activity. A company or another separate
-commercial legal entity requires a commercial license.
-
-This is not an OSI-approved open-source license.
+Source-available software. See [LICENSE](LICENSE).
