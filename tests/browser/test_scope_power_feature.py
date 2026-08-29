@@ -67,7 +67,7 @@ def test_scope_p_mode_uses_one_common_symmetric_watt_magnitude() -> None:
           return mod.scopeUnitMagnitudes(traces);
         }})()'''
     )
-    assert result == {"U": 0, "I": 0, "P": 2380}
+    assert result == {"P": 2380}
 
 
 def test_scope_p_view_mode_is_device_local_and_selectable() -> None:
