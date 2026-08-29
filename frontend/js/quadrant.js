@@ -313,8 +313,10 @@ function renderSelectedPhase(sample) {
   const block = sample[config.key];
   const details = computePowerVectorDetails(block, config.isTotal);
   const group = svgElement("g", "plot-vector-group");
+  const label = config.label;
   group.dataset.phase = config.token;
-  group.dataset.vector = config.label;
+  // data-vector remains the stable DOM contract for plot inspection.
+  group.dataset.vector = label;
 
   appendPowerTriangle(group, details);
   appendDetailPanel(group, config, details);
