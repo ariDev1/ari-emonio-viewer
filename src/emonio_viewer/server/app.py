@@ -52,6 +52,11 @@ def create_app(
 
     async def index(_request: web.Request) -> web.Response:
         source = (frontend_dir / "index.html").read_text(encoding="utf-8")
+        source = source.replace(
+            '<span class="eyebrow">ARI EMONIO VIEWER</span>',
+            f'<span class="eyebrow">ARI EMONIO VIEWER · v{__version__}</span>',
+            1,
+        )
         source = source.replace('"/static/', f'"{static_prefix}')
         return web.Response(
             text=source,
