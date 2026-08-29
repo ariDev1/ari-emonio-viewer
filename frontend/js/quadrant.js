@@ -111,6 +111,97 @@ export function buildPowerDetailRows(details) {
   return rows;
 }
 
+export function computePowerLabelLayout(p, q, limit) {
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 1;
+  const finiteP = Number.isFinite(p) ? p : 0;
+  const finiteQ = Number.isFinite(q) ? q : 0;
+  const dx = (finiteP / safeLimit) * PLOT_RADIUS;
+  const dy = -(finiteQ / safeLimit) * PLOT_RADIUS;
+  const tip = {
+    x: PLOT_CENTER_X + dx,
+    y: PLOT_CENTER_Y + dy,
+  };
+  const absP = Math.abs(finiteP);
+  const absQ = Math.abs(finiteQ);
+  const nearVertical = absQ > POWER_ZERO_EPSILON && absP <= absQ * 0.20;
+  const nearHorizontal = absP > POWER_ZERO_EPSILON && absQ <= absP * 0.20;
+  const phiDeg = Math.atan2(finiteQ, finiteP) * 180 / Math.PI;
+  const midRadians = phiDeg * Math.PI / 360;
+
+  let orientation = "general";
+  let angleRadius = 48;
+  let pLabel = {
+    x: PLOT_CENTER_X + dx * 0.5,
+    y: PLOT_CENTER_Y - 9,
+    anchor: "middle",
+  };
+  let qLabel = {
+    x: tip.x + (finiteP < 0 ? -10 : 10),
+    y: PLOT_CENTER_Y + dy * 0.5,
+    anchor: finiteP < 0 ? "end" : "start",
+  };
+
+  const vectorLength = Math.hypot(dx, dy);
+  const perpendicularX = vectorLength > POWER_ZERO_EPSILON ? -dy / vectorLength : 0;
+  const perpendicularY = vectorLength > POWER_ZERO_EPSILON ? dx / vectorLength : -1;
+  let vectorLabel = {
+    x: PLOT_CENTER_X + dx * 0.62 + perpendicularX * 14,
+    y: PLOT_CENTER_Y + dy * 0.62 + perpendicularY * 14,
+    anchor: "middle",
+  };
+
+  if (nearVertical) {
+    orientation = "near-vertical";
+    angleRadius = 60;
+    const side = finiteP < 0 ? -1 : 1;
+    pLabel = {
+      x: PLOT_CENTER_X + side * 24,
+      y: PLOT_CENTER_Y - 10,
+      anchor: "middle",
+    };
+    qLabel = {
+      x: tip.x + side * 14,
+      y: PLOT_CENTER_Y + dy * 0.5,
+      anchor: side < 0 ? "end" : "start",
+    };
+    vectorLabel = {
+      x: PLOT_CENTER_X + dx * 0.62 - side * 22,
+      y: PLOT_CENTER_Y + dy * 0.62,
+      anchor: "middle",
+    };
+  } else if (nearHorizontal) {
+    orientation = "near-horizontal";
+    angleRadius = 60;
+    pLabel = {
+      x: PLOT_CENTER_X + dx * 0.5,
+      y: PLOT_CENTER_Y - 10,
+      anchor: "middle",
+    };
+    qLabel = {
+      x: tip.x,
+      y: PLOT_CENTER_Y + (finiteQ < 0 ? 18 : -18),
+      anchor: "middle",
+    };
+    vectorLabel = {
+      x: PLOT_CENTER_X + dx * 0.62 + perpendicularX * 16,
+      y: PLOT_CENTER_Y + dy * 0.62 + perpendicularY * 16,
+      anchor: "middle",
+    };
+  }
+
+  return {
+    orientation,
+    p: pLabel,
+    q: qLabel,
+    vector: vectorLabel,
+    angle: {
+      x: PLOT_CENTER_X + angleRadius * Math.cos(midRadians),
+      y: PLOT_CENTER_Y - angleRadius * Math.sin(midRadians),
+      radius: angleRadius,
+    },
+  };
+}
+
 function sampleMagnitude(sample) {
   let maximum = 0;
   for (const plot of PHASE_PLOTS) {
@@ -216,24 +307,28 @@ function appendDetailPanel(group, config, details) {
   });
 }
 
-function appendAngle(group, details) {
+function appendAngle(group, details, layout) {
   if (!details.angleMeaningful) return;
 
   const arc = svgElement("path", "plot-angle-arc");
   arc.setAttribute("d", angleArcPath(details.phiDeg));
   group.appendChild(arc);
 
-  const midRadians = details.phiDeg * Math.PI / 360;
-  const labelRadius = ANGLE_RADIUS + 14;
-  const labelX = PLOT_CENTER_X + labelRadius * Math.cos(midRadians);
-  const labelY = PLOT_CENTER_Y - labelRadius * Math.sin(midRadians);
-  appendText(group, "plot-angle-label", labelX, labelY, details.isTotal ? "φPQ" : "φ", "middle");
+  appendText(
+    group,
+    "plot-angle-label",
+    layout.angle.x,
+    layout.angle.y,
+    details.isTotal ? "φPQ" : "φ",
+    "middle",
+  );
 }
 
 function appendPowerTriangle(group, details) {
   const tip = vectorTip(details.p, details.q);
   const pPoint = { x: tip.x, y: PLOT_CENTER_Y };
   const qPoint = { x: PLOT_CENTER_X, y: tip.y };
+  const layout = computePowerLabelLayout(details.p, details.q, currentLimit);
 
   appendLine(group, "plot-p-component", PLOT_CENTER_X, PLOT_CENTER_Y, pPoint.x, pPoint.y);
   appendLine(group, "plot-q-component", pPoint.x, pPoint.y, tip.x, tip.y);
@@ -248,15 +343,34 @@ function appendPowerTriangle(group, details) {
   tipCircle.setAttribute("r", "4.5");
   group.appendChild(tipCircle);
 
-  appendText(group, "plot-component-label", (PLOT_CENTER_X + pPoint.x) / 2, PLOT_CENTER_Y - 7, "P", "middle");
-  appendText(group, "plot-component-label", pPoint.x + 8, (PLOT_CENTER_Y + tip.y) / 2, "Q");
+  appendText(
+    group,
+    "plot-component-label plot-p-label",
+    layout.p.x,
+    layout.p.y,
+    "P",
+    layout.p.anchor,
+  );
+  appendText(
+    group,
+    "plot-component-label plot-q-label",
+    layout.q.x,
+    layout.q.y,
+    "Q",
+    layout.q.anchor,
+  );
 
   const vectorLabel = details.isTotal ? "|P+jQ|" : "S";
-  const vectorLabelX = PLOT_CENTER_X + (tip.x - PLOT_CENTER_X) * 0.62;
-  const vectorLabelY = PLOT_CENTER_Y + (tip.y - PLOT_CENTER_Y) * 0.62 - 8;
-  appendText(group, "plot-vector-label", vectorLabelX, vectorLabelY, vectorLabel, "middle");
+  appendText(
+    group,
+    "plot-vector-label",
+    layout.vector.x,
+    layout.vector.y,
+    vectorLabel,
+    layout.vector.anchor,
+  );
 
-  appendAngle(group, details);
+  appendAngle(group, details, layout);
 }
 
 function selectedPlot() {
