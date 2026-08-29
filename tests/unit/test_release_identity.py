@@ -6,10 +6,10 @@ import tomllib
 from emonio_viewer import __version__
 
 
-def test_v045_candidate_release_identity_is_consistent() -> None:
+def test_v046_candidate_release_identity_is_consistent() -> None:
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-    assert project["project"]["version"] == "0.4.5"
-    assert __version__ == "0.4.5"
+    assert project["project"]["version"] == "0.4.6"
+    assert __version__ == "0.4.6"
 
 
 def test_v045_readme_trusted_field_baseline_is_current() -> None:
