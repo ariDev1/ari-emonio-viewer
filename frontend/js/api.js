@@ -51,11 +51,27 @@ export async function readCtConfiguration(deviceId, password) {
   return response.json();
 }
 
-export function connectDevice(target) {
-  return requestJson("/api/v1/devices/connect", {
+export async function connectDevice(target) {
+  const response = await fetch("/api/v1/devices/connect", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ target }),
   });
+  if (!response.ok) {
+    const raw = await response.text();
+    let detail = null;
+    try {
+      detail = JSON.parse(raw);
+    } catch (_error) {
+      detail = null;
+    }
+    const error = new Error(detail?.message ?? `${response.status} ${raw || response.statusText}`);
+    error.targetState = detail?.state ?? "TARGET_CONNECTION_FAILED";
+    error.targetDetail = detail?.detail ?? null;
+    error.httpStatus = response.status;
+    throw error;
+  }
+  return response.json();
 }
 
 export function getRecordingStatus() {

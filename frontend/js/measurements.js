@@ -60,7 +60,19 @@ function renderBlock(panelId, block) {
   panel.querySelectorAll("[data-field]").forEach((element) => {
     const field = element.dataset.field;
     const value = block[field];
-    element.textContent = field === "flow" || field === "quadrant" ? String(value ?? "—") : formatField(field, value);
+    if (field === "flow") {
+      const flowLabels = {
+        POSITIVE_FLOW: "POSITIVE_ACTIVE_POWER",
+        NEGATIVE_FLOW: "NEGATIVE_ACTIVE_POWER",
+        ZERO_ACTIVE_POWER: "ZERO_ACTIVE_POWER",
+      };
+
+      element.textContent = flowLabels[value] ?? String(value ?? "—");
+    } else if (field === "quadrant") {
+      element.textContent = String(value ?? "—");
+    } else {
+      element.textContent = formatField(field, value);
+    }
     element.classList.toggle("signed-positive", (field === "p" || field === "q") && Number(value) > 0);
     element.classList.toggle("signed-negative", (field === "p" || field === "q") && Number(value) < 0);
   });

@@ -301,7 +301,13 @@ function initializeTargetControls() {
       await selectDevice(result.device_id);
       setTargetStatus(result.already_connected ? "CONNECTED / EXISTING" : "CONNECTED / VERIFIED", "connected");
     } catch (error) {
-      setTargetStatus(`FAILED: ${error.message}`, "error");
+      const targetState = error?.targetState;
+      const operatorState = targetState === "TARGET_UNAVAILABLE"
+        ? "TARGET UNAVAILABLE"
+        : targetState === "TARGET_INVALID"
+          ? "TARGET INVALID"
+          : "TARGET CONNECTION FAILED";
+      setTargetStatus(operatorState, "error");
     } finally {
       button.disabled = false;
     }

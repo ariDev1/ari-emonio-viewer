@@ -509,3 +509,51 @@ def test_frontend_index_uses_release_versioned_static_namespace_and_no_store_cac
     assert api_status == 200
     assert "export const ok = true;" in api_source
     assert legacy_status == 404
+
+
+def test_failed_target_route_returns_stable_operator_state_and_keeps_diagnostic_detail(
+    tmp_path, real_sample, device_config
+) -> None:
+    from emonio_viewer.acquisition.connector import TargetConnectionError
+
+    class FailingConnector:
+        async def connect(self, _target):
+            raise TargetConnectionError(
+                "A: TRANSPORT: [Errno -2] Name or service not known"
+            )
+
+        def device_configs(self):
+            return ()
+
+        def get_device_config(self, _device_id):
+            raise KeyError
+
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "index.html").write_text("<html></html>", encoding="utf-8")
+    store = RuntimeStore()
+    store.register_device(device_config)
+    store.publish_sample(real_sample, connections_opened=1)
+    bus = RuntimeEventBus()
+    config = RuntimeConfig(
+        ViewerConfig(device_config.id), RecordingConfig(10.0), (device_config,)
+    )
+    manager = FakeRecordingManager()
+    app = create_app(
+        config,
+        store,
+        bus,
+        manager,
+        frontend,
+        connector=FailingConnector(),
+    )
+
+    status, payload = asyncio.run(
+        post_json(app, "/api/v1/devices/connect", {"target": "emonio-missing"})
+    )
+
+    assert status == 502
+    assert payload["state"] == "TARGET_UNAVAILABLE"
+    assert payload["message"] == "Target could not be qualified."
+    assert payload["detail"] == "A: TRANSPORT: [Errno -2] Name or service not known"
+    assert store.get_device(device_config.id).last_sample == real_sample

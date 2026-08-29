@@ -651,3 +651,13 @@ def test_scope_drawer_publishes_existing_per_phase_metadata_without_relabeling_a
             assert f'id="scope-meta-{phase}-{field}"' in html
     assert "renderScopeMetadata" in source
     assert "SCOPE METADATA" in html
+
+
+def test_phase_panels_use_two_column_canonical_measurement_layout() -> None:
+    css = Path("frontend/css/phase-panels.css").read_text(encoding="utf-8")
+    assert ".measurement-table {" in css
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css
+    assert "grid-template-rows: repeat(5, minmax(20px, auto));" in css
+    assert "grid-auto-flow: column;" in css
+    assert ".measurement-row:nth-child(5)," in css
+    assert ".measurement-row:nth-child(10)" in css

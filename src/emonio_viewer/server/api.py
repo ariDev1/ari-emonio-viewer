@@ -343,7 +343,14 @@ async def connect_device(request):
     except TargetInputError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
     except TargetConnectionError as exc:
-        raise web.HTTPBadGateway(text=f"target connection failed: {exc}") from exc
+        return web.json_response(
+            {
+                "state": "TARGET_UNAVAILABLE",
+                "message": "Target could not be qualified.",
+                "detail": str(exc),
+            },
+            status=502,
+        )
 
     device = result.device
     return web.json_response(
