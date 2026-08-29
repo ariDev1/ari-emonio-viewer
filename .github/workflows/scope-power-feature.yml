@@ -18,18 +18,14 @@ jobs:
           node-version: '22'
       - name: Install test dependencies
         run: python -m pip install -e '.[dev]'
-      - name: Run feature and release identity tests
+      - name: Run complete acceptance suite
         shell: bash
         run: |
           set -o pipefail
-          PYTHONPATH=. pytest -q \
-            tests/browser/test_scope_power_feature.py \
-            tests/unit/test_release_identity.py \
-            tests/unit/test_release_builder.py \
-            2>&1 | tee scope-power-test.log
-      - name: Preserve Scope power test evidence
+          ./tools/ari-emonio-acceptance.sh 2>&1 | tee ari-emonio-acceptance.log
+      - name: Preserve acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: scope-power-test-evidence
-          path: scope-power-test.log
+          name: ari-emonio-acceptance-evidence
+          path: ari-emonio-acceptance.log
