@@ -414,6 +414,7 @@
           <button class="scope-mode-button" type="button" data-scope-signal="U" aria-pressed="false">U</button>
           <button class="scope-mode-button" type="button" data-scope-signal="I" aria-pressed="false">I</button>
           <button class="scope-mode-button is-active" type="button" data-scope-signal="U+I" aria-pressed="true">U+I</button>
+          <button class="scope-mode-button" type="button" data-scope-signal="P" aria-pressed="false">P</button>
         </div>
       </div>
 
@@ -436,16 +437,17 @@
 
       <div class="scope-plot-card">
         <div id="scope-legend" class="scope-legend" aria-label="Scope trace legend">
-          <span class="scope-legend-phase scope-legend-a">A</span>
-          <span class="scope-legend-phase scope-legend-b">B</span>
-          <span class="scope-legend-phase scope-legend-c">C</span>
-          <span class="scope-legend-signal"><i class="scope-legend-line scope-legend-line-u"></i>U</span>
-          <span class="scope-legend-signal"><i class="scope-legend-line scope-legend-line-i"></i>I</span>
+          <span class="scope-legend-phase scope-legend-a" data-scope-legend-phase="A">A</span>
+          <span class="scope-legend-phase scope-legend-b" data-scope-legend-phase="B">B</span>
+          <span class="scope-legend-phase scope-legend-c" data-scope-legend-phase="C">C</span>
+          <span class="scope-legend-signal" data-scope-legend-signal="U"><i class="scope-legend-line scope-legend-line-u"></i>U</span>
+          <span class="scope-legend-signal" data-scope-legend-signal="I"><i class="scope-legend-line scope-legend-line-i"></i>I</span>
+          <span class="scope-legend-signal" data-scope-legend-signal="P" hidden><i class="scope-legend-line scope-legend-line-p"></i>P = U×I</span>
         </div>
-        <svg id="scope-plot" viewBox="0 0 1000 560" preserveAspectRatio="none" role="img" aria-label="Exact Emonio voltage and current waveform samples"></svg>
+        <svg id="scope-plot" viewBox="0 0 1000 560" preserveAspectRatio="none" role="img" aria-label="Exact Emonio voltage and current samples with Scope-derived instantaneous power"></svg>
       </div>
 
-      <p class="scope-science-note">EMONIO WEBSOCKET SCOPE · EXACT RECEIVED FLOAT32 SAMPLES · MODBUS-INDEPENDENT · NO SMOOTHING · NO AVERAGING · NO RESAMPLING · U/I SCALES ARE DISPLAY-ONLY · RATE DERIVED FROM CAPTURE AXIS.</p>
+      <p class="scope-science-note">EMONIO WEBSOCKET SCOPE · EXACT RECEIVED FLOAT32 U/I SAMPLES · P(t)=U[k]×I[k] IS SCOPE-DERIVED FROM SAME-INDEX SAMPLES · NOT CANONICAL MODBUS P · NO SMOOTHING · NO AVERAGING · NO RESAMPLING · DISPLAY SCALES ONLY · RATE DERIVED FROM CAPTURE AXIS.</p>
     </div>
   </aside>
 
