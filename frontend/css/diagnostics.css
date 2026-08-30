@@ -17,3 +17,13 @@
 @media (max-width: 560px) {
   .diagnostics-grid { grid-template-columns: 1fr; }
 }
+
+.diagnostics-quality-note {
+  margin: 0 0 8px;
+  padding: 6px 7px;
+  border-left: 2px solid var(--warning);
+  color: var(--muted);
+  font-size: 0.60rem;
+  line-height: 1.35;
+}
+.diagnostics-quality-note strong { color: var(--text); }

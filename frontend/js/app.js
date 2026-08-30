@@ -60,7 +60,11 @@ function configForSelectedDevice() {
 
 function displayDeviceName(deviceId) {
   const config = runtimeConfig?.devices.find((device) => device.id === deviceId);
-  return config?.name ?? recordingState.forDevice(deviceId)?.device_name ?? deviceId ?? "—";
+  return config?.name
+    ?? recordingState.forDevice(deviceId)?.device_name
+    ?? recordingState.errorForDevice(deviceId)?.device_name
+    ?? deviceId
+    ?? "—";
 }
 
 function formatInterval(value) {
@@ -71,7 +75,9 @@ function formatInterval(value) {
 function renderRecordingPanel(message = "") {
   const selectedName = displayDeviceName(selectedDevice);
   const selectedRecording = selectedDevice ? recordingState.forDevice(selectedDevice) : null;
+  const selectedError = selectedDevice ? recordingState.errorForDevice(selectedDevice) : null;
   const active = recordingState.activeRecordings();
+  const errors = recordingState.recordingErrors();
   const startButton = document.getElementById("record-start");
   const stopButton = document.getElementById("record-stop");
   const interval = document.getElementById("recording-interval");
@@ -80,7 +86,12 @@ function renderRecordingPanel(message = "") {
   setText("recording-selected-device", selectedName);
   setText("recording-strip-device", selectedName);
   setText("recording-control-device", selectedName);
-  setText("recording-summary-state", recordingStatusKnown ? `${active.length} ACTIVE` : "STATUS UNKNOWN");
+  setText(
+    "recording-summary-state",
+    recordingStatusKnown
+      ? errors.length ? `${active.length} ACTIVE · ${errors.length} ERROR` : `${active.length} ACTIVE`
+      : "STATUS UNKNOWN"
+  );
   setText(
     "recording-active-list",
     recordingStatusKnown && active.length
@@ -91,7 +102,7 @@ function renderRecordingPanel(message = "") {
   if (!recordingStatusKnown) {
     setText("recording-selected-state", "STATUS UNKNOWN");
     state.textContent = "STATUS UNKNOWN";
-    state.classList.remove("active");
+    state.classList.remove("active", "error");
     startButton.disabled = true;
     stopButton.disabled = true;
     interval.disabled = true;
@@ -99,10 +110,26 @@ function renderRecordingPanel(message = "") {
     return;
   }
 
+  if (selectedError) {
+    setText("recording-selected-state", "REC ERROR");
+    state.textContent = "ERROR";
+    state.classList.remove("active");
+    state.classList.add("error");
+    startButton.disabled = false;
+    stopButton.disabled = true;
+    interval.disabled = false;
+    const errorText = `${selectedError.error_type}: ${selectedError.error_detail}`;
+    const sessionText = selectedError.session_dir ? ` Session: ${selectedError.session_dir}` : "";
+    document.getElementById("recording-detail").textContent =
+      message || `Recording failed for ${selectedName}: ${errorText}.${sessionText}`;
+    return;
+  }
+
   if (selectedRecording) {
     const selectedState = `REC ON · ${formatInterval(selectedRecording.interval_s)}`;
     setText("recording-selected-state", selectedState);
     state.textContent = "RECORDING";
+    state.classList.remove("error");
     state.classList.add("active");
     startButton.disabled = true;
     stopButton.disabled = false;
@@ -123,7 +150,7 @@ function renderRecordingPanel(message = "") {
 
   setText("recording-selected-state", "REC OFF");
   state.textContent = "STOPPED";
-  state.classList.remove("active");
+  state.classList.remove("active", "error");
   startButton.disabled = false;
   stopButton.disabled = true;
   interval.disabled = false;
@@ -133,7 +160,7 @@ function renderRecordingPanel(message = "") {
 async function refreshRecordingState(message = "") {
   try {
     const payload = await getRecordingStatus();
-    recordingState.replaceActive(payload?.active ?? []);
+    recordingState.replaceStatus(payload?.active ?? [], payload?.errors ?? []);
     recordingStatusKnown = true;
     renderRecordingPanel(message);
     return true;
@@ -179,15 +206,18 @@ function applySelectedDeviceConfig() {
 
 function populateDeviceSelector() {
   const selector = document.getElementById("device-selector");
+  const enabledDevices = (runtimeConfig?.devices ?? []).filter((device) => device.enabled);
   selector.replaceChildren();
-  for (const device of runtimeConfig?.devices ?? []) {
-    if (!device.enabled) continue;
+  for (const device of enabledDevices) {
     const option = document.createElement("option");
     option.value = device.id;
     option.textContent = device.name;
     selector.appendChild(option);
   }
-  if (selectedDevice) selector.value = selectedDevice;
+  selector.disabled = enabledDevices.length === 0;
+  if (selectedDevice && enabledDevices.some((device) => device.id === selectedDevice)) {
+    selector.value = selectedDevice;
+  }
 }
 
 async function refreshBackendState() {
@@ -274,10 +304,22 @@ async function reloadRuntimeConfig() {
 async function initializeDevices() {
   await reloadRuntimeConfig();
   const selector = document.getElementById("device-selector");
-  selectedDevice = runtimeConfig.default_device;
+  const configuredDefault = runtimeConfig.devices.find(
+    (device) => device.enabled && device.id === runtimeConfig.default_device
+  );
+  const firstEnabled = runtimeConfig.devices.find((device) => device.enabled);
+  selectedDevice = configuredDefault?.id ?? firstEnabled?.id ?? null;
   populateDeviceSelector();
-  selector.value = selectedDevice;
   selector.addEventListener("change", () => selectDevice(selector.value));
+
+  if (!selectedDevice) {
+    setStreamState("NO DEVICE SELECTED");
+    setTargetStatus("TARGET REQUIRED");
+    renderRecordingPanel();
+    return;
+  }
+
+  selector.value = selectedDevice;
   await selectDevice(selectedDevice);
   const config = configForSelectedDevice();
   if (config) document.getElementById("device-target").value = config.name;
@@ -378,7 +420,10 @@ async function main() {
   renderRecordingPanel();
   await initializeDevices();
   connectStream();
-  setInterval(refreshBackendState, 1000);
+  setInterval(() => {
+    refreshBackendState();
+    refreshRecordingState();
+  }, 1000);
 }
 
 main().catch((error) => {

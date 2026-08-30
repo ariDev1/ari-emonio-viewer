@@ -9,9 +9,23 @@ function normalizedRecord(record) {
   });
 }
 
+function normalizedError(record) {
+  const base = normalizedRecord(record);
+  if (!base) return null;
+  return Object.freeze({
+    ...base,
+    state: "ERROR",
+    failed_utc: typeof record.failed_utc === "string" ? record.failed_utc : "",
+    failed_cycle_id: Number.isInteger(Number(record.failed_cycle_id)) ? Number(record.failed_cycle_id) : null,
+    error_type: typeof record.error_type === "string" && record.error_type ? record.error_type : "RecordingError",
+    error_detail: typeof record.error_detail === "string" && record.error_detail ? record.error_detail : "recording failed",
+  });
+}
+
 export class RecordingState {
   constructor() {
     this._active = new Map();
+    this._errors = new Map();
   }
 
   replaceActive(records) {
@@ -23,8 +37,24 @@ export class RecordingState {
     this._active = next;
   }
 
+  replaceStatus(activeRecords, errorRecords) {
+    this.replaceActive(activeRecords);
+    const errors = new Map();
+    for (const record of Array.isArray(errorRecords) ? errorRecords : []) {
+      const normalized = normalizedError(record);
+      if (normalized && !this._active.has(normalized.device_id)) {
+        errors.set(normalized.device_id, normalized);
+      }
+    }
+    this._errors = errors;
+  }
+
   forDevice(deviceId) {
     return this._active.get(deviceId) ?? null;
+  }
+
+  errorForDevice(deviceId) {
+    return this._errors.get(deviceId) ?? null;
   }
 
   isActive(deviceId) {
@@ -37,5 +67,9 @@ export class RecordingState {
 
   activeRecordings() {
     return this.activeDeviceIds().map((deviceId) => this._active.get(deviceId));
+  }
+
+  recordingErrors() {
+    return [...this._errors.keys()].sort().map((deviceId) => this._errors.get(deviceId));
   }
 }

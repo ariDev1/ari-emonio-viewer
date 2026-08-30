@@ -23,13 +23,10 @@ MEASUREMENT_FIELDS = [
     "delta_s",
 ]
 EVENT_FIELDS = ["utc", "event", "severity", "cycle_id", "detail"]
-OUTPUT_DECIMAL_PLACES = 4
-
-
 def _format_numeric(value: float) -> str:
     if not math.isfinite(value):
         raise ValueError("cannot serialize non-finite measurement value")
-    return f"{value:.{OUTPUT_DECIMAL_PLACES}f}"
+    return repr(value)
 
 
 class CsvWriters:

@@ -70,6 +70,10 @@ export function computePowerVectorDetails(block, isTotal = false) {
     && Math.abs(canonicalS) > POWER_ZERO_EPSILON
     && Number.isFinite(pf);
 
+  const canonicalQuadrant = typeof block?.quadrant === "string" && block.quadrant
+    ? block.quadrant
+    : null;
+
   return {
     p,
     q,
@@ -77,7 +81,7 @@ export function computePowerVectorDetails(block, isTotal = false) {
     resultantS,
     pf,
     phiDeg: angleMeaningful ? Math.atan2(q, p) * 180 / Math.PI : null,
-    quadrant: finiteVector ? quadrantFor(p, q) : "—",
+    quadrant: canonicalQuadrant ?? (finiteVector ? quadrantFor(p, q) : "—"),
     meaningful: angleMeaningful || pfMeaningful,
     angleMeaningful,
     pfMeaningful,
@@ -360,7 +364,7 @@ function appendPowerTriangle(group, details) {
     layout.q.anchor,
   );
 
-  const vectorLabel = details.isTotal ? "|P+jQ|" : "S";
+  const vectorLabel = "|P+jQ|";
   appendText(
     group,
     "plot-vector-label",
@@ -390,7 +394,7 @@ function updateSelectorState() {
   const title = document.getElementById("quadrant-title");
   if (title) title.textContent = active.isTotal ? "Total power vector" : `Phase ${active.label} power vector`;
   const plot = document.getElementById("pq-plot");
-  if (plot) plot.setAttribute("aria-label", `${active.label} active and reactive power triangle with signed P, Q, apparent power, power factor, and phase angle`);
+  if (plot) plot.setAttribute("aria-label", `${active.label} active and reactive power triangle with signed P, Q, P/Q resultant, canonical apparent power, power factor, and phase angle`);
 }
 
 function selectPhase(key) {

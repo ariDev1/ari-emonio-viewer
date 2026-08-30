@@ -1,8 +1,10 @@
+import math
 from aiohttp import web
 
 from emonio_viewer.acquisition.connector import TargetConnectionError
 from emonio_viewer.acquisition.target import TargetInputError
 from emonio_viewer.measurement.model import MeasurementSample
+from emonio_viewer.modbus.register_map import REGISTER_MAP_ID
 from emonio_viewer.device_evidence.telnet import CtConfigurationReadError
 from emonio_viewer.scope.service import ScopeServiceError, ScopeSessionConflict
 
@@ -10,6 +12,7 @@ from .keys import (
     CT_CONFIGURATION_SERVICE_KEY,
     MODBUS_DEVICE_EVIDENCE_SERVICE_KEY,
     DEVICE_CONNECTOR_KEY,
+    EVENT_BUS_KEY,
     RECORDING_MANAGER_KEY,
     RUNTIME_CONFIG_KEY,
     RUNTIME_STORE_KEY,
@@ -192,12 +195,18 @@ async def get_diagnostics(request):
     except KeyError as exc:
         raise web.HTTPNotFound() from exc
     metrics = snapshot.metrics
+    device = _device_config(request, snapshot.device_id)
     payload = {name: getattr(metrics, name) for name in metrics.__dataclass_fields__}
     payload.update(
         {
             "device_id": snapshot.device_id,
             "state": snapshot.state.value,
             "sample_age_s": snapshot.sample_age_s,
+            "firmware_version": device.firmware_version,
+            "register_map_id": REGISTER_MAP_ID,
+            "event_deliveries_dropped": request.app[EVENT_BUS_KEY].dropped_deliveries(
+                snapshot.device_id
+            ),
         }
     )
     return web.json_response(payload)
@@ -242,6 +251,8 @@ def _positive_interval(body: dict) -> float:
         value = float(body["interval_s"])
     except (KeyError, TypeError, ValueError) as exc:
         raise web.HTTPBadRequest(text="interval_s must be numeric") from exc
+    if not math.isfinite(value):
+        raise web.HTTPBadRequest(text="interval_s must be finite")
     if value <= 0:
         raise web.HTTPBadRequest(text="interval_s must be > 0")
     return value
@@ -367,7 +378,13 @@ async def connect_device(request):
 
 
 async def get_recording_status(request):
-    return web.json_response({"active": list(_recording(request).active_recordings())})
+    recording = _recording(request)
+    return web.json_response(
+        {
+            "active": list(recording.active_recordings()),
+            "errors": list(recording.recording_failures()),
+        }
+    )
 
 
 async def start_recording(request):

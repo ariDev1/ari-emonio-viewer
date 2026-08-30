@@ -21,3 +21,33 @@ def test_reconnect_count_is_connections_after_first() -> None:
     assert metrics.snapshot().reconnects == 0
     metrics.set_connections_opened(3)
     assert metrics.snapshot().reconnects == 2
+
+
+def test_latency_statistics_use_bounded_explicit_rolling_window() -> None:
+    metrics = DeviceMetrics()
+    window_size = 4096
+    total = window_size + 2
+    for value in range(total):
+        metrics.record_valid_cycle(float(value), 0.0)
+
+    snapshot = metrics.snapshot()
+
+    assert snapshot.valid_cycles == total
+    assert snapshot.latency_statistics_scope == "ROLLING_VALID_CYCLES"
+    assert snapshot.latency_window_capacity == window_size
+    assert snapshot.latency_window_samples == window_size
+    assert snapshot.min_latency_ms == 2.0
+    assert snapshot.max_latency_ms == float(total - 1)
+
+    retained = list(range(2, total))
+    rank = max(0, __import__("math").ceil(0.95 * len(retained)) - 1)
+    assert snapshot.p95_latency_ms == float(retained[rank])
+
+
+def test_latency_window_does_not_grow_after_capacity() -> None:
+    metrics = DeviceMetrics()
+    window_size = 4096
+    for value in range(window_size * 3):
+        metrics.record_valid_cycle(float(value), 0.0)
+
+    assert len(metrics._latencies) == window_size

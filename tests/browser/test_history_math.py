@@ -424,11 +424,11 @@ def test_history_plot_x_maps_to_timestamp_without_resampling() -> None:
     assert result == [400000, 700000, 1000000]
 
 
-def test_canonical_inspector_number_format_does_not_force_display_rounding() -> None:
+def test_history_inspector_uses_four_decimal_display_without_changing_canonical_export() -> None:
     result = _run_history_module(
-        "[mod.formatCanonicalHistoryValue(-123.456789012), mod.formatCanonicalHistoryValue(0.000012345), mod.formatCanonicalHistoryValue(null)]"
+        "[mod.formatCanonicalHistoryValue(-123.456789012), mod.formatCanonicalHistoryValue(0.000012345), mod.formatHistoryInspectorValue(-123.456789012), mod.formatHistoryInspectorValue(0.000012345), mod.formatHistoryInspectorValue(5.2), mod.formatHistoryInspectorValue(null)]"
     )
-    assert result == ["-123.456789012", "0.000012345", "—"]
+    assert result == ["-123.456789012", "0.000012345", "-123.4568", "0.0000", "5.2000", "—"]
 
 
 

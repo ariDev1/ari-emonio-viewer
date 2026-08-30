@@ -1,5 +1,10 @@
+from collections import deque
 from dataclasses import dataclass
 import math
+
+
+LATENCY_WINDOW_SIZE = 4096
+LATENCY_STATISTICS_SCOPE = "ROLLING_VALID_CYCLES"
 
 
 @dataclass(frozen=True, slots=True)
@@ -11,6 +16,9 @@ class MetricsSnapshot:
     protocol_errors: int
     decode_errors: int
     reconnects: int
+    latency_statistics_scope: str
+    latency_window_samples: int
+    latency_window_capacity: int
     min_latency_ms: float | None
     mean_latency_ms: float | None
     p95_latency_ms: float | None
@@ -27,7 +35,7 @@ class DeviceMetrics:
         self.decode_errors = 0
         self.reconnects = 0
         self._connections_opened = 0
-        self._latencies: list[float] = []
+        self._latencies: deque[float] = deque(maxlen=LATENCY_WINDOW_SIZE)
         self._schedule_lag_ms = 0.0
 
     def record_valid_cycle(self, latency_ms: float, schedule_lag_ms: float) -> None:
@@ -73,6 +81,9 @@ class DeviceMetrics:
             protocol_errors=self.protocol_errors,
             decode_errors=self.decode_errors,
             reconnects=self.reconnects,
+            latency_statistics_scope=LATENCY_STATISTICS_SCOPE,
+            latency_window_samples=len(self._latencies),
+            latency_window_capacity=LATENCY_WINDOW_SIZE,
             min_latency_ms=minimum,
             mean_latency_ms=mean,
             p95_latency_ms=p95,

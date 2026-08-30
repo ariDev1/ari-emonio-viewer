@@ -26,9 +26,9 @@ def test_selected_phase_plot_contains_p_q_resultant_angle_and_exact_detail_rows(
     assert 'replaceChildren(group)' in source
 
 
-def test_total_resultant_is_not_labeled_as_canonical_sigma_s() -> None:
+def test_resultant_is_not_labeled_as_canonical_apparent_power() -> None:
     source = Path("frontend/js/quadrant.js").read_text(encoding="utf-8")
-    assert 'details.isTotal ? "|P+jQ|" : "S"' in source
+    assert 'const vectorLabel = "|P+jQ|";' in source
     assert 'label: "ΣS"' in source
     assert 'label: "|P+jQ|"' in source
     assert 'label: "φPQ"' in source
@@ -52,3 +52,9 @@ def test_quadrant_css_has_dedicated_styles_for_selector_triangle_and_details() -
 def test_quadrant_detail_panel_starts_below_positive_p_axis_label() -> None:
     source = Path("frontend/js/quadrant.js").read_text(encoding="utf-8")
     assert "const DETAIL_START_Y = 250;" in source
+
+
+def test_resultant_vector_is_never_labeled_as_canonical_apparent_power() -> None:
+    source = Path("frontend/js/quadrant.js").read_text(encoding="utf-8")
+    assert 'const vectorLabel = "|P+jQ|";' in source
+    assert 'details.isTotal ? "|P+jQ|" : "S"' not in source

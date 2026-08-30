@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -68,12 +69,12 @@ def _device_from_json(raw: Any) -> DeviceConfig:
         raise DeviceRegistryError("device unit_id must be 0..255")
     if isinstance(device.poll_interval_s, bool) or not isinstance(device.poll_interval_s, (int, float)):
         raise DeviceRegistryError("device poll_interval_s must be numeric")
-    if device.poll_interval_s <= 0:
-        raise DeviceRegistryError("device poll_interval_s must be > 0")
+    if not math.isfinite(device.poll_interval_s) or device.poll_interval_s <= 0:
+        raise DeviceRegistryError("device poll_interval_s must be finite and > 0")
     if isinstance(device.timeout_s, bool) or not isinstance(device.timeout_s, (int, float)):
         raise DeviceRegistryError("device timeout_s must be numeric")
-    if device.timeout_s <= 0:
-        raise DeviceRegistryError("device timeout_s must be > 0")
+    if not math.isfinite(device.timeout_s) or device.timeout_s <= 0:
+        raise DeviceRegistryError("device timeout_s must be finite and > 0")
     if not isinstance(device.enabled, bool):
         raise DeviceRegistryError("device enabled must be boolean")
     if not isinstance(device.firmware_version, str):

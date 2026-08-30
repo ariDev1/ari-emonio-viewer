@@ -1,3 +1,4 @@
+from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -64,6 +65,27 @@ def test_registry_persists_only_fixed_device_configuration_fields(tmp_path: Path
     serialized = json.dumps(raw).lower()
     for forbidden in ("password", "ct_invert", "ct_type", "measurement", "session_note"):
         assert forbidden not in serialized
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("poll_interval_s", float("nan")),
+        ("poll_interval_s", float("inf")),
+        ("timeout_s", float("nan")),
+        ("timeout_s", float("inf")),
+    ),
+)
+def test_registry_rejects_non_finite_timing_values(
+    tmp_path: Path, field: str, value: float
+) -> None:
+    registry = RememberedDeviceRegistry(tmp_path / "remembered-devices.json")
+    device = replace(_device(), **{field: value})
+
+    with pytest.raises(DeviceRegistryError, match=field):
+        registry.remember(device)
+
+    assert not registry.path.exists()
 
 
 def test_registry_rejects_duplicate_device_ids(tmp_path: Path) -> None:

@@ -2,17 +2,22 @@ from dataclasses import replace
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from aiohttp.test_utils import TestClient, TestServer
 
 from emonio_viewer.config.model import RecordingConfig, RuntimeConfig, ViewerConfig
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
 from emonio_viewer.server.app import create_app
+from emonio_viewer.server.keys import EVENT_BUS_KEY
 
 
 class FakeRecordingManager:
     def __init__(self) -> None:
         self.calls = []
+        self.active = ()
+        self.errors = ()
 
     def start(self, device_id, interval_s, session_note=""):
         self.calls.append(("start", device_id, interval_s, session_note))
@@ -25,7 +30,10 @@ class FakeRecordingManager:
         self.calls.append(("interval", device_id, interval_s))
 
     def active_recordings(self):
-        return tuple(getattr(self, "active", ()))
+        return tuple(self.active)
+
+    def recording_failures(self):
+        return tuple(self.errors)
 
 
 def build_app(tmp_path, real_sample, device_config):
@@ -79,6 +87,39 @@ def test_read_endpoints_are_present(tmp_path, real_sample, device_config) -> Non
         assert status == 200
 
 
+
+def test_diagnostics_report_device_firmware_and_verified_register_map(tmp_path, real_sample, device_config) -> None:
+    app, _ = build_app(tmp_path, real_sample, device_config)
+    status, payload = asyncio.run(get_json(app, f"/api/v1/diagnostics/{device_config.id}"))
+
+    assert status == 200
+    assert payload["firmware_version"] == device_config.firmware_version
+    assert payload["register_map_id"] == "P3-3.0.79-verified"
+
+
+
+
+def test_diagnostics_report_latency_window_scope(tmp_path, real_sample, device_config) -> None:
+    app, _ = build_app(tmp_path, real_sample, device_config)
+    status, payload = asyncio.run(get_json(app, f"/api/v1/diagnostics/{device_config.id}"))
+
+    assert status == 200
+    assert payload["latency_statistics_scope"] == "ROLLING_VALID_CYCLES"
+    assert payload["latency_window_capacity"] >= payload["latency_window_samples"] >= 1
+
+def test_diagnostics_report_event_delivery_drops(tmp_path, real_sample, device_config) -> None:
+    app, _ = build_app(tmp_path, real_sample, device_config)
+    bus = app[EVENT_BUS_KEY]
+    observer = bus.subscribe(maxsize=1)
+    bus.publish(real_sample)
+    bus.publish(real_sample)
+
+    status, payload = asyncio.run(get_json(app, f"/api/v1/diagnostics/{device_config.id}"))
+
+    bus.unsubscribe(observer)
+    assert status == 200
+    assert payload["event_deliveries_dropped"] == 1
+
 def test_recording_command_allow_list(tmp_path, real_sample, device_config) -> None:
     app, manager = build_app(tmp_path, real_sample, device_config)
     status, _ = asyncio.run(
@@ -113,6 +154,31 @@ def test_recording_interval_rejects_non_positive_value(tmp_path, real_sample, de
         post_json(app, "/api/v1/recording/interval", {"device_id": device_config.id, "interval_s": 0})
     )
     assert status == 400
+
+
+@pytest.mark.parametrize(
+    ("path", "interval_s"),
+    (
+        ("/api/v1/recording/start", "nan"),
+        ("/api/v1/recording/start", "inf"),
+        ("/api/v1/recording/interval", "nan"),
+        ("/api/v1/recording/interval", "inf"),
+    ),
+)
+def test_recording_commands_reject_non_finite_interval(
+    tmp_path, real_sample, device_config, path, interval_s
+) -> None:
+    app, manager = build_app(tmp_path, real_sample, device_config)
+    status, _ = asyncio.run(
+        post_json(
+            app,
+            path,
+            {"device_id": device_config.id, "interval_s": interval_s},
+        )
+    )
+
+    assert status == 400
+    assert manager.calls == []
 
 
 def test_unknown_recording_device_is_not_forwarded(tmp_path, real_sample, device_config) -> None:
@@ -452,9 +518,22 @@ def test_recording_status_endpoint_is_read_only_and_reports_device_owners(tmp_pa
             "started_utc": "2026-08-28T05:00:00+00:00",
         },
     )
+    manager.errors = (
+        {
+            "device_id": "emonio-failed",
+            "device_name": "Failed meter",
+            "state": "ERROR",
+            "interval_s": 5.0,
+            "session_dir": "/tmp/session-failed",
+            "started_utc": "2026-08-28T04:00:00+00:00",
+            "failed_utc": "2026-08-28T04:00:05+00:00",
+            "error_type": "OSError",
+            "error_detail": "disk full",
+        },
+    )
     status, payload = asyncio.run(get_json(app, "/api/v1/recording/status"))
     assert status == 200
-    assert payload == {"active": list(manager.active)}
+    assert payload == {"active": list(manager.active), "errors": list(manager.errors)}
     assert manager.calls == []
 
 

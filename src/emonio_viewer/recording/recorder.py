@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import json
+import math
 import os
 from pathlib import Path
 from queue import Empty
@@ -7,7 +8,7 @@ import threading
 
 from emonio_viewer.config.model import DeviceConfig
 from emonio_viewer.measurement.model import MeasurementSample, SampleQuality
-from emonio_viewer.runtime.events import DiagnosticEvent, RuntimeEventBus
+from emonio_viewer.runtime.events import DiagnosticEvent, RuntimeEventBus, Severity
 from emonio_viewer.runtime.store import RuntimeStore
 
 from .csv_writer import CsvWriters, sample_to_csv_row
@@ -15,6 +16,8 @@ from .session import create_session_directory, initial_session_metadata
 
 
 def _validate_recording_interval(interval_s: float, acquisition_interval_s: float) -> None:
+    if not math.isfinite(interval_s):
+        raise ValueError("recording interval must be finite")
     if interval_s <= 0:
         raise ValueError("recording interval must be > 0")
     if interval_s < acquisition_interval_s:
@@ -157,6 +160,87 @@ class SessionRecorder:
             "started_utc": self._metadata["started_utc"],
         }
 
+    def _final_metadata(self, ended_utc: datetime) -> dict:
+        final = dict(self._metadata)
+        started = datetime.fromisoformat(self._metadata["started_utc"])
+        final.update(
+            {
+                "duration_s": (ended_utc - started).total_seconds(),
+                "records_written": self._records,
+                "record_points_missed": self._missed,
+                "valid_samples_seen": self._valid_samples_seen,
+                "invalid_cycles_seen": self._invalid_cycles_seen,
+            }
+        )
+        return final
+
+    def _replace_session_metadata(self, final: dict) -> None:
+        tmp = self.session_dir / "session.json.tmp"
+        with tmp.open("w", encoding="utf-8") as handle:
+            json.dump(final, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, self.session_dir / "session.json")
+
+    def fail(
+        self,
+        error: Exception,
+        *,
+        failed_utc: datetime,
+        cycle_id: int,
+    ) -> dict:
+        if self._closed:
+            raise RuntimeError("recording session is already closed")
+
+        error_type = type(error).__name__
+        error_detail = str(error) or error_type
+        cleanup_error = None
+        try:
+            self._writers.close()
+        except Exception as exc:
+            cleanup_error = f"{type(exc).__name__}: {str(exc) or type(exc).__name__}"
+        self._closed = True
+
+        failure = {
+            "type": error_type,
+            "detail": error_detail,
+            "cycle_id": cycle_id,
+        }
+        if cleanup_error is not None:
+            failure["cleanup_error"] = cleanup_error
+
+        final = self._final_metadata(failed_utc)
+        final.update(
+            {
+                "recording_state": "ERROR",
+                "failed_utc": failed_utc.isoformat(),
+                "failure": failure,
+            }
+        )
+
+        metadata_error = None
+        try:
+            self._replace_session_metadata(final)
+        except Exception as exc:
+            metadata_error = f"{type(exc).__name__}: {str(exc) or type(exc).__name__}"
+
+        status = self.recording_status()
+        status.update(
+            {
+                "state": "ERROR",
+                "failed_utc": failed_utc.isoformat(),
+                "failed_cycle_id": cycle_id,
+                "error_type": error_type,
+                "error_detail": error_detail,
+            }
+        )
+        if cleanup_error is not None:
+            status["cleanup_error"] = cleanup_error
+        if metadata_error is not None:
+            status["metadata_error"] = metadata_error
+        return status
+
     def stop(self, stopped_utc: datetime | None = None) -> None:
         if self._closed:
             raise RuntimeError("recording session is already closed")
@@ -173,25 +257,9 @@ class SessionRecorder:
 
         self._writers.close()
         self._closed = True
-        final = dict(self._metadata)
-        started = datetime.fromisoformat(self._metadata["started_utc"])
-        final.update(
-            {
-                "stopped_utc": stop.isoformat(),
-                "duration_s": (stop - started).total_seconds(),
-                "records_written": self._records,
-                "record_points_missed": self._missed,
-                "valid_samples_seen": self._valid_samples_seen,
-                "invalid_cycles_seen": self._invalid_cycles_seen,
-            }
-        )
-        tmp = self.session_dir / "session.json.tmp"
-        with tmp.open("w", encoding="utf-8") as handle:
-            json.dump(final, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, self.session_dir / "session.json")
+        final = self._final_metadata(stop)
+        final["stopped_utc"] = stop.isoformat()
+        self._replace_session_metadata(final)
 
 
 class RecordingManager:
@@ -209,6 +277,7 @@ class RecordingManager:
         self._bus = bus
         self._application_version = application_version
         self._active: dict[str, SessionRecorder] = {}
+        self._failed: dict[str, dict] = {}
         self._lock = threading.RLock()
         self._accept_commands = True
         self._subscriber = bus.subscribe(maxsize=256)
@@ -261,6 +330,7 @@ class RecordingManager:
                     snapshot.last_sample.identity.cycle_id,
                     session_note,
                 )
+            self._failed.pop(device_id, None)
             self._active[device_id] = recorder
             return recorder.session_dir
 
@@ -282,6 +352,10 @@ class RecordingManager:
                 for device_id in sorted(self._active)
             )
 
+    def recording_failures(self) -> tuple[dict, ...]:
+        with self._lock:
+            return tuple(dict(self._failed[device_id]) for device_id in sorted(self._failed))
+
     def stop_all(self) -> None:
         cleanup_errors: list[str] = []
         with self._lock:
@@ -302,22 +376,68 @@ class RecordingManager:
         if cleanup_errors:
             raise RuntimeError("recording cleanup failed: " + "; ".join(cleanup_errors))
 
+    def _recording_failure_event(
+        self,
+        device_id: str,
+        recorder: SessionRecorder,
+        cycle_id: int,
+        error: Exception,
+    ) -> DiagnosticEvent:
+        failed_utc = datetime.now(timezone.utc)
+        current = self._active.get(device_id)
+        if current is recorder:
+            self._active.pop(device_id, None)
+        status = recorder.fail(error, failed_utc=failed_utc, cycle_id=cycle_id)
+        self._failed[device_id] = status
+
+        detail = f"{type(error).__name__}: {str(error) or type(error).__name__}"
+        if "metadata_error" in status:
+            detail += f"; session metadata update failed: {status['metadata_error']}"
+        if "cleanup_error" in status:
+            detail += f"; recorder cleanup failed: {status['cleanup_error']}"
+        return DiagnosticEvent(
+            device_id=device_id,
+            cycle_id=cycle_id,
+            occurred_utc=failed_utc,
+            event="RECORDING_WRITE_ERROR",
+            severity=Severity.ERROR,
+            detail=detail,
+        )
+
     def _consume(self) -> None:
         while not self._stop.is_set():
             try:
                 event = self._subscriber.get(timeout=0.1)
             except Empty:
                 continue
+
+            failure_event = None
             with self._lock:
                 if isinstance(event, MeasurementSample):
-                    recorder = self._active.get(event.identity.device_id)
+                    device_id = event.identity.device_id
+                    cycle_id = event.identity.cycle_id
+                    recorder = self._active.get(device_id)
                     if recorder is not None:
-                        recorder.consider_sample(event)
+                        try:
+                            recorder.consider_sample(event)
+                        except Exception as exc:
+                            failure_event = self._recording_failure_event(
+                                device_id, recorder, cycle_id, exc
+                            )
                 elif isinstance(event, DiagnosticEvent):
-                    recorder = self._active.get(event.device_id)
+                    device_id = event.device_id
+                    recorder = self._active.get(device_id)
                     if recorder is not None:
-                        recorder.record_invalid_cycle(
-                            event.occurred_utc,
-                            event.cycle_id,
-                            f"{event.event}: {event.detail}",
-                        )
+                        try:
+                            recorder.record_invalid_cycle(
+                                event.occurred_utc,
+                                event.cycle_id,
+                                f"{event.event}: {event.detail}",
+                            )
+                        except Exception as exc:
+                            failure_event = self._recording_failure_event(
+                                device_id, recorder, event.cycle_id, exc
+                            )
+
+            if failure_event is not None:
+                self._bus.publish(failure_event)

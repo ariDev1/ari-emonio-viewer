@@ -59,3 +59,18 @@ def test_recording_state_replaces_stale_browser_memory_from_backend_status() -> 
         })()"""
     )
     assert result == [False, 2, ["emonio-b"]]
+
+
+def test_recording_error_is_separate_from_active_recording_state() -> None:
+    result = _run_module(
+        """(() => {
+          const state = new mod.RecordingState();
+          state.replaceStatus(
+            [{device_id:'emonio-a', device_name:'A', interval_s:10, session_dir:'/active'}],
+            [{device_id:'emonio-b', device_name:'B', state:'ERROR', interval_s:5, session_dir:'/failed', error_type:'OSError', error_detail:'disk full'}]
+          );
+          const failure = state.errorForDevice('emonio-b');
+          return [state.isActive('emonio-a'), state.isActive('emonio-b'), failure.state, failure.error_type, failure.error_detail];
+        })()"""
+    )
+    assert result == [True, False, "ERROR", "OSError", "disk full"]

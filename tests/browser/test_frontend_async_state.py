@@ -21,8 +21,11 @@ def _run_app_module(expression: str, *, api_mode: str) -> object:
     common_stubs = r'''
 class RecordingState {
   replaceActive() {}
+  replaceStatus() {}
   forDevice() { return null; }
+  errorForDevice() { return null; }
   activeRecordings() { return []; }
+  recordingErrors() { return []; }
   isActive() { return false; }
 }
 const __noop = () => {};

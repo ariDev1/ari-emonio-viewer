@@ -661,3 +661,44 @@ def test_phase_panels_use_two_column_canonical_measurement_layout() -> None:
     assert "grid-auto-flow: column;" in css
     assert ".measurement-row:nth-child(5)," in css
     assert ".measurement-row:nth-child(10)" in css
+
+
+def test_recording_failure_status_is_rendered_as_error_not_active() -> None:
+    app = Path("frontend/js/app.js").read_text(encoding="utf-8")
+    assert "recordingState.replaceStatus(payload?.active ?? [], payload?.errors ?? [])" in app
+    assert "recordingState.errorForDevice(selectedDevice)" in app
+    assert 'setText("recording-selected-state", "REC ERROR")' in app
+    assert 'state.textContent = "ERROR"' in app
+    assert "error_detail" in app
+    assert "setInterval(() => {\n    refreshBackendState();\n    refreshRecordingState();\n  }, 1000);" in app
+
+
+def test_initial_device_selection_uses_only_enabled_devices_and_has_clean_empty_state() -> None:
+    source = Path("frontend/js/app.js").read_text(encoding="utf-8")
+    assert "device.enabled && device.id === runtimeConfig.default_device" in source
+    assert "runtimeConfig.devices.find((device) => device.enabled)" in source
+    assert "if (!selectedDevice)" in source
+
+
+def test_diagnostics_surface_event_delivery_loss_evidence() -> None:
+    source = Path("frontend/js/diagnostics.js").read_text(encoding="utf-8")
+    assert '"event_deliveries_dropped"' in source
+
+
+def test_diagnostics_surface_firmware_and_register_map_as_separate_evidence() -> None:
+    source = Path("frontend/js/diagnostics.js").read_text(encoding="utf-8")
+    assert '"firmware_version"' in source
+    assert '"register_map_id"' in source
+
+
+def test_diagnostics_explains_unqualified_scientific_warning_profile() -> None:
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    assert "VALID does not mean scientifically qualified" in html
+    assert "Scientific warning thresholds are unqualified and disabled" in html
+
+
+def test_diagnostics_surface_latency_window_semantics() -> None:
+    source = Path("frontend/js/diagnostics.js").read_text(encoding="utf-8")
+    assert '"latency_statistics_scope"' in source
+    assert '"latency_window_samples"' in source
+    assert '"latency_window_capacity"' in source

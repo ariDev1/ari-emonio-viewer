@@ -223,6 +223,10 @@ export function formatCanonicalHistoryValue(value) {
   return Number.isFinite(value) ? String(value) : "—";
 }
 
+export function formatHistoryInspectorValue(value) {
+  return Number.isFinite(value) ? value.toFixed(4) : "—";
+}
+
 export function formatHistorySampleClipboardText(deviceId, selectedSample) {
   if (!deviceId || !selectedSample) return null;
   const lines = [
@@ -511,7 +515,7 @@ function renderInspector(deviceId, samples, selectedSample) {
     if (!row) continue;
     for (const field of ["vrms", "irms", "p", "q", "s", "pf", "frequency"]) {
       const cell = row.querySelector(`[data-history-field="${field}"]`);
-      if (cell) cell.textContent = formatCanonicalHistoryValue(selectedSample?.[phase.key]?.[field]);
+      if (cell) cell.textContent = formatHistoryInspectorValue(selectedSample?.[phase.key]?.[field]);
     }
   }
 }

@@ -1,5 +1,7 @@
 const ORDER = [
   "state",
+  "firmware_version",
+  "register_map_id",
   "sample_age_s",
   "cycles_total",
   "valid_cycles",
@@ -8,6 +10,10 @@ const ORDER = [
   "protocol_errors",
   "decode_errors",
   "reconnects",
+  "event_deliveries_dropped",
+  "latency_statistics_scope",
+  "latency_window_samples",
+  "latency_window_capacity",
   "min_latency_ms",
   "mean_latency_ms",
   "p95_latency_ms",

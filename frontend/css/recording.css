@@ -58,7 +58,7 @@
 .recording-note { display: grid; gap: 4px; color: var(--muted); font-size: 0.64rem; }
 .recording-note input { min-height: 32px; padding: 5px 8px; }
 .recording-state { font-family: var(--mono); color: var(--muted); }
-#recording-selected-state.active, .recording-state.active { color: var(--danger); }
+#recording-selected-state.active, .recording-state.active, .recording-state.error { color: var(--danger); }
 .recording-detail { margin-top: 7px; color: var(--muted); font-family: var(--mono); font-size: 0.66rem; overflow-wrap: anywhere; }
 
 @media (max-width: 1100px) {

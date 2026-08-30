@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 try:
@@ -23,10 +24,10 @@ def load_config(path: Path) -> RuntimeConfig:
     if not devices:
         raise ConfigError("at least one device is required")
     for device in devices:
-        if device.poll_interval_s <= 0:
-            raise ConfigError("poll_interval_s must be > 0")
-        if device.timeout_s <= 0:
-            raise ConfigError("timeout_s must be > 0")
+        if not math.isfinite(device.poll_interval_s) or device.poll_interval_s <= 0:
+            raise ConfigError("poll_interval_s must be finite and > 0")
+        if not math.isfinite(device.timeout_s) or device.timeout_s <= 0:
+            raise ConfigError("timeout_s must be finite and > 0")
         if not 1 <= device.port <= 65535:
             raise ConfigError("port must be 1..65535")
         if not 0 <= device.unit_id <= 255:
@@ -36,8 +37,8 @@ def load_config(path: Path) -> RuntimeConfig:
     recording = RecordingConfig(**raw["recording"])
     if viewer.default_device not in set(ids):
         raise ConfigError("default_device is not configured")
-    if recording.default_interval_s <= 0:
-        raise ConfigError("recording default_interval_s must be > 0")
+    if not math.isfinite(recording.default_interval_s) or recording.default_interval_s <= 0:
+        raise ConfigError("recording default_interval_s must be finite and > 0")
     return RuntimeConfig(viewer=viewer, recording=recording, devices=devices)
 
 

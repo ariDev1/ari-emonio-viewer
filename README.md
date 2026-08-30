@@ -2,7 +2,7 @@
 
 Local Linux measurement viewer for Emonio P3 devices.
 
-The trusted field baseline is **v0.4.7**.
+The trusted field baseline is **v0.4.12**.
 Tested device firmware: `3.0.79-release`.
 
 ![ARI Emonio Viewer](ari-emonio-viewer_v047.png)

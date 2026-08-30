@@ -80,6 +80,42 @@ poll_interval_s = 0
         load_config(path)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("poll_interval_s", "nan"),
+        ("poll_interval_s", "inf"),
+        ("timeout_s", "nan"),
+        ("timeout_s", "inf"),
+        ("default_interval_s", "nan"),
+        ("default_interval_s", "inf"),
+    ),
+)
+def test_rejects_non_finite_timing_configuration(tmp_path: Path, field: str, value: str) -> None:
+    poll_interval = value if field == "poll_interval_s" else "2.0"
+    timeout = value if field == "timeout_s" else "2.0"
+    recording_interval = value if field == "default_interval_s" else "10.0"
+    path = tmp_path / "non-finite.toml"
+    path.write_text(
+        f"""
+[viewer]
+default_device = "meter"
+[recording]
+default_interval_s = {recording_interval}
+[[devices]]
+id = "meter"
+name = "meter"
+host = "192.0.2.1"
+poll_interval_s = {poll_interval}
+timeout_s = {timeout}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match=field):
+        load_config(path)
+
+
 def test_merge_runtime_devices_adds_remembered_devices_without_changing_default() -> None:
     from emonio_viewer.config.loader import merge_runtime_devices
     from emonio_viewer.config.model import DeviceConfig, RecordingConfig, RuntimeConfig, ViewerConfig

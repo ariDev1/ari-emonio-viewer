@@ -32,6 +32,8 @@ class RuntimeEventBus:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._subscribers: list[Queue[RuntimeEvent]] = []
+        self._dropped_deliveries_total = 0
+        self._dropped_deliveries_by_device: dict[str, int] = {}
 
     def subscribe(self, maxsize: int = 4) -> Queue[RuntimeEvent]:
         if maxsize <= 0:
@@ -46,6 +48,23 @@ class RuntimeEventBus:
             if subscriber in self._subscribers:
                 self._subscribers.remove(subscriber)
 
+    def dropped_deliveries(self, device_id: str | None = None) -> int:
+        with self._lock:
+            if device_id is None:
+                return self._dropped_deliveries_total
+            return self._dropped_deliveries_by_device.get(device_id, 0)
+
+    def _record_dropped_delivery(self, event: RuntimeEvent) -> None:
+        if isinstance(event, MeasurementSample):
+            device_id = event.identity.device_id
+        else:
+            device_id = event.device_id
+        with self._lock:
+            self._dropped_deliveries_total += 1
+            self._dropped_deliveries_by_device[device_id] = (
+                self._dropped_deliveries_by_device.get(device_id, 0) + 1
+            )
+
     def publish(self, event: RuntimeEvent) -> None:
         with self._lock:
             subscribers = tuple(self._subscribers)
@@ -56,6 +75,7 @@ class RuntimeEventBus:
                     break
                 except Full:
                     try:
-                        subscriber.get_nowait()
+                        dropped = subscriber.get_nowait()
                     except Empty:
                         continue
+                    self._record_dropped_delivery(dropped)
