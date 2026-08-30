@@ -276,31 +276,34 @@ def test_reconnect_rejects_running_connecting_live_previous_thread_and_global_st
     store = RuntimeStore()
     coordinator = AcquisitionCoordinator((device_config,), store, RuntimeEventBus())
     coordinator.start()
-    wait_until(lambda: store.get_device(device_config.id).cycles_valid >= 1)
-    original_worker = coordinator._workers[device_config.id]
+    try:
+        wait_until(lambda: store.get_device(device_config.id).cycles_valid >= 1)
+        original_worker = coordinator._workers[device_config.id]
 
-    with pytest.raises(AcquisitionTransitionError):
-        coordinator.reconnect_device(device_config.id)
-    assert coordinator._workers[device_config.id] is original_worker
+        with pytest.raises(AcquisitionTransitionError):
+            coordinator.reconnect_device(device_config.id)
+        assert coordinator._workers[device_config.id] is original_worker
 
-    coordinator._lifecycle[device_config.id] = AcquisitionStatus(
-        device_config.id,
-        AcquisitionLifecycleState.CONNECTING,
-    )
-    with pytest.raises(AcquisitionTransitionError):
-        coordinator.reconnect_device(device_config.id)
-    assert coordinator._workers[device_config.id] is original_worker
+        coordinator._lifecycle[device_config.id] = AcquisitionStatus(
+            device_config.id,
+            AcquisitionLifecycleState.CONNECTING,
+        )
+        with pytest.raises(AcquisitionTransitionError):
+            coordinator.reconnect_device(device_config.id)
+        assert coordinator._workers[device_config.id] is original_worker
 
-    coordinator._lifecycle[device_config.id] = AcquisitionStatus(
-        device_config.id,
-        AcquisitionLifecycleState.DISCONNECTED,
-    )
-    assert coordinator._threads[device_config.id].is_alive() is True
-    with pytest.raises(AcquisitionTransitionError):
-        coordinator.reconnect_device(device_config.id)
-    assert coordinator._workers[device_config.id] is original_worker
+        coordinator._lifecycle[device_config.id] = AcquisitionStatus(
+            device_config.id,
+            AcquisitionLifecycleState.DISCONNECTED,
+        )
+        assert coordinator._threads[device_config.id].is_alive() is True
+        with pytest.raises(AcquisitionTransitionError):
+            coordinator.reconnect_device(device_config.id)
+        assert coordinator._workers[device_config.id] is original_worker
+    finally:
+        coordinator.stop()
+        coordinator.close_clients()
 
-    coordinator.stop()
     assert coordinator.acquisition_status(device_config.id).state is AcquisitionLifecycleState.DISCONNECTED
     with pytest.raises(AcquisitionTransitionError):
         coordinator.reconnect_device(device_config.id)
