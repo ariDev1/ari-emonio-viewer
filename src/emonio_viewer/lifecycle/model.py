@@ -31,6 +31,7 @@ class DeviceLifecycleResult:
 
 
 class DeviceLifecycleCommandError(RuntimeError):
-    def __init__(self, result: DeviceLifecycleResult) -> None:
+    def __init__(self, result: DeviceLifecycleResult, *, conflict: bool = False) -> None:
         super().__init__(result.detail or "device lifecycle command failed")
         self.result = result
+        self.conflict = conflict
