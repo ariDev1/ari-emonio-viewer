@@ -80,6 +80,8 @@ class SessionRecorder:
         self._missed = 0
         self._valid_samples_seen = 0
         self._invalid_cycles_seen = 0
+        self._last_recorded_utc: datetime | None = None
+        self._last_recorded_cycle_id: int | None = None
         self._closed = False
 
     def consider_sample(self, sample: MeasurementSample) -> None:
@@ -106,6 +108,8 @@ class SessionRecorder:
                 sample_to_csv_row(sample, sample_time.isoformat(), 0.0)
             )
             self._records += 1
+            self._last_recorded_utc = sample_time
+            self._last_recorded_cycle_id = sample.identity.cycle_id
             self._next_record_utc += self._interval
 
     def set_interval(self, interval_s: float, changed_utc: datetime) -> None:
@@ -155,9 +159,22 @@ class SessionRecorder:
         return {
             "device_id": device["id"],
             "device_name": device["name"],
+            "state": "RECORDING",
             "interval_s": self._interval.total_seconds(),
+            "acquisition_interval_s": self._minimum_interval_s,
+            "session_id": self._metadata["session_id"],
             "session_dir": str(self.session_dir),
             "started_utc": self._metadata["started_utc"],
+            "application_version": self._metadata["application_version"],
+            "records_written": self._records,
+            "record_points_missed": self._missed,
+            "eligible_samples_seen": self._valid_samples_seen,
+            "invalid_cycles_seen": self._invalid_cycles_seen,
+            "last_recorded_cycle_id": self._last_recorded_cycle_id,
+            "last_recorded_utc": (
+                None if self._last_recorded_utc is None else self._last_recorded_utc.isoformat()
+            ),
+            "next_record_utc": self._next_record_utc.isoformat(),
         }
 
     def _final_metadata(self, ended_utc: datetime) -> dict:
