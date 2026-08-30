@@ -1,11 +1,37 @@
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function integerNumber(value) {
+  const number = finiteNumber(value);
+  return Number.isInteger(number) ? number : null;
+}
+
+function textValue(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
 function normalizedRecord(record) {
   if (!record || typeof record.device_id !== "string" || !record.device_id) return null;
   return Object.freeze({
     device_id: record.device_id,
     device_name: typeof record.device_name === "string" && record.device_name ? record.device_name : record.device_id,
-    interval_s: Number.isFinite(Number(record.interval_s)) ? Number(record.interval_s) : null,
-    session_dir: typeof record.session_dir === "string" ? record.session_dir : "",
-    started_utc: typeof record.started_utc === "string" ? record.started_utc : "",
+    state: textValue(record.state, "RECORDING") || "RECORDING",
+    interval_s: finiteNumber(record.interval_s),
+    acquisition_interval_s: finiteNumber(record.acquisition_interval_s),
+    session_id: textValue(record.session_id),
+    session_dir: textValue(record.session_dir),
+    started_utc: textValue(record.started_utc),
+    application_version: textValue(record.application_version),
+    records_written: integerNumber(record.records_written),
+    record_points_missed: integerNumber(record.record_points_missed),
+    eligible_samples_seen: integerNumber(record.eligible_samples_seen),
+    invalid_cycles_seen: integerNumber(record.invalid_cycles_seen),
+    last_recorded_cycle_id: integerNumber(record.last_recorded_cycle_id),
+    last_recorded_utc: textValue(record.last_recorded_utc),
+    next_record_utc: textValue(record.next_record_utc),
   });
 }
 
@@ -15,8 +41,8 @@ function normalizedError(record) {
   return Object.freeze({
     ...base,
     state: "ERROR",
-    failed_utc: typeof record.failed_utc === "string" ? record.failed_utc : "",
-    failed_cycle_id: Number.isInteger(Number(record.failed_cycle_id)) ? Number(record.failed_cycle_id) : null,
+    failed_utc: textValue(record.failed_utc),
+    failed_cycle_id: integerNumber(record.failed_cycle_id),
     error_type: typeof record.error_type === "string" && record.error_type ? record.error_type : "RecordingError",
     error_detail: typeof record.error_detail === "string" && record.error_detail ? record.error_detail : "recording failed",
   });
@@ -71,5 +97,18 @@ export class RecordingState {
 
   recordingErrors() {
     return [...this._errors.keys()].sort().map((deviceId) => this._errors.get(deviceId));
+  }
+
+  summary() {
+    const active = this.activeRecordings();
+    return Object.freeze({
+      active: active.length,
+      errors: this._errors.size,
+      records_written: active.reduce((sum, record) => sum + (record.records_written ?? 0), 0),
+      record_points_missed: active.reduce(
+        (sum, record) => sum + (record.record_points_missed ?? 0),
+        0
+      ),
+    });
   }
 }
