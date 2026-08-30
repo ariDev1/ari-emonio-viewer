@@ -192,7 +192,22 @@ Registration of a new device must happen exactly once: store config in `_devices
 
 Keep `AcquisitionWorker.run()` byte-identical if possible. The coordinator must pass a per-device `threading.Event` to it instead of the former global event. The global event remains only a whole-coordinator shutdown guard.
 
-Initial registered devices are `DISCONNECTED` before `start()`. `start()` creates/clears each device stop event, starts each enabled worker, and sets lifecycle to `RUNNING`.
+Use one explicit internal start interface for both initial start and reconnect:
+
+```python
+def _start_worker(
+    self,
+    device_id: str,
+    worker: AcquisitionWorker,
+    *,
+    connection_offset: int,
+) -> None:
+    ...
+```
+
+It creates/clears only that device's stop event, rejects an already-live thread, and starts `_run_worker(worker, stop_event, connection_offset)`.
+
+Initial registered devices are `DISCONNECTED` before `start()`. `start()` starts each enabled worker with the current connection offset and sets lifecycle to `RUNNING`.
 
 `disconnect_device()` must serialize state changes under `_lock`, then stop outside the lock:
 
@@ -330,7 +345,11 @@ connections = self._connection_offsets[device_id] + worker.client.connections_op
 self._store.publish_sample(sample, connections)
 self._bus.publish(sample)
 self._workers[device_id] = worker
-self._start_worker(device_id, worker, connection_offset=self._connection_offsets[device_id])
+self._start_worker(
+    device_id,
+    worker,
+    connection_offset=self._connection_offsets[device_id],
+)
 self._lifecycle[device_id] = AcquisitionStatus(
     device_id, AcquisitionLifecycleState.RUNNING
 )
@@ -585,7 +604,7 @@ assert payload["acquisition_state"] == "RUNNING"
 assert payload["state"] in {"ONLINE", "DEGRADED", "STALE", "OFFLINE", "CONNECTING"}
 ```
 
-The sample body must remain byte/value-equivalent to the existing canonical serialization aside from the new envelope field.
+The sample body must remain value-equivalent to existing canonical serialization aside from the new envelope field.
 
 - [ ] **Step 3: Run and verify RED**
 
@@ -1015,11 +1034,11 @@ Confirm no protected scientific implementation files changed except the explicit
 - `src/emonio_viewer/scope/client.py`
 - `src/emonio_viewer/scope/model.py`
 - `src/emonio_viewer/scope/protocol.py`
+- `src/emonio_viewer/scope/service.py`
 - `src/emonio_viewer/recording/csv_writer.py`
 - `src/emonio_viewer/recording/session.py`
-- quadrant and validation math.
 
-`src/emonio_viewer/scope/service.py` should also remain unchanged because the lifecycle service uses its existing `stop()` path.
+The canonical quadrant and validation modules under `src/emonio_viewer/measurement/` are included in the protected directory rule above.
 
 - [ ] **Step 2: Run complete source publication and acceptance gates**
 
@@ -1032,7 +1051,10 @@ Required result: every unit, integration, frontend/browser, read-only, Python co
 
 - [ ] **Step 3: Build the candidate twice from the same commit**
 
+Capture the source root before changing directories later:
+
 ```bash
+SOURCE_ROOT="$(git rev-parse --show-toplevel)"
 rm -rf dist build
 python tools/build-release.py
 cp dist/ARI_Emonio_Viewer_v0.4.14_Candidate.zip /tmp/ari-v0414-first.zip
@@ -1063,10 +1085,10 @@ Expected: packaged acceptance PASS.
 
 - [ ] **Step 5: Record deterministic evidence**
 
-From the source repository after packaged verification:
+Return to the captured source repository:
 
 ```bash
-cd <source-repository-root>
+cd "$SOURCE_ROOT"
 sha256sum dist/ARI_Emonio_Viewer_v0.4.14_Candidate.zip
 cat dist/ARI_Emonio_Viewer_v0.4.14_Candidate.zip.sha256
 git rev-parse HEAD
