@@ -27,6 +27,7 @@ class RecordingState {
   activeRecordings() { return []; }
   recordingErrors() { return []; }
   isActive() { return false; }
+  summary() { return {active:0, errors:0, records_written:0, record_points_missed:0}; }
 }
 const __noop = () => {};
 const __asyncTrue = async () => true;
