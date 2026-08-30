@@ -2,8 +2,8 @@
 
 Local Linux measurement viewer for Emonio P3 devices.
 
-The trusted field baseline is **v0.4.13**.
-**v0.4.14 Candidate** adds explicit per-Emonio acquisition disconnect/reconnect for controlled multi-machine handoff. Disconnect cleanly stops active Recording, then SCOPE, then only the selected Modbus acquisition worker. Reconnect restores canonical acquisition only.
+The trusted field baseline is **v0.4.14**.
+**v0.4.15 Testing** adds the P-Q Density Map as a browser-only visualization of exact canonical P/Q history samples. The Density Map uses the selected 30 s, 1 min, 2 min, 5 min, or 10 min history window and a fixed 32×32 deterministic grid. It does not smooth, interpolate, resample, or modify measured values.
 Tested device firmware: `3.0.79-release`.
 
 ![ARI Emonio Viewer](ari-emonio-viewer_v047.png)
@@ -13,6 +13,7 @@ Tested device firmware: `3.0.79-release`.
 - Modbus/TCP: read-only canonical A/B/C/TOTAL measurements
 - Measurements: U, I, P, Q, S, PF, frequency, energy
 - Signed P/Q with four-quadrant representation
+- P-Q Density Map from exact canonical browser-history samples only
 - 30 s, 1 min, 2 min, 5 min, and 10 min history windows
 - Exact stored samples only
 - Multi-device runtime isolation
