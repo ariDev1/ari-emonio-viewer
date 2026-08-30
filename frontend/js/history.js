@@ -1,9 +1,28 @@
-import {
-  initializeDensityView,
-  isDensityViewActive,
-  renderDensityView,
-  setDensityViewActive,
-} from "./density-view.js";
+let densityViewApi = null;
+let densityViewLoadPromise = null;
+
+function isDensityViewActive() {
+  return densityViewApi?.isDensityViewActive?.() ?? false;
+}
+
+function setDensityViewActive(active) {
+  return densityViewApi?.setDensityViewActive?.(active) ?? false;
+}
+
+function renderDensityView(samples) {
+  return densityViewApi?.renderDensityView?.(samples) ?? null;
+}
+
+function loadDensityView() {
+  if (densityViewApi) return Promise.resolve(densityViewApi);
+  if (!densityViewLoadPromise) {
+    densityViewLoadPromise = import("./density-view.js").then((module) => {
+      densityViewApi = module;
+      return module;
+    });
+  }
+  return densityViewLoadPromise;
+}
 
 export const HISTORY_WINDOW_MS = 10 * 60 * 1000;
 export const HISTORY_DISPLAY_WINDOWS = Object.freeze([
@@ -492,6 +511,7 @@ function showHistoryCopyFeedback(button, label, state) {
 }
 
 function renderInspector(deviceId, samples, selectedSample) {
+  const selectionIdentity = selectedByDevice.get(deviceId);
   setText("history-inspector-device", selectedSample ? deviceId : "—");
   setText("history-inspector-cycle", selectedSample ? String(selectedSample.cycleId) : "—");
   setText("history-inspector-timestamp", selectedSample?.cycleFinishedUtc ?? "—");
@@ -499,7 +519,9 @@ function renderInspector(deviceId, samples, selectedSample) {
   setText(
     "history-inspector-state",
     selectedSample
-      ? "SELECTED MEASURED SAMPLE"
+      ? isDensityViewActive() && selectionIdentity?.source === "density_bin"
+        ? `DENSITY BIN · ${selectionIdentity.densityBinCount} SAMPLES · SHOWING LATEST EXACT SAMPLE`
+        : "SELECTED MEASURED SAMPLE"
       : isDensityViewActive()
         ? "DENSITY VIEW ACTIVE · SELECT TIME HISTORY FOR EXACT SAMPLE INSPECTION"
         : samples.length
@@ -611,12 +633,30 @@ export function initializeHistoryMetricSelector(getActiveDeviceId) {
       if (deviceId) renderMeasurementHistory(deviceId);
     });
   }
-  initializeDensityView(({ active }) => {
-    const deviceId = getActiveDeviceId?.();
-    if (!deviceId) return;
-    if (active) selectedByDevice.delete(deviceId);
-    renderMeasurementHistory(deviceId);
-  });
+  loadDensityView()
+    .then((density) => {
+      density.initializeDensityView(({ selectedSampleIdentity, densityBinCount }) => {
+        const deviceId = getActiveDeviceId?.();
+        if (!deviceId) return;
+        if (
+          Number.isInteger(selectedSampleIdentity?.cycleId)
+          && typeof selectedSampleIdentity?.cycleFinishedUtc === "string"
+          && Number.isInteger(densityBinCount)
+          && densityBinCount > 0
+        ) {
+          selectedByDevice.set(deviceId, {
+            cycleId: selectedSampleIdentity.cycleId,
+            cycleFinishedUtc: selectedSampleIdentity.cycleFinishedUtc,
+            source: "density_bin",
+            densityBinCount,
+          });
+        }
+        renderMeasurementHistory(deviceId);
+      });
+    })
+    .catch((error) => {
+      console.error("P-Q density view unavailable", error);
+    });
   updateHistorySelectorState();
   updateActiveHistoryHeading();
 }
