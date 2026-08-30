@@ -68,17 +68,29 @@ function sampleWord(count) {
   return count === 1 ? "SAMPLE" : "SAMPLES";
 }
 
+function exactSampleIdentity(sample) {
+  if (!Number.isInteger(sample?.cycleId) || typeof sample?.cycleFinishedUtc !== "string") return null;
+  return Object.freeze({
+    cycleId: sample.cycleId,
+    cycleFinishedUtc: sample.cycleFinishedUtc,
+  });
+}
+
 export function buildDensityRenderModel(samples, phaseKey = densityPhaseKey) {
   const phaseLabel = phaseLabelFor(phaseKey);
   if (!phaseLabel) throw new RangeError("unsupported density phase");
   const density = buildDensityMap(samples, phaseKey);
   const cells = density.bins
     .filter((bin) => bin.count > 0)
-    .map((bin) => Object.freeze({
-      ...bin,
-      geometry: densityCellGeometry(bin, DENSITY_PLOT, DENSITY_BIN_COUNT),
-      detail: formatDensityBinDetails(bin),
-    }));
+    .map((bin) => {
+      const latestSampleIndex = bin.sampleIndices[bin.sampleIndices.length - 1];
+      return Object.freeze({
+        ...bin,
+        geometry: densityCellGeometry(bin, DENSITY_PLOT, DENSITY_BIN_COUNT),
+        detail: formatDensityBinDetails(bin),
+        latestSampleIdentity: exactSampleIdentity(samples?.[latestSampleIndex]),
+      });
+    });
   const skipped = density.skippedSampleCount > 0 ? ` · ${density.skippedSampleCount} SKIPPED` : "";
   return Object.freeze({
     viewBox: DENSITY_VIEWBOX,
@@ -152,6 +164,14 @@ function renderDensityCells(svg, model) {
     const title = svgElement("title");
     title.textContent = cell.detail;
     rect.appendChild(title);
+    if (cell.latestSampleIdentity) {
+      rect.addEventListener("click", () => {
+        notifyDensityChange({
+          selectedSampleIdentity: cell.latestSampleIdentity,
+          densityBinCount: cell.count,
+        });
+      });
+    }
     svg.appendChild(rect);
   }
 }
@@ -211,9 +231,14 @@ function updateDensityControlState() {
   }
 }
 
-function notifyDensityChange() {
+function notifyDensityChange(details = null) {
   if (typeof densityChangeCallback === "function") {
-    densityChangeCallback(Object.freeze({ active: densityViewActive, phaseKey: densityPhaseKey }));
+    const selection = details && typeof details === "object" ? details : {};
+    densityChangeCallback(Object.freeze({
+      active: densityViewActive,
+      phaseKey: densityPhaseKey,
+      ...selection,
+    }));
   }
 }
 
