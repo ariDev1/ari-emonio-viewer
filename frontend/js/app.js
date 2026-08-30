@@ -72,20 +72,260 @@ function formatInterval(value) {
   return Number.isInteger(value) ? `${value} s` : `${value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")} s`;
 }
 
+function formatRecordingCount(value) {
+  return Number.isInteger(value) && value >= 0 ? String(value) : "—";
+}
+
+function formatRecordingRuntime(startedUtc) {
+  const startedMs = Date.parse(startedUtc ?? "");
+  if (!Number.isFinite(startedMs)) return "—";
+  const elapsedS = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
+  const hours = Math.floor(elapsedS / 3600);
+  const minutes = Math.floor((elapsedS % 3600) / 60);
+  const seconds = elapsedS % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+function createRecordingElement(tag, className = "", text = "") {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text) node.textContent = text;
+  return node;
+}
+
+function createRecordingSummaryCell(label, id) {
+  const cell = createRecordingElement("span", "recording-dashboard-summary-cell");
+  cell.appendChild(createRecordingElement("small", "recording-dashboard-label", label));
+  const value = createRecordingElement("strong", "recording-dashboard-value", "—");
+  value.id = id;
+  cell.appendChild(value);
+  return cell;
+}
+
+function ensureRecordingDashboardStructure() {
+  if (document.getElementById("recording-session-grid")) return;
+  const body = document.querySelector(".recording-drawer .recording-panel-body");
+  if (!body) return;
+
+  const summary = createRecordingElement("section", "recording-dashboard-summary");
+  summary.setAttribute("aria-label", "Recording session summary");
+  summary.append(
+    createRecordingSummaryCell("ACTIVE", "recording-dashboard-active"),
+    createRecordingSummaryCell("RECORDS", "recording-dashboard-records"),
+    createRecordingSummaryCell("MISSED", "recording-dashboard-missed"),
+    createRecordingSummaryCell("ERRORS", "recording-dashboard-errors")
+  );
+
+  const activeSection = createRecordingElement("section", "recording-session-section");
+  activeSection.appendChild(createRecordingElement("h3", "recording-session-section-title", "ACTIVE SESSIONS"));
+  const activeGrid = createRecordingElement("div", "recording-session-grid");
+  activeGrid.id = "recording-session-grid";
+  activeSection.appendChild(activeGrid);
+
+  const errorSection = createRecordingElement("section", "recording-session-section recording-error-section");
+  errorSection.appendChild(createRecordingElement("h3", "recording-session-section-title", "RECORDING ERRORS"));
+  const errorGrid = createRecordingElement("div", "recording-error-grid");
+  errorGrid.id = "recording-error-grid";
+  errorSection.appendChild(errorGrid);
+
+  const selectedControls = createRecordingElement("section", "recording-selected-controls");
+  selectedControls.setAttribute("aria-label", "Selected Emonio recording controls");
+  const selectedState = createRecordingElement("strong", "recording-selected-control-state", "STATUS UNKNOWN");
+  selectedState.id = "recording-drawer-selected-state";
+  const intervalLabel = createRecordingElement("label", "recording-selected-interval", "INTERVAL");
+  const interval = createRecordingElement("select");
+  interval.id = "recording-drawer-interval";
+  interval.setAttribute("aria-label", "Selected Emonio recording interval");
+  intervalLabel.appendChild(interval);
+  const start = createRecordingElement("button", "", "RECORD");
+  start.id = "recording-drawer-start";
+  start.type = "button";
+  const stop = createRecordingElement("button", "", "STOP");
+  stop.id = "recording-drawer-stop";
+  stop.type = "button";
+  selectedControls.append(selectedState, intervalLabel, start, stop);
+
+  const legacySummary = body.querySelector(".recording-active-summary");
+  const note = body.querySelector(".recording-note");
+  if (legacySummary) legacySummary.hidden = true;
+  if (legacySummary) body.insertBefore(summary, legacySummary);
+  else body.prepend(summary);
+  if (legacySummary) body.insertBefore(activeSection, legacySummary);
+  else body.appendChild(activeSection);
+  if (note) body.insertBefore(errorSection, note);
+  else body.appendChild(errorSection);
+  if (note) body.insertBefore(selectedControls, note);
+  else body.appendChild(selectedControls);
+}
+
+function appendRecordingMetric(container, label, value, className = "") {
+  const cell = createRecordingElement("span", `recording-session-metric${className ? ` ${className}` : ""}`);
+  cell.appendChild(createRecordingElement("small", "recording-session-metric-label", label));
+  cell.appendChild(createRecordingElement("strong", "recording-session-metric-value", value));
+  container.appendChild(cell);
+}
+
+function renderRecordingSessionCards(records) {
+  const target = document.getElementById("recording-session-grid");
+  if (!target) return;
+  target.replaceChildren();
+  if (!records.length) {
+    target.appendChild(createRecordingElement("div", "recording-session-empty", "NO ACTIVE RECORDING SESSIONS"));
+    return;
+  }
+
+  for (const record of records) {
+    const card = createRecordingElement("article", "recording-session-card");
+    card.dataset.deviceId = record.device_id;
+    card.classList.toggle("is-selected", record.device_id === selectedDevice);
+
+    const header = createRecordingElement("div", "recording-session-card-header");
+    const identity = createRecordingElement("div", "recording-session-card-identity");
+    identity.append(
+      createRecordingElement("strong", "recording-session-device", displayDeviceName(record.device_id)),
+      createRecordingElement("span", "recording-session-device-id", record.device_id)
+    );
+    const state = createRecordingElement("strong", "recording-session-state", "RECORDING");
+    const button = createRecordingElement("button", "recording-session-stop", "STOP");
+    button.type = "button";
+    button.dataset.recordingStopDevice = record.device_id;
+    button.setAttribute("aria-label", `Stop recording for ${displayDeviceName(record.device_id)}`);
+    button.addEventListener("click", async () => {
+      const deviceId = button.dataset.recordingStopDevice;
+      if (!deviceId || !recordingState.isActive(deviceId)) return;
+      button.disabled = true;
+      try {
+        await stopRecording(deviceId);
+        await refreshRecordingState(`Recording stopped for ${displayDeviceName(deviceId)}.`);
+        applySelectedDeviceConfig();
+      } catch (error) {
+        await refreshRecordingState(`Stop failed for ${displayDeviceName(deviceId)}: ${error.message}`);
+      }
+    });
+    header.append(identity, state, button);
+    card.appendChild(header);
+
+    const session = createRecordingElement("div", "recording-session-id", record.session_id || "SESSION ID UNAVAILABLE");
+    card.appendChild(session);
+
+    const metrics = createRecordingElement("div", "recording-session-metrics");
+    appendRecordingMetric(metrics, "STARTED UTC", record.started_utc || "—");
+    appendRecordingMetric(metrics, "RUNTIME", formatRecordingRuntime(record.started_utc));
+    appendRecordingMetric(metrics, "RECORD INTERVAL", formatInterval(record.interval_s));
+    appendRecordingMetric(metrics, "ACQ INTERVAL", formatInterval(record.acquisition_interval_s));
+    appendRecordingMetric(metrics, "RECORDS", formatRecordingCount(record.records_written));
+    appendRecordingMetric(
+      metrics,
+      "MISSED POINTS",
+      formatRecordingCount(record.record_points_missed),
+      (record.record_points_missed ?? 0) > 0 ? "has-warning" : ""
+    );
+    appendRecordingMetric(metrics, "VALID/DEGRADED SEEN", formatRecordingCount(record.eligible_samples_seen));
+    appendRecordingMetric(
+      metrics,
+      "INVALID CYCLES",
+      formatRecordingCount(record.invalid_cycles_seen),
+      (record.invalid_cycles_seen ?? 0) > 0 ? "has-warning" : ""
+    );
+    appendRecordingMetric(metrics, "LAST RECORD UTC", record.last_recorded_utc || "—");
+    appendRecordingMetric(metrics, "LAST CYCLE", formatRecordingCount(record.last_recorded_cycle_id));
+    appendRecordingMetric(metrics, "NEXT BOUNDARY UTC", record.next_record_utc || "—");
+    appendRecordingMetric(metrics, "VIEWER", record.application_version || "—");
+    card.appendChild(metrics);
+
+    const path = createRecordingElement("div", "recording-session-path");
+    path.appendChild(createRecordingElement("small", "recording-session-metric-label", "SESSION DIRECTORY"));
+    path.appendChild(createRecordingElement("code", "", record.session_dir || "—"));
+    card.appendChild(path);
+    target.appendChild(card);
+  }
+}
+
+function renderRecordingErrorCards(records) {
+  const target = document.getElementById("recording-error-grid");
+  if (!target) return;
+  target.replaceChildren();
+  if (!records.length) {
+    target.appendChild(createRecordingElement("div", "recording-session-empty", "NO RECORDING ERRORS"));
+    return;
+  }
+
+  for (const record of records) {
+    const card = createRecordingElement("article", "recording-session-card recording-session-error-card");
+    const header = createRecordingElement("div", "recording-session-card-header");
+    const identity = createRecordingElement("div", "recording-session-card-identity");
+    identity.append(
+      createRecordingElement("strong", "recording-session-device", displayDeviceName(record.device_id)),
+      createRecordingElement("span", "recording-session-device-id", record.device_id)
+    );
+    header.append(identity, createRecordingElement("strong", "recording-session-state error", "ERROR"));
+    card.appendChild(header);
+
+    const metrics = createRecordingElement("div", "recording-session-metrics");
+    appendRecordingMetric(metrics, "FAILED UTC", record.failed_utc || "—");
+    appendRecordingMetric(metrics, "FAILED CYCLE", formatRecordingCount(record.failed_cycle_id));
+    appendRecordingMetric(metrics, "ERROR TYPE", record.error_type || "RecordingError");
+    appendRecordingMetric(metrics, "RECORDS BEFORE ERROR", formatRecordingCount(record.records_written));
+    card.appendChild(metrics);
+    card.appendChild(createRecordingElement("div", "recording-session-error-detail", record.error_detail || "recording failed"));
+
+    const path = createRecordingElement("div", "recording-session-path");
+    path.appendChild(createRecordingElement("small", "recording-session-metric-label", "SESSION DIRECTORY"));
+    path.appendChild(createRecordingElement("code", "", record.session_dir || "—"));
+    card.appendChild(path);
+    target.appendChild(card);
+  }
+}
+
+function setRecordingControlAvailability({ start, stop, interval }) {
+  for (const id of ["record-start", "recording-drawer-start"]) {
+    const node = document.getElementById(id);
+    if (node) node.disabled = !start;
+  }
+  for (const id of ["record-stop", "recording-drawer-stop"]) {
+    const node = document.getElementById(id);
+    if (node) node.disabled = !stop;
+  }
+  for (const id of ["recording-interval", "recording-drawer-interval"]) {
+    const node = document.getElementById(id);
+    if (node) node.disabled = !interval;
+  }
+}
+
+function setRecordingIntervalValue(value) {
+  if (!Number.isFinite(value)) return;
+  const optionValue = String(value);
+  for (const id of ["recording-interval", "recording-drawer-interval"]) {
+    const select = document.getElementById(id);
+    if (!select) continue;
+    if (![...select.options].some((option) => option.value === optionValue)) {
+      const option = document.createElement("option");
+      option.value = optionValue;
+      option.textContent = formatInterval(value);
+      select.appendChild(option);
+    }
+    select.value = optionValue;
+  }
+}
+
 function renderRecordingPanel(message = "") {
+  ensureRecordingDashboardStructure();
   const selectedName = displayDeviceName(selectedDevice);
   const selectedRecording = selectedDevice ? recordingState.forDevice(selectedDevice) : null;
   const selectedError = selectedDevice ? recordingState.errorForDevice(selectedDevice) : null;
   const active = recordingState.activeRecordings();
   const errors = recordingState.recordingErrors();
-  const startButton = document.getElementById("record-start");
-  const stopButton = document.getElementById("record-stop");
-  const interval = document.getElementById("recording-interval");
+  const summary = recordingState.summary();
   const state = document.getElementById("recording-state");
 
   setText("recording-selected-device", selectedName);
   setText("recording-strip-device", selectedName);
   setText("recording-control-device", selectedName);
+  setText("recording-dashboard-active", recordingStatusKnown ? String(summary.active) : "—");
+  setText("recording-dashboard-records", recordingStatusKnown ? String(summary.records_written) : "—");
+  setText("recording-dashboard-missed", recordingStatusKnown ? String(summary.record_points_missed) : "—");
+  setText("recording-dashboard-errors", recordingStatusKnown ? String(summary.errors) : "—");
   setText(
     "recording-summary-state",
     recordingStatusKnown
@@ -99,25 +339,31 @@ function renderRecordingPanel(message = "") {
       : recordingStatusKnown ? "NONE" : "UNAVAILABLE"
   );
 
+  if (recordingStatusKnown) {
+    renderRecordingSessionCards(active);
+    renderRecordingErrorCards(errors);
+  } else {
+    renderRecordingSessionCards([]);
+    renderRecordingErrorCards([]);
+  }
+
   if (!recordingStatusKnown) {
     setText("recording-selected-state", "STATUS UNKNOWN");
+    setText("recording-drawer-selected-state", "STATUS UNKNOWN");
     state.textContent = "STATUS UNKNOWN";
     state.classList.remove("active", "error");
-    startButton.disabled = true;
-    stopButton.disabled = true;
-    interval.disabled = true;
+    setRecordingControlAvailability({ start: false, stop: false, interval: false });
     document.getElementById("recording-detail").textContent = message || "Recording status is unavailable.";
     return;
   }
 
   if (selectedError) {
     setText("recording-selected-state", "REC ERROR");
+    setText("recording-drawer-selected-state", "ERROR");
     state.textContent = "ERROR";
     state.classList.remove("active");
     state.classList.add("error");
-    startButton.disabled = false;
-    stopButton.disabled = true;
-    interval.disabled = false;
+    setRecordingControlAvailability({ start: true, stop: false, interval: true });
     const errorText = `${selectedError.error_type}: ${selectedError.error_detail}`;
     const sessionText = selectedError.session_dir ? ` Session: ${selectedError.session_dir}` : "";
     document.getElementById("recording-detail").textContent =
@@ -128,32 +374,21 @@ function renderRecordingPanel(message = "") {
   if (selectedRecording) {
     const selectedState = `REC ON · ${formatInterval(selectedRecording.interval_s)}`;
     setText("recording-selected-state", selectedState);
+    setText("recording-drawer-selected-state", selectedState);
     state.textContent = "RECORDING";
     state.classList.remove("error");
     state.classList.add("active");
-    startButton.disabled = true;
-    stopButton.disabled = false;
-    interval.disabled = false;
-    if (Number.isFinite(selectedRecording.interval_s)) {
-      const value = String(selectedRecording.interval_s);
-      if (![...interval.options].some((option) => option.value === value)) {
-        const option = document.createElement("option");
-        option.value = value;
-        option.textContent = formatInterval(selectedRecording.interval_s);
-        interval.appendChild(option);
-      }
-      interval.value = value;
-    }
+    setRecordingControlAvailability({ start: false, stop: true, interval: true });
+    setRecordingIntervalValue(selectedRecording.interval_s);
     document.getElementById("recording-detail").textContent = message || `Recording selected Emonio: ${selectedRecording.session_dir}`;
     return;
   }
 
   setText("recording-selected-state", "REC OFF");
+  setText("recording-drawer-selected-state", "STOPPED");
   state.textContent = "STOPPED";
   state.classList.remove("active", "error");
-  startButton.disabled = false;
-  stopButton.disabled = true;
-  interval.disabled = false;
+  setRecordingControlAvailability({ start: true, stop: false, interval: true });
   document.getElementById("recording-detail").textContent = message || `No active recording for selected Emonio ${selectedName}.`;
 }
 
@@ -172,7 +407,6 @@ async function refreshRecordingState(message = "") {
 }
 
 function configureRecordingIntervals(config) {
-  const select = document.getElementById("recording-interval");
   const minimum = Number(config.poll_interval_s);
   const preferred = Number(runtimeConfig?.recording_default_interval_s ?? minimum);
   const activeInterval = recordingState.forDevice(config.id)?.interval_s;
@@ -181,16 +415,19 @@ function configureRecordingIntervals(config) {
     .filter((value) => Number.isFinite(value) && value >= minimum)
     .sort((a, b) => a - b);
 
-  select.replaceChildren();
-  for (const value of values) {
-    const option = document.createElement("option");
-    option.value = String(value);
-    option.textContent = formatInterval(value);
-    select.appendChild(option);
+  for (const id of ["recording-interval", "recording-drawer-interval"]) {
+    const select = document.getElementById(id);
+    if (!select) continue;
+    select.replaceChildren();
+    for (const value of values) {
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = formatInterval(value);
+      select.appendChild(option);
+    }
+    const selected = Number.isFinite(activeInterval) ? activeInterval : preferred >= minimum ? preferred : values[0];
+    select.value = String(selected);
   }
-
-  const selected = Number.isFinite(activeInterval) ? activeInterval : preferred >= minimum ? preferred : values[0];
-  select.value = String(selected);
 }
 
 function applySelectedDeviceConfig() {
@@ -362,9 +599,12 @@ function initializeTargetControls() {
 }
 
 function initializeRecordingControls() {
-  const interval = document.getElementById("recording-interval");
+  ensureRecordingDashboardStructure();
+  const stripInterval = document.getElementById("recording-interval");
+  const drawerInterval = document.getElementById("recording-drawer-interval");
   const note = document.getElementById("session-note");
-  document.getElementById("record-start").addEventListener("click", async () => {
+
+  const startSelected = async (interval) => {
     const deviceId = selectedDevice;
     if (!recordingStatusKnown || !deviceId || recordingState.isActive(deviceId)) return;
     try {
@@ -375,8 +615,9 @@ function initializeRecordingControls() {
     } catch (error) {
       await refreshRecordingState(`Start failed for ${displayDeviceName(deviceId)}: ${error.message}`);
     }
-  });
-  document.getElementById("record-stop").addEventListener("click", async () => {
+  };
+
+  const stopSelected = async () => {
     const deviceId = selectedDevice;
     if (!recordingStatusKnown || !deviceId || !recordingState.isActive(deviceId)) return;
     try {
@@ -386,18 +627,28 @@ function initializeRecordingControls() {
     } catch (error) {
       await refreshRecordingState(`Stop failed for ${displayDeviceName(deviceId)}: ${error.message}`);
     }
-  });
-  interval.addEventListener("change", async () => {
+  };
+
+  const changeSelectedInterval = async (interval) => {
     const deviceId = selectedDevice;
+    const value = Number(interval.value);
+    setRecordingIntervalValue(value);
     if (!recordingStatusKnown || !deviceId || !recordingState.isActive(deviceId)) return;
     try {
-      await changeRecordingInterval(deviceId, Number(interval.value));
+      await changeRecordingInterval(deviceId, value);
       await refreshRecordingState(`Recording interval for ${displayDeviceName(deviceId)}: ${interval.value} s`);
       applySelectedDeviceConfig();
     } catch (error) {
       await refreshRecordingState(`Interval change failed for ${displayDeviceName(deviceId)}: ${error.message}`);
     }
-  });
+  };
+
+  document.getElementById("record-start").addEventListener("click", () => startSelected(stripInterval));
+  document.getElementById("recording-drawer-start").addEventListener("click", () => startSelected(drawerInterval));
+  document.getElementById("record-stop").addEventListener("click", stopSelected);
+  document.getElementById("recording-drawer-stop").addEventListener("click", stopSelected);
+  stripInterval.addEventListener("change", () => changeSelectedInterval(stripInterval));
+  drawerInterval.addEventListener("change", () => changeSelectedInterval(drawerInterval));
 }
 
 async function main() {
