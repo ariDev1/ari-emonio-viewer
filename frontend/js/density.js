@@ -1,10 +1,10 @@
 export const DENSITY_BIN_COUNT = 32;
 
-function validPoint(sample, phaseKey) {
+function validPoint(sample, phaseKey, sampleIndex) {
   const p = sample?.[phaseKey]?.p;
   const q = sample?.[phaseKey]?.q;
   if (!Number.isFinite(p) || !Number.isFinite(q)) return null;
-  return Object.freeze({ p, q });
+  return Object.freeze({ p, q, sampleIndex });
 }
 
 function observedDensityLimit(points) {
@@ -29,7 +29,7 @@ export function occupancyBand(count) {
 export function buildDensityMap(samples, phaseKey) {
   const inputSamples = Array.isArray(samples) ? samples : [];
   const points = inputSamples
-    .map((sample) => validPoint(sample, phaseKey))
+    .map((sample, sampleIndex) => validPoint(sample, phaseKey, sampleIndex))
     .filter((point) => point !== null);
   const observedLimit = observedDensityLimit(points);
   const fallbackRangeUsed = observedLimit === 0;
@@ -44,6 +44,7 @@ export function buildDensityMap(samples, phaseKey) {
       count: 0,
       percentage: 0,
       band: 0,
+      sampleIndices: [],
       pMin: -limit + pIndex * binWidth,
       pMax: -limit + (pIndex + 1) * binWidth,
       qMin: -limit + qIndex * binWidth,
@@ -54,12 +55,15 @@ export function buildDensityMap(samples, phaseKey) {
   for (const point of points) {
     const pIndex = binIndex(point.p, limit);
     const qIndex = binIndex(point.q, limit);
-    bins[qIndex * DENSITY_BIN_COUNT + pIndex].count += 1;
+    const bin = bins[qIndex * DENSITY_BIN_COUNT + pIndex];
+    bin.count += 1;
+    bin.sampleIndices.push(point.sampleIndex);
   }
 
   for (const bin of bins) {
     bin.percentage = points.length > 0 ? (bin.count / points.length) * 100 : 0;
     bin.band = occupancyBand(bin.count);
+    Object.freeze(bin.sampleIndices);
     Object.freeze(bin);
   }
 
