@@ -1,0 +1,93 @@
+.density-view-controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.density-phase-selector {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.density-phase-selector[hidden] {
+  display: none;
+}
+
+.density-phase-label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.density-view-button,
+.density-phase-button {
+  white-space: nowrap;
+}
+
+.history-plot.density-plot-active {
+  cursor: default;
+}
+
+.density-cell {
+  fill: var(--accent);
+  stroke: rgba(237, 243, 248, 0.28);
+  stroke-width: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.density-cell:focus,
+.density-cell:focus-visible {
+  opacity: 1;
+  stroke: var(--text);
+  stroke-width: 1.5;
+  outline: none;
+}
+
+.density-band-1 { opacity: 0.20; }
+.density-band-2 { opacity: 0.30; }
+.density-band-3 { opacity: 0.40; }
+.density-band-4 { opacity: 0.50; }
+.density-band-5 { opacity: 0.62; }
+.density-band-6 { opacity: 0.74; }
+.density-band-7 { opacity: 0.86; }
+.density-band-8 { opacity: 0.98; }
+
+.density-axis {
+  stroke: #53697d;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.density-zero-axis {
+  stroke: #8da1b3;
+}
+
+.density-axis-label,
+.density-scale-label,
+.density-waiting {
+  fill: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.density-scale-label {
+  font-size: 10px;
+}
+
+.density-waiting {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 1150px) {
+  .density-view-controls {
+    flex-wrap: wrap;
+  }
+}
