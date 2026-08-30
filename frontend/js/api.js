@@ -10,6 +10,27 @@ async function requestJson(path, options = {}) {
   return response.json();
 }
 
+async function lifecycleRequest(path) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  let detail = null;
+  try {
+    detail = await response.json();
+  } catch (_error) {
+    detail = null;
+  }
+  if (!response.ok) {
+    const error = new Error(detail?.detail ?? `${response.status} ${response.statusText}`);
+    error.lifecycleResult = detail;
+    error.httpStatus = response.status;
+    throw error;
+  }
+  return detail;
+}
+
 export function getDevices() {
   return requestJson("/api/v1/devices");
 }
@@ -72,6 +93,14 @@ export async function connectDevice(target) {
     throw error;
   }
   return response.json();
+}
+
+export function disconnectDevice(deviceId) {
+  return lifecycleRequest(`/api/v1/devices/${encodeURIComponent(deviceId)}/disconnect`);
+}
+
+export function reconnectDevice(deviceId) {
+  return lifecycleRequest(`/api/v1/devices/${encodeURIComponent(deviceId)}/reconnect`);
 }
 
 export function getRecordingStatus() {

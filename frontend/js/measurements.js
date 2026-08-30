@@ -93,6 +93,9 @@ export function renderMeasurementPayload(payload) {
   document.getElementById("device-ip").textContent = payload.device_ip || "—";
   document.getElementById("transport-state").textContent = payload.transport || "—";
   document.getElementById("device-state").textContent = payload.state || "—";
+  if (typeof payload.acquisition_state === "string" && payload.acquisition_state) {
+    document.getElementById("acquisition-state").textContent = payload.acquisition_state;
+  }
   document.getElementById("quality-state").textContent = payload.quality || "—";
   document.getElementById("sample-age").textContent = Number.isFinite(payload.sample_age_s) ? `${payload.sample_age_s.toFixed(2)} s` : "—";
   document.getElementById("firmware-version").textContent = payload.firmware_version || "—";
@@ -101,6 +104,9 @@ export function renderMeasurementPayload(payload) {
 export function renderBackendStatus(device) {
   if (!device) return;
   document.getElementById("device-state").textContent = device.state || "—";
+  if (typeof device.acquisition_state === "string" && device.acquisition_state) {
+    document.getElementById("acquisition-state").textContent = device.acquisition_state;
+  }
   document.getElementById("quality-state").textContent = device.quality || "NO SAMPLE";
   document.getElementById("sample-age").textContent = Number.isFinite(device.sample_age_s) ? `${device.sample_age_s.toFixed(2)} s` : "—";
 }

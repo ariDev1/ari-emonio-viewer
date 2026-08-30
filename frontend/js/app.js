@@ -1,11 +1,13 @@
 import {
   changeRecordingInterval,
   connectDevice,
+  disconnectDevice,
   getDevice,
   getDevices,
   getDiagnostics,
   getRecordingStatus,
   getRuntimeConfig,
+  reconnectDevice,
   startRecording,
   stopRecording,
 } from "./api.js";
@@ -33,6 +35,7 @@ let socket = null;
 let reconnectTimer = null;
 const recordingState = new RecordingState();
 let recordingStatusKnown = false;
+const backendDeviceState = new Map();
 
 function setText(id, value) {
   const node = document.getElementById(id);
@@ -52,6 +55,75 @@ function setTargetStatus(state, kind = "") {
 
 function selectionResponseIsCurrent(deviceId, generation) {
   return selectedDevice === deviceId && selectionGeneration === generation;
+}
+
+function cacheBackendDeviceState(device) {
+  if (!device?.device_id) return;
+  const previous = backendDeviceState.get(device.device_id) ?? {};
+  backendDeviceState.set(device.device_id, { ...previous, ...device });
+}
+
+function lifecycleStateFor(deviceId) {
+  return backendDeviceState.get(deviceId)?.acquisition_state ?? null;
+}
+
+function renderLifecycleControl(acquisitionState = lifecycleStateFor(selectedDevice)) {
+  const button = document.getElementById("device-lifecycle-action");
+  if (!button) return;
+  const states = {
+    RUNNING: ["DISCONNECT EMONIO", false],
+    DISCONNECTED: ["RECONNECT EMONIO", false],
+    DISCONNECTING: ["DISCONNECTING...", true],
+    CONNECTING: ["CONNECTING...", true],
+    ERROR: ["DISCONNECT ERROR", true],
+  };
+  const [label, disabled] = states[acquisitionState] ?? ["LIFECYCLE UNKNOWN", true];
+  button.textContent = label;
+  button.disabled = disabled;
+}
+
+async function executeSelectedDeviceLifecycle() {
+  const deviceId = selectedDevice;
+  const generation = selectionGeneration;
+  const acquisitionState = lifecycleStateFor(deviceId);
+  if (!deviceId || !["RUNNING", "DISCONNECTED"].includes(acquisitionState)) return false;
+
+  const button = document.getElementById("device-lifecycle-action");
+  if (button) {
+    button.disabled = true;
+    button.textContent = acquisitionState === "RUNNING" ? "DISCONNECTING..." : "CONNECTING...";
+  }
+
+  let lifecycleError = null;
+  try {
+    if (acquisitionState === "RUNNING") await disconnectDevice(deviceId);
+    else await reconnectDevice(deviceId);
+  } catch (error) {
+    lifecycleError = error;
+  }
+
+  await Promise.all([
+    refreshBackendState(),
+    refreshRecordingState(),
+    refreshScopeStatus(deviceId),
+  ]);
+
+  if (!selectionResponseIsCurrent(deviceId, generation)) return false;
+  if (lifecycleError) {
+    const result = lifecycleError.lifecycleResult;
+    const stage = result?.failed_stage ?? "LIFECYCLE";
+    const detail = result?.detail ?? lifecycleError.message;
+    setTargetStatus(`${stage} ERROR: ${detail}`, "error");
+  }
+  applySelectedDeviceConfig();
+  return lifecycleError === null;
+}
+
+function initializeDeviceLifecycleControl() {
+  const button = document.getElementById("device-lifecycle-action");
+  if (!button) return;
+  button.addEventListener("click", executeSelectedDeviceLifecycle);
+  renderLifecycleControl();
 }
 
 function configForSelectedDevice() {
@@ -439,6 +511,7 @@ function applySelectedDeviceConfig() {
   document.getElementById("firmware-version").textContent = config.firmware_version;
   configureRecordingIntervals(config);
   renderRecordingPanel();
+  renderLifecycleControl();
 }
 
 function populateDeviceSelector() {
@@ -448,7 +521,9 @@ function populateDeviceSelector() {
   for (const device of enabledDevices) {
     const option = document.createElement("option");
     option.value = device.id;
-    option.textContent = device.name;
+    option.textContent = lifecycleStateFor(device.id) === "DISCONNECTED"
+      ? `${device.name} · DISCONNECTED`
+      : device.name;
     selector.appendChild(option);
   }
   selector.disabled = enabledDevices.length === 0;
@@ -464,8 +539,11 @@ async function refreshBackendState() {
   try {
     const [devices, diagnostics] = await Promise.all([getDevices(), getDiagnostics(deviceId)]);
     if (!selectionResponseIsCurrent(deviceId, generation)) return false;
+    for (const device of devices) cacheBackendDeviceState(device);
     const selected = devices.find((device) => device.device_id === deviceId);
+    populateDeviceSelector();
     renderBackendStatus(selected);
+    renderLifecycleControl(selected?.acquisition_state);
     renderDiagnostics(diagnostics);
     return true;
   } catch (error) {
@@ -487,6 +565,11 @@ function connectStream() {
     const payload = JSON.parse(event.data);
     appendHistoryPayload(payload);
     if (payload.device_id !== selectedDevice) return;
+    if (typeof payload.acquisition_state === "string" && payload.acquisition_state) {
+      cacheBackendDeviceState(payload);
+      populateDeviceSelector();
+      renderLifecycleControl(payload.acquisition_state);
+    }
     renderMeasurementPayload(payload);
     renderQuadrant(payload.sample);
     renderMeasurementHistory(selectedDevice);
@@ -509,6 +592,9 @@ async function selectDevice(deviceId) {
     const payload = await getDevice(deviceId);
     if (payload.sample) appendHistoryPayload(payload);
     if (!selectionResponseIsCurrent(deviceId, generation)) return false;
+    cacheBackendDeviceState(payload);
+    populateDeviceSelector();
+    renderLifecycleControl(payload.acquisition_state);
     if (payload.sample) {
       renderMeasurementPayload(payload);
       renderQuadrant(payload.sample);
@@ -578,7 +664,14 @@ function initializeTargetControls() {
       const result = await connectDevice(target);
       await reloadRuntimeConfig();
       await selectDevice(result.device_id);
-      setTargetStatus(result.already_connected ? "CONNECTED / EXISTING" : "CONNECTED / VERIFIED", "connected");
+      if (result.state === "EXISTING") {
+      const evidenceState = result.acquisition_state === "DISCONNECTED"
+        ? "DISCONNECTED"
+        : result.measurement_state;
+      setTargetStatus(`EXISTING / ${evidenceState ?? "UNKNOWN"}`, "");
+    } else {
+      setTargetStatus("CONNECTED / VERIFIED", "connected");
+    }
     } catch (error) {
       const targetState = error?.targetState;
       const operatorState = targetState === "TARGET_UNAVAILABLE"
@@ -654,6 +747,7 @@ function initializeRecordingControls() {
 async function main() {
   initializeMeasurementPanels();
   initializeTargetControls();
+  initializeDeviceLifecycleControl();
   initializeRecordingControls();
   initializeUtilityDrawers();
   initializeCtEvidenceControls(() => selectedDevice);

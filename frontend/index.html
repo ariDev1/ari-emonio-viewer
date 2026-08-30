@@ -26,6 +26,7 @@
         <span><span class="status-label">Target</span><strong id="device-ip">—</strong></span>
         <span><span class="status-label">Transport</span><strong id="transport-state">—</strong></span>
         <span><span class="status-label">Device</span><strong id="device-state">STARTING</strong></span>
+        <span><span class="status-label">Acquisition</span><strong id="acquisition-state">—</strong></span>
         <span><span class="status-label">Stream</span><strong id="stream-state">CONNECTING</strong></span>
         <span><span class="status-label">Quality</span><strong id="quality-state">NO SAMPLE</strong></span>
         <span><span class="status-label">Age</span><strong id="sample-age">—</strong></span>
@@ -62,6 +63,7 @@
       <span id="target-status" class="target-status" aria-live="polite">READY</span>
       <label class="active-device-label" for="device-selector">ACTIVE</label>
       <select id="device-selector" aria-label="Select connected Emonio device"></select>
+      <button id="device-lifecycle-action" type="button" disabled>LIFECYCLE UNKNOWN</button>
     </section>
 
     <section class="phase-grid" aria-label="Live phase measurements">
