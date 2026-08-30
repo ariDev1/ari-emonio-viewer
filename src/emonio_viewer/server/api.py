@@ -381,7 +381,7 @@ async def disconnect_device(request):
     try:
         result = await service.disconnect(device_id)
     except DeviceLifecycleCommandError as exc:
-        return web.json_response(exc.result.as_dict(), status=502)
+        return web.json_response(exc.result.as_dict(), status=409 if exc.conflict else 502)
     return web.json_response(result.as_dict())
 
 
@@ -392,7 +392,7 @@ async def reconnect_device(request):
     try:
         result = await service.reconnect(device_id)
     except DeviceLifecycleCommandError as exc:
-        return web.json_response(exc.result.as_dict(), status=502)
+        return web.json_response(exc.result.as_dict(), status=409 if exc.conflict else 502)
     return web.json_response(result.as_dict())
 
 
