@@ -419,15 +419,18 @@ async def connect_device(request):
         )
 
     device = result.device
+    snapshot = _store(request).get_device(device.id)
     return web.json_response(
         {
-            "state": "CONNECTED",
+            "state": "EXISTING" if result.already_connected else "CONNECTED",
             "device_id": device.id,
             "name": device.name,
             "host": device.host,
             "poll_interval_s": device.poll_interval_s,
             "firmware_version": device.firmware_version,
             "already_connected": result.already_connected,
+            "acquisition_state": _acquisition_state(request, device.id),
+            "measurement_state": snapshot.state.value,
         }
     )
 
