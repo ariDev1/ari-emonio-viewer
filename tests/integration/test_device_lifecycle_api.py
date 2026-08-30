@@ -57,7 +57,7 @@ class FakeLifecycleService:
 
 def build_app(tmp_path: Path, real_sample, device_config, lifecycle: FakeLifecycleService):
     frontend = tmp_path / "frontend"
-    frontend.mkdir(parents=True)
+    frontend.mkdir(parents=True, exist_ok=True)
     (frontend / "index.html").write_text("<html></html>", encoding="utf-8")
     store = RuntimeStore()
     store.register_device(device_config)
@@ -79,18 +79,24 @@ def build_app(tmp_path: Path, real_sample, device_config, lifecycle: FakeLifecyc
     return app, bus
 
 
+async def _response_payload(response):
+    if response.content_type == "application/json":
+        return await response.json()
+    return await response.text()
+
+
 async def get_json(app, path: str):
     async with TestServer(app) as server:
         async with TestClient(server) as client:
             response = await client.get(path)
-            return response.status, await response.json()
+            return response.status, await _response_payload(response)
 
 
 async def post_json(app, path: str):
     async with TestServer(app) as server:
         async with TestClient(server) as client:
             response = await client.post(path, json={})
-            return response.status, await response.json()
+            return response.status, await _response_payload(response)
 
 
 def test_lifecycle_disconnect_and_reconnect_routes_are_backend_authoritative(
@@ -111,6 +117,7 @@ def test_lifecycle_disconnect_and_reconnect_routes_are_backend_authoritative(
     assert payload["scope_state"] == "DISCONNECTED"
     assert payload["failed_stage"] is None
 
+    app, _ = build_app(tmp_path, real_sample, device_config, lifecycle)
     status, payload = asyncio.run(
         post_json(app, f"/api/v1/devices/{device_config.id}/reconnect")
     )
@@ -178,12 +185,14 @@ def test_read_routes_add_acquisition_state_without_renaming_measurement_state(
     assert devices[0]["acquisition_state"] == "RUNNING"
     assert devices[0]["state"] == "ONLINE"
 
+    app, _ = build_app(tmp_path, real_sample, device_config, lifecycle)
     status, device = asyncio.run(get_json(app, f"/api/v1/devices/{device_config.id}"))
     assert status == 200
     assert device["acquisition_state"] == "RUNNING"
     assert device["state"] == "ONLINE"
     assert device["sample"]["phase_b"]["p"] == real_sample.phase_b.measurement.p
 
+    app, _ = build_app(tmp_path, real_sample, device_config, lifecycle)
     status, diagnostics = asyncio.run(
         get_json(app, f"/api/v1/diagnostics/{device_config.id}")
     )
