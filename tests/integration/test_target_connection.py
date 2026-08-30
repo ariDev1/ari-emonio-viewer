@@ -109,6 +109,7 @@ def test_http_connect_route_uses_real_connector_and_publishes_sample(tmp_path, f
     assert snapshot.last_sample is not None
     assert snapshot.last_sample.phase_c.measurement.q < 0
 
+
 class AssertingDeviceRegistry:
     def __init__(self, coordinator, recording) -> None:
         self._coordinator = coordinator
@@ -212,3 +213,113 @@ host = "192.0.2.11"
     remembered = fresh_config.devices[1]
     assert remembered.host == fake_emonio.host
     assert remembered.port == fake_emonio.port
+
+
+def test_existing_target_returns_registration_without_new_probe_or_worker(fake_emonio) -> None:
+    store = RuntimeStore()
+    bus = RuntimeEventBus()
+    coordinator = AcquisitionCoordinator((), store, bus)
+    recording = FakeRecordingRegistry()
+    connector = DeviceConnector(
+        coordinator,
+        recording,
+        port=fake_emonio.port,
+        poll_interval_s=0.05,
+        timeout_s=0.1,
+    )
+    coordinator.start()
+    try:
+        first = asyncio.run(connector.connect(fake_emonio.host))
+        worker_before = coordinator._workers[first.device.id]
+        configs_before = coordinator.device_configs()
+
+        second = asyncio.run(connector.connect(fake_emonio.host))
+
+        assert second.already_connected is True
+        assert second.device == first.device
+        assert coordinator._workers[first.device.id] is worker_before
+        assert coordinator.device_configs() == configs_before
+    finally:
+        coordinator.stop()
+
+
+def test_http_existing_target_reports_actual_lifecycle_and_measurement_state(
+    tmp_path,
+    fake_emonio,
+) -> None:
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from emonio_viewer.config.model import RecordingConfig, RuntimeConfig, ViewerConfig
+    from emonio_viewer.lifecycle.model import DeviceLifecycleResult
+    from emonio_viewer.server.app import create_app
+
+    store = RuntimeStore()
+    bus = RuntimeEventBus()
+    coordinator = AcquisitionCoordinator((), store, bus)
+    recording = FakeRecordingRegistry()
+    connector = DeviceConnector(
+        coordinator,
+        recording,
+        port=fake_emonio.port,
+        poll_interval_s=0.05,
+        timeout_s=0.1,
+    )
+
+    class LifecycleEvidence:
+        def status(self, device_id):
+            snapshot = store.get_device(device_id)
+            return DeviceLifecycleResult(
+                device_id=device_id,
+                acquisition_state=coordinator.acquisition_status(device_id).state.value,
+                measurement_state=snapshot.state.value,
+                recording_state="STOPPED",
+                scope_state="DISCONNECTED",
+            )
+
+    frontend = tmp_path / "frontend-existing"
+    frontend.mkdir()
+    (frontend / "index.html").write_text("<html></html>", encoding="utf-8")
+    config = RuntimeConfig(ViewerConfig("none"), RecordingConfig(10.0), ())
+
+    async def exercise():
+        app = create_app(
+            config,
+            store,
+            bus,
+            recording,
+            frontend,
+            connector=connector,
+            lifecycle_service=LifecycleEvidence(),
+        )
+        async with TestServer(app) as server:
+            async with TestClient(server) as client:
+                first = await client.post(
+                    "/api/v1/devices/connect",
+                    json={"target": fake_emonio.host},
+                )
+                assert first.status == 200
+                first_payload = await first.json()
+                second = await client.post(
+                    "/api/v1/devices/connect",
+                    json={"target": fake_emonio.host},
+                )
+                return first_payload, second.status, await second.json()
+
+    coordinator.start()
+    try:
+        first_payload, status, payload = asyncio.run(exercise())
+    finally:
+        coordinator.stop()
+
+    assert first_payload["state"] == "CONNECTED"
+    assert status == 200
+    assert payload["state"] == "EXISTING"
+    assert payload["already_connected"] is True
+    assert payload["acquisition_state"] == "RUNNING"
+    assert payload["measurement_state"] in {
+        "ONLINE",
+        "DEGRADED",
+        "STALE",
+        "OFFLINE",
+        "CONNECTING",
+    }
