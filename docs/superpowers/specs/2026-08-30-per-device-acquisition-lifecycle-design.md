@@ -3,463 +3,473 @@
 Date: 2026-08-30
 Status: DESIGN FOR REVIEW
 Baseline: v0.4.13 (`af25c80e0aa82fedb969035fd5c615102dbe874c`)
-Target development version: v0.4.14 Candidate
+Target: v0.4.14 Candidate
 
 ## 1. Purpose
 
 The viewer must let an operator release one Emonio from one machine without closing the complete viewer.
 
-This is required for a multi-machine workflow.
-
-Field evidence confirmed this behavior:
+Field evidence confirmed the problem:
 
 1. Machine A acquired three Emonios.
 2. Recording and SCOPE were stopped for `emonio-d08a08` on Machine A.
-3. Machine B already knew `emonio-d08a08`, but it did not receive measurement data.
+3. Machine B already knew `emonio-d08a08`, but it received no measurement data.
 4. Machine B showed `CONNECTED / EXISTING`.
-5. Machine A was then closed completely.
+5. Machine A was closed completely.
 6. Machine B received `emonio-d08a08` measurements immediately.
 
-The root cause is that Recording STOP and SCOPE STOP do not stop the canonical Modbus acquisition worker. Machine A keeps the persistent Modbus/TCP acquisition connection until the complete acquisition coordinator stops.
+The source confirms two causes.
 
-A second defect is also confirmed in the source: for an already registered target, the current connect path returns `already_connected=True` without a new live Modbus qualification. Therefore `CONNECTED / EXISTING` does not prove that live measurement data exists.
+First, Recording STOP and SCOPE STOP do not stop the canonical Modbus acquisition worker. Machine A keeps the persistent Modbus/TCP acquisition connection until the acquisition coordinator stops.
 
-## 2. Design principles
+Second, the current target-connect path returns `already_connected=True` for an existing local device without new live Modbus qualification. Therefore `CONNECTED / EXISTING` does not prove that live measurements exist.
 
-The change must preserve the trusted v0.4.13 measurement architecture.
+## 2. Required outcome
 
-The implementation must be:
+The selected Emonio gets an explicit per-device acquisition lifecycle.
 
-- deterministic;
-- per-device;
-- measurable;
-- reversible;
-- read-only at the Emonio protocol level;
-- explicit in the UI;
-- isolated from scientific measurement calculations.
+The operator can:
 
-The implementation must not restart or disturb other Emonios when one Emonio is disconnected or reconnected.
+- disconnect one Emonio;
+- keep that Emonio remembered and visible;
+- let another machine acquire it;
+- reconnect it later without registering it again.
+
+Disconnect must stop active work in this fixed order:
+
+1. Recording.
+2. SCOPE.
+3. Modbus acquisition.
+
+Reconnect must start measurement acquisition only. It must not restart Recording or SCOPE.
 
 ## 3. Protected behavior
 
-The following behavior must not change:
+This change is a lifecycle-control change. It is not a scientific calculation change.
+
+The implementation must not change:
 
 - Modbus read-only function-code restriction;
-- register map and register addresses;
+- register map or register addresses;
 - measurement decoding;
 - canonical A/B/C/TOTAL measurement structure;
-- P/Q sign handling;
+- P/Q signs;
 - quadrant classification;
 - flow classification;
 - validation tolerances;
-- fixed-deadline acquisition scheduling for an active worker;
+- fixed-deadline scheduling of an active worker;
 - exact measurement timestamps;
-- SCOPE waveform acquisition semantics;
+- SCOPE waveform semantics;
 - CSV value precision;
 - recording-point eligibility;
 - recording boundary calculation;
 - recording failure-state integrity;
 - EventBus measurement publication semantics.
 
-The change is a lifecycle-control change. It is not a scientific calculation change.
+No Modbus write operation is permitted.
 
-## 4. Separate acquisition lifecycle from measurement health
+## 4. Two separate state concepts
 
-The viewer must not use one word such as `CONNECTED` for two different facts.
-
-The implementation must keep two separate state concepts.
+The viewer must not use one state word for two different facts.
 
 ### 4.1 Acquisition lifecycle
 
-This state answers: **Is this viewer actively owning and running acquisition for this Emonio?**
+This state answers: **Is this viewer running acquisition ownership for this Emonio?**
 
 Required states:
 
-- `RUNNING` — the per-device acquisition worker is active. The worker can have a live socket or can be retrying after a transport failure.
-- `DISCONNECTING` — a controlled per-device shutdown is in progress.
-- `DISCONNECTED` — the per-device acquisition worker is not running and its Modbus socket is closed.
-- `CONNECTING` — an operator-requested reconnect qualification is in progress.
-- `ERROR` — the requested lifecycle transition failed and the viewer cannot claim the requested final state.
+- `RUNNING` — the per-device acquisition worker is active. Its transport can be connected or retrying.
+- `DISCONNECTING` — controlled shutdown is in progress.
+- `DISCONNECTED` — no per-device worker is running and the Modbus socket is closed.
+- `CONNECTING` — operator-requested reconnect qualification is in progress.
+- `ERROR` — disconnect failed and the viewer cannot prove that acquisition was released.
 
-`RUNNING` does not mean that the Emonio currently produces valid samples. Measurement health must remain separate.
+`ERROR` is not used for a normal reconnect qualification failure. If reconnect qualification fails and the candidate client is closed, the safe final state is `DISCONNECTED` with failure detail. The operator can retry.
 
 ### 4.2 Measurement health
 
-The existing `RuntimeStore` / `DeviceStateMachine` remains the authority for measurement health:
+The existing `RuntimeStore` and `DeviceStateMachine` remain the authority for measurement health, including:
 
-- `CONNECTING`
-- `ONLINE`
-- `DEGRADED`
-- `STALE`
-- `OFFLINE`
-- existing startup/stop states where applicable
+- `CONNECTING`;
+- `ONLINE`;
+- `DEGRADED`;
+- `STALE`;
+- `OFFLINE`.
 
-A device can therefore be:
+A device can therefore be acquisition `RUNNING` while measurement health is `OFFLINE`.
 
-- acquisition `RUNNING` + measurement `ONLINE`;
-- acquisition `RUNNING` + measurement `OFFLINE`;
-- acquisition `DISCONNECTED` + an exact last sample retained for reference.
+A disconnected device can keep its last exact sample for reference. The UI must make clear that this sample is not live.
 
-The implementation must not erase the last exact sample when an operator disconnects a device. The UI must make clear that the sample is not live.
+The per-device disconnect feature must not reset the existing measurement-health state machine.
 
-## 5. Per-device acquisition ownership
+## 5. AcquisitionCoordinator responsibility
 
-`AcquisitionCoordinator` remains the owner of Modbus acquisition workers and Modbus clients.
+`AcquisitionCoordinator` remains the owner of Modbus workers and Modbus clients.
 
-It must gain a real per-device lifecycle.
+It must gain per-device lifecycle control.
 
 The coordinator must be able to:
 
-- query the acquisition lifecycle of one device;
-- stop one worker without stopping other workers;
-- close one worker's Modbus client;
-- verify that one worker thread terminated;
-- keep the device configuration registered after disconnect;
-- create a fresh acquisition worker and client for reconnect;
-- preserve cycle-ID continuity from the last published sample;
-- keep the current global `stop()` behavior for complete viewer shutdown.
+- report lifecycle state for one device;
+- stop one worker only;
+- close one Modbus client only;
+- join one worker thread only;
+- prove that the selected worker is no longer alive;
+- keep the `DeviceConfig` registered after disconnect;
+- create a fresh worker/client for reconnect;
+- preserve cycle-ID continuity;
+- keep the current complete-viewer `stop()` behavior.
 
-The existing single global stop event is not sufficient for this requirement. Each active device needs independent stop control. Global shutdown can still stop all per-device workers.
+The current single global stop event is not sufficient. Each running device needs independent stop control. Global shutdown can still stop all per-device workers.
 
-The coordinator must not remove a disconnected device from its configuration list.
+A disconnected device must remain in `device_configs()`.
 
-## 6. Controlled DISCONNECT sequence
+## 6. Backend lifecycle orchestration
 
-The operator command `DISCONNECT EMONIO` must use one deterministic sequence for the selected device.
+A small backend lifecycle service must coordinate cross-subsystem actions.
 
-The sequence is:
+It depends on:
 
-1. Detect whether Recording is active for the device.
-2. If Recording is active, stop it by using the existing normal Recording stop path.
-3. Confirm that the recording session is closed and its final session metadata was written.
-4. Stop the SCOPE session for the device by using the existing normal SCOPE stop path. SCOPE stop is allowed to be idempotent when no session exists.
-5. Request stop of only that device's acquisition worker.
-6. Close only that device's Modbus/TCP client so that a blocking read can terminate.
-7. Join only that device's acquisition thread.
-8. Confirm that the thread is not alive.
-9. Confirm that the coordinator lifecycle state is `DISCONNECTED`.
-10. Return the final structured state to the UI.
+- `RecordingManager`;
+- `ScopeService`;
+- `AcquisitionCoordinator`.
 
-The device remains remembered and remains visible in the device selector.
+The service must not contain measurement decoding, validation, sign logic, quadrant logic, or recording mathematics.
 
-No other device worker, recording session, SCOPE session, history, or socket may be changed.
+The frontend sends one lifecycle command. The backend is the authority for the sequence.
 
-## 7. Disconnect failure rules
+This prevents browser timing or refresh behavior from changing the shutdown order.
+
+## 7. DISCONNECT EMONIO sequence
+
+For one selected device, the backend must do this:
+
+1. Check whether Recording is active.
+2. If active, call the existing normal Recording stop path.
+3. Confirm that Recording stop returned successfully.
+4. Call the existing normal SCOPE stop path. This call can be idempotent when no SCOPE session exists.
+5. Set acquisition lifecycle to `DISCONNECTING`.
+6. Signal only this device worker to stop.
+7. Close only this device Modbus client so a blocking read can terminate.
+8. Join only this device worker thread.
+9. Verify that the thread is not alive.
+10. Set lifecycle to `DISCONNECTED`.
+11. Return the exact final subsystem states to the UI.
+
+The device stays remembered and stays visible in the selector.
+
+Other Emonios must continue their own acquisition, Recording, and SCOPE operation without lifecycle changes.
+
+## 8. Disconnect failure rules
 
 The sequence is one-way. There is no automatic rollback.
 
+### Recording stop failure
+
 If Recording stop fails:
 
-- SCOPE stop must not start;
-- acquisition disconnect must not start;
-- the device must not be reported as `DISCONNECTED`;
-- the response must identify `RECORDING` as the failed stage.
+- do not stop SCOPE;
+- do not stop acquisition;
+- do not report `DISCONNECTED`;
+- report failed stage `RECORDING`.
 
-If Recording stop succeeds but SCOPE stop fails:
+### SCOPE stop failure
+
+If Recording stopped but SCOPE stop fails:
 
 - Recording remains stopped;
-- acquisition disconnect must not start;
-- the device must not be reported as `DISCONNECTED`;
-- the response must identify `SCOPE` as the failed stage.
+- do not stop acquisition;
+- do not report `DISCONNECTED`;
+- report failed stage `SCOPE`.
 
-If Recording and SCOPE stop successfully but acquisition shutdown fails:
+### Acquisition stop failure
+
+If Recording and SCOPE stopped but acquisition shutdown cannot prove worker termination:
 
 - Recording remains stopped;
 - SCOPE remains stopped;
-- the device must not be reported as `DISCONNECTED`;
-- the response must identify `ACQUISITION` as the failed stage;
-- the acquisition lifecycle must expose `ERROR` plus a diagnostic detail.
+- report failed stage `ACQUISITION`;
+- set acquisition lifecycle to `ERROR`;
+- include exact diagnostic detail;
+- do not allow normal reconnect while the old worker can still be alive.
 
-The software must never report `DISCONNECTED` before the worker is terminated and the Modbus client is closed.
+The software must never report `DISCONNECTED` until the worker is terminated and the Modbus client is closed.
 
-## 8. RECONNECT behavior
+## 9. RECONNECT EMONIO sequence
 
 Reconnect is acquisition-only.
+
+The backend must:
+
+1. Require acquisition lifecycle `DISCONNECTED`.
+2. Set lifecycle to `CONNECTING`.
+3. Create a fresh read-only Modbus client from remembered `DeviceConfig`.
+4. Create a fresh canonical `AcquisitionWorker`.
+5. Use the existing worker read path for one complete qualification sample.
+6. Use the next cycle ID after the last published cycle ID.
+7. If qualification succeeds, publish that exact sample through the existing RuntimeStore/EventBus path.
+8. Start normal fixed-deadline acquisition from the qualified cycle ID.
+9. Set lifecycle to `RUNNING`.
+
+The next continuous sample must use the next cycle ID after the qualification sample.
 
 Reconnect must not:
 
 - restart Recording;
 - restart SCOPE;
-- restore a prior recording interval as an active recording command;
-- restore SCOPE credentials;
-- modify another Emonio.
+- restore an old Recording session;
+- reuse SCOPE credentials;
+- create a synthetic history point;
+- reset cycle IDs;
+- change another Emonio.
 
-The reconnect sequence is:
-
-1. Require acquisition lifecycle `DISCONNECTED`.
-2. Set acquisition lifecycle to `CONNECTING`.
-3. Create a fresh read-only Modbus client and acquisition worker from the remembered `DeviceConfig`.
-4. Use the existing canonical acquisition worker read path to obtain one complete qualification sample.
-5. Use the next cycle ID after the last published cycle ID for this device.
-6. If qualification succeeds, publish that exact sample by the existing store/EventBus path.
-7. Start the normal fixed-deadline worker from the qualified cycle ID so that the next continuous sample uses the next cycle ID.
-8. Set acquisition lifecycle to `RUNNING`.
+### Reconnect qualification failure
 
 If qualification fails:
 
-- close the candidate client;
+- close the candidate Modbus client;
 - do not start a worker thread;
 - do not publish a synthetic sample;
-- do not change Recording or SCOPE;
-- return a connection failure with exact failure detail;
-- leave the device safely reconnectable.
+- do not start Recording or SCOPE;
+- return exact connection-failure detail;
+- return lifecycle to `DISCONNECTED`;
+- keep the device available for another reconnect attempt.
 
-No interpolation, gap filling, sample synthesis, cycle-ID reset, or sign correction is permitted.
+## 10. Existing target behavior
 
-## 9. Existing target behavior
+`CONNECTED / EXISTING` must be removed because it can report a live connection without live evidence.
 
-The current `CONNECTED / EXISTING` result is not scientifically sufficient and must be removed.
-
-When the operator enters a target that already exists locally, the viewer must not claim a successful live connection only because the target is registered.
-
-The response must expose both:
+For an existing local target, the API and UI must expose both:
 
 - acquisition lifecycle;
-- measurement health / live-data state.
+- measurement health.
 
-Examples of valid operator messages are:
+Acceptable operator messages include:
 
-- `EXISTING / ONLINE`
-- `EXISTING / OFFLINE`
-- `EXISTING / DISCONNECTED`
-- `CONNECTING`
-- `CONNECTION FAILED`
+- `EXISTING / ONLINE`;
+- `EXISTING / OFFLINE`;
+- `EXISTING / DISCONNECTED`;
+- `CONNECTING`;
+- `CONNECTION FAILED`.
 
-The exact UI text can be finalized during implementation, but it must not use `CONNECTED` unless the displayed evidence actually supports that statement.
+The implementation must not show `CONNECTED` only because a configuration entry exists.
 
-For an already registered device whose acquisition lifecycle is `RUNNING`, the target-connect action must not create a second worker.
+If an existing device is acquisition `RUNNING`, target-connect must not create a second worker.
 
-For an already registered device whose acquisition lifecycle is `DISCONNECTED`, the operator should be able to reconnect it without registering it again.
+If an existing device is `DISCONNECTED`, the operator must be able to reconnect it without registering it again.
 
-## 10. API design
+## 11. API surface
 
-Add explicit per-device lifecycle commands. The preferred API surface is:
+Preferred new commands:
 
 - `POST /api/v1/devices/{device_id}/disconnect`
 - `POST /api/v1/devices/{device_id}/reconnect`
 
-Read APIs that report devices must add acquisition lifecycle as an additive field. Existing measurement fields must keep their current meaning.
+Device read APIs must add acquisition lifecycle as an additive field. Existing measurement fields keep their current meaning.
 
-Lifecycle command responses must be structured. They must include at least:
+Lifecycle responses must include at least:
 
 - `device_id`;
 - `acquisition_state`;
 - `measurement_state` when available;
 - `recording_state`;
 - `scope_state`;
-- `failed_stage` when a command fails;
-- failure `detail` when a command fails.
+- `failed_stage` when applicable;
+- `detail` when applicable.
 
-HTTP failure responses must not hide partial completion. Example: if Recording stopped but SCOPE stop failed, the response must show that Recording is stopped and that the failed stage is SCOPE.
+A failure response must show partial completion. Example: if Recording stopped and SCOPE stop failed, the response must show Recording stopped and `failed_stage: SCOPE`.
 
-## 11. Orchestration boundary
-
-The acquisition coordinator must own only acquisition worker/client lifecycle.
-
-A small lifecycle orchestration service should coordinate the cross-subsystem disconnect sequence:
-
-- RecordingManager;
-- ScopeService;
-- AcquisitionCoordinator.
-
-This service must not contain measurement decoding or scientific calculations.
-
-The HTTP API should call this service instead of duplicating shutdown sequencing in frontend code.
-
-The frontend must send one disconnect command. The backend is the authority for the shutdown sequence.
-
-This prevents a browser refresh, network delay, or frontend race from changing the required order.
-
-## 12. Recording requirements
+## 12. Recording integrity
 
 The lifecycle service must use the existing `RecordingManager.stop(device_id)` behavior.
 
-It must not implement a second recording-close path.
+It must not create another recording-close implementation.
 
-Existing final metadata generation, writer close, missed-point accounting, and failure behavior remain authoritative.
+Existing writer close, final metadata, missed-point accounting, and failure semantics remain authoritative.
 
-A successful device disconnect with an active recording must therefore produce the same valid final recording artifacts as an explicit operator Recording STOP.
+A disconnect-triggered Recording stop must produce the same valid final artifacts as an explicit Recording STOP.
 
-## 13. SCOPE requirements
+## 13. SCOPE integrity
 
-The lifecycle service must use the existing asynchronous `ScopeService.stop(device_id)` behavior.
+The lifecycle service must use the existing `ScopeService.stop(device_id)` behavior.
 
-It must not implement a second SCOPE transport-close path.
+It must not create another SCOPE cleanup path.
 
-The existing SCOPE task cancellation and client cleanup remain authoritative.
+Existing task cancellation and client cleanup remain authoritative.
 
-After reconnect, SCOPE remains disconnected until the operator explicitly starts it again.
+After reconnect, SCOPE remains stopped until the operator explicitly starts it.
 
 ## 14. Diagnostics and counters
 
-Per-device disconnect/reconnect must not reset existing scientific or diagnostic counters without explicit reason.
+Disconnect/reconnect must not reset existing counters without explicit reason.
 
-In particular:
+Required behavior:
 
-- valid-cycle count must not reset;
-- invalid-cycle count must not reset;
-- latency history must not be replaced by synthetic values;
-- the last exact sample must remain available;
-- reconnect diagnostics must not decrease when a new client object is created.
+- valid-cycle count does not reset;
+- invalid-cycle count does not reset;
+- latency evidence is not replaced by synthetic values;
+- last exact sample remains available;
+- reconnect diagnostics do not decrease when a fresh client object is created.
 
-If an intentional acquisition reconnect is counted as a reconnect, it must increment the existing reconnect diagnostic exactly once. The implementation must test and document this behavior.
+If intentional per-device reacquisition is counted as a reconnect, it must increment the existing reconnect diagnostic exactly once. This behavior must have an explicit test.
 
 ## 15. Frontend behavior
 
-A remembered disconnected Emonio remains visible in the device selector.
+A disconnected remembered Emonio remains visible in the selector.
 
-The selected-device controls must provide an explicit lifecycle action:
+The selected-device lifecycle control must show:
 
-- `DISCONNECT EMONIO` while acquisition is running;
-- `RECONNECT EMONIO` while acquisition is disconnected.
+- `DISCONNECT EMONIO` for acquisition `RUNNING`;
+- `RECONNECT EMONIO` for acquisition `DISCONNECTED`.
 
-During `DISCONNECTING` or `CONNECTING`, lifecycle controls must be disabled to prevent duplicate commands.
+During `DISCONNECTING` and `CONNECTING`, duplicate lifecycle actions are disabled.
 
-The UI must show the acquisition lifecycle separately from measurement health.
+For lifecycle `ERROR`, the UI must show the failure detail and must not offer a normal reconnect if the backend cannot prove that the old worker is terminated.
 
-If a disconnect command stops Recording automatically, the Recording panel must update from the backend result and normal status refresh. It must not fabricate a local stopped state before backend confirmation.
+Acquisition lifecycle and measurement health must be shown as separate facts.
 
-If a disconnect command stops SCOPE automatically, the SCOPE panel must update from backend state in the same way.
+The Recording and SCOPE panels must update from backend-confirmed state after disconnect. The frontend must not invent a local success state before the backend returns success.
 
-The last measurement can remain visible after disconnect, but it must be clearly identified as non-live through lifecycle/health status and sample age.
+The last measurement may remain visible after disconnect, but lifecycle state and sample age must make clear that it is not live.
 
 ## 16. Concurrency rules
 
-Per-device lifecycle commands must be serialized for the same device.
+Lifecycle commands for the same device must be serialized.
 
-The software must prevent these races:
+The implementation must prevent:
 
 - two simultaneous disconnect commands for one device;
 - disconnect and reconnect at the same time for one device;
-- a second worker start while the first worker is still alive;
-- reconnect while a previous disconnect cannot prove thread termination.
+- a second worker while the first worker is alive;
+- reconnect after a failed disconnect when worker termination is not proven.
 
-Commands for different devices must remain independent.
+Commands for different devices remain independent.
 
-Disconnecting `emonio-d08a08` must not block normal acquisition for the other Emonios except for normal short Python scheduling effects.
+Disconnecting `emonio-d08a08` must not stop or restart another device worker.
 
-## 17. Shutdown behavior
+## 17. Complete viewer shutdown
 
-Complete viewer shutdown must remain safe.
+Global shutdown must remain safe.
 
-Global shutdown must still:
+It must still cleanly handle:
 
-- disable new recording commands as currently required;
-- stop/finalize active recordings;
-- stop SCOPE sessions;
-- stop all acquisition workers;
-- close all clients;
-- join all non-daemon service threads according to the existing shutdown contract.
+- active recordings;
+- active SCOPE sessions;
+- all running acquisition workers;
+- all open clients;
+- service threads.
 
-Per-device lifecycle support must not weaken this path.
+A device that is already `DISCONNECTED` must not make global shutdown fail only because it has no active worker thread.
 
-A device that is already `DISCONNECTED` must not cause global shutdown to fail only because no worker thread exists for it.
+Per-device lifecycle support must not weaken the existing shutdown contract.
 
-## 18. Test requirements
+## 18. TDD requirements
 
-Implementation must use TDD.
-
-Minimum new tests:
+Implementation must use test-driven development.
 
 ### Coordinator tests
 
-- disconnect one of three workers and verify the other two stay alive;
-- verify only the selected Modbus client is closed;
-- verify selected worker thread terminates;
-- verify device configuration remains registered;
-- verify reconnect creates a fresh worker/client;
-- verify cycle-ID continuity across disconnect/reconnect;
-- verify no second worker can start for the same device;
-- verify global stop still stops all running workers and tolerates already disconnected devices.
+- disconnect one of three workers and keep the other two alive;
+- close only the selected client;
+- terminate only the selected thread;
+- keep selected `DeviceConfig` registered;
+- reconnect with a fresh worker/client;
+- preserve cycle-ID continuity;
+- prevent duplicate worker start;
+- keep global stop correct with a mix of running and disconnected devices.
 
-### Lifecycle orchestration tests
+### Lifecycle-service tests
 
-- active Recording is stopped before SCOPE;
-- SCOPE is stopped before acquisition;
-- no-active-recording case is valid;
-- no-active-SCOPE case is valid;
-- Recording-stop failure prevents later stages;
-- SCOPE-stop failure prevents acquisition stop;
-- acquisition-stop failure reports partial completion and does not claim `DISCONNECTED`;
+- Recording stops before SCOPE;
+- SCOPE stops before acquisition;
+- no-active-Recording is valid;
+- no-active-SCOPE is valid;
+- Recording failure blocks later steps;
+- SCOPE failure blocks acquisition stop;
+- acquisition failure reports partial completion and does not claim `DISCONNECTED`;
 - reconnect does not restart Recording;
-- reconnect does not restart SCOPE.
+- reconnect does not restart SCOPE;
+- reconnect qualification failure returns safely to `DISCONNECTED`.
 
 ### API tests
 
-- disconnect endpoint returns structured final state;
-- reconnect endpoint returns structured final state;
-- existing target no longer returns a false live-connected claim;
-- device read APIs expose acquisition lifecycle additively;
-- unknown device IDs return the existing appropriate error class.
+- disconnect returns structured final state;
+- reconnect returns structured final state;
+- existing target no longer gives false live-connected status;
+- device reads expose acquisition lifecycle additively;
+- unknown device behavior remains correct.
 
 ### Frontend tests
 
-- disconnected device remains in selector;
-- control label changes between DISCONNECT and RECONNECT;
-- transition states disable duplicate commands;
-- `CONNECTED / EXISTING` wording is removed;
-- offline existing device is not presented as live-connected;
-- Recording and SCOPE panels refresh from backend state after disconnect.
+- disconnected device remains visible;
+- control changes between DISCONNECT and RECONNECT;
+- transition states prevent duplicate commands;
+- `CONNECTED / EXISTING` is removed;
+- existing offline device is not shown as live-connected;
+- Recording and SCOPE views refresh from backend state.
 
-### Regression and acceptance
+### Full regression
 
-The complete existing acceptance suite must pass.
+The complete existing acceptance suite must pass:
 
-Protected scientific-sign tests, read-only gate, compilation, unit, integration, and frontend/browser suites must all pass.
+- unit;
+- integration;
+- frontend/browser;
+- read-only source gate;
+- Python compilation;
+- scientific sign path.
 
-A deterministic candidate ZIP and SHA-256 must be produced after implementation.
+The implementation must also pass deterministic release-package verification and produce a new SHA-256.
 
-## 19. Field acceptance
+## 19. Two-machine field acceptance
 
-Software tests are not sufficient for final trust.
+Final trust requires this real workflow:
 
-Required field acceptance with two machines:
-
-1. Machine A runs acquisition for all three Emonios.
+1. Machine A acquires all three Emonios.
 2. Machine B also knows all three Emonios.
 3. Start Recording and SCOPE for `emonio-d08a08` on Machine A.
 4. Press `DISCONNECT EMONIO` for `emonio-d08a08` on Machine A.
-5. Confirm Recording closes cleanly on Machine A.
-6. Confirm SCOPE stops cleanly on Machine A.
-7. Confirm Machine A shows `emonio-d08a08` as `DISCONNECTED` and keeps it in the selector.
-8. Confirm the other two Emonios on Machine A continue without interruption.
-9. Confirm Machine B begins to receive `emonio-d08a08` measurements without closing Machine A.
-10. Disconnect/release `emonio-d08a08` from Machine B as required by the test setup.
+5. Confirm Recording closes cleanly.
+6. Confirm SCOPE stops cleanly.
+7. Confirm Machine A keeps `emonio-d08a08` visible as `DISCONNECTED`.
+8. Confirm the other two Machine A Emonios continue without interruption.
+9. Confirm Machine B begins receiving `emonio-d08a08` measurements without closing Machine A.
+10. Release `emonio-d08a08` from Machine B for the return test.
 11. Press `RECONNECT EMONIO` on Machine A.
-12. Confirm live canonical measurement resumes.
+12. Confirm canonical measurement resumes.
 13. Confirm Recording remains stopped.
 14. Confirm SCOPE remains stopped.
-15. Confirm no cycle-ID reset or synthetic history point is observed.
+15. Confirm no cycle-ID reset or synthetic history sample appears.
 
-Only after this field test passes can v0.4.14 Candidate be promoted to the trusted baseline.
+Only after this workflow passes can v0.4.14 Candidate become the trusted baseline.
 
 ## 20. Non-goals
 
 This change does not add:
 
-- automatic cross-machine arbitration;
-- network discovery of which computer owns an Emonio;
+- cross-machine automatic arbitration;
+- discovery of which computer owns an Emonio;
 - distributed locks;
 - automatic Recording restart;
 - automatic SCOPE restart;
-- automatic credential reuse;
-- sample interpolation;
+- credential reuse;
 - history synchronization between computers;
-- changes to Emonio firmware;
-- Modbus write operations.
+- interpolation or gap filling;
+- Emonio firmware changes;
+- Modbus writes.
 
-The Emonio itself remains the external authority that determines whether another TCP client can acquire it after the first viewer releases its connection.
+The Emonio remains the external authority that determines when another TCP client can acquire it after the first viewer releases its connection.
 
-## 21. Reversibility
+## 21. Reversibility and Git safety
 
-All implementation work must occur on the feature branch created from trusted v0.4.13.
+All implementation work must stay on `feature/v0.4.14-device-acquisition-lifecycle` until field acceptance.
 
 `main` must remain unchanged until:
 
 - implementation is complete;
-- all automated acceptance passes;
+- automated acceptance passes;
 - deterministic package verification passes;
 - the two-machine field workflow passes;
 - the operator explicitly approves integration.
 
-The trusted v0.4.13 baseline remains available unchanged throughout development.
+Trusted v0.4.13 remains the stable baseline during development.
