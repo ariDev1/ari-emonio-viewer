@@ -10,7 +10,7 @@ from emonio_viewer.runtime.events import DiagnosticEvent, RuntimeEventBus, Sever
 from emonio_viewer.runtime.store import RuntimeStore
 
 from .lifecycle import AcquisitionLifecycleState, AcquisitionStatus, AcquisitionTransitionError
-from .worker import AcquisitionFailure, AcquisitionWorker
+from .worker import AcquisitionCycleError, AcquisitionFailure, AcquisitionWorker
 
 
 class AcquisitionCoordinator:
@@ -253,6 +253,99 @@ class AcquisitionCoordinator:
             )
             self._lifecycle[device_id] = status
             return status
+
+    def reconnect_device(self, device_id: str) -> AcquisitionStatus:
+        with self._lock:
+            try:
+                status = self._lifecycle[device_id]
+                device = self._devices[device_id]
+            except KeyError as exc:
+                raise KeyError(device_id) from exc
+            if self._stop.is_set() or not self._started:
+                raise AcquisitionTransitionError(
+                    AcquisitionStatus(
+                        device_id,
+                        status.state,
+                        "acquisition coordinator is stopping",
+                    )
+                )
+            if status.state is not AcquisitionLifecycleState.DISCONNECTED:
+                raise AcquisitionTransitionError(
+                    AcquisitionStatus(
+                        device_id,
+                        status.state,
+                        "acquisition is not DISCONNECTED",
+                    )
+                )
+            previous_thread = self._threads.get(device_id)
+            if previous_thread is not None and previous_thread.is_alive():
+                raise AcquisitionTransitionError(
+                    AcquisitionStatus(
+                        device_id,
+                        status.state,
+                        "previous acquisition worker is still running",
+                    )
+                )
+            snapshot = self._store.get_device(device_id)
+            last_cycle_id = (
+                0 if snapshot.last_sample is None else snapshot.last_sample.identity.cycle_id
+            )
+            qualification_cycle_id = last_cycle_id + 1
+            connection_offset = self._connection_offsets[device_id]
+            self._lifecycle[device_id] = AcquisitionStatus(
+                device_id,
+                AcquisitionLifecycleState.CONNECTING,
+            )
+
+        worker = self._create_worker(
+            device,
+            starting_cycle_id=qualification_cycle_id,
+        )
+        try:
+            sample = worker.run_cycle(qualification_cycle_id, 0.0)
+        except (AcquisitionCycleError, OSError) as exc:
+            worker.client.close()
+            detail = str(exc) or type(exc).__name__
+            failed = AcquisitionStatus(
+                device_id,
+                AcquisitionLifecycleState.DISCONNECTED,
+                detail,
+            )
+            with self._lock:
+                self._lifecycle[device_id] = failed
+            raise AcquisitionTransitionError(failed) from exc
+
+        connections_opened = connection_offset + worker.client.connections_opened
+        self._store.publish_sample(sample, connections_opened)
+        self._bus.publish(sample)
+        with self._lock:
+            if self._stop.is_set():
+                worker.client.close()
+                failed = AcquisitionStatus(
+                    device_id,
+                    AcquisitionLifecycleState.DISCONNECTED,
+                    "acquisition coordinator started stopping during reconnect",
+                )
+                self._lifecycle[device_id] = failed
+                raise AcquisitionTransitionError(failed)
+            self._workers[device_id] = worker
+        try:
+            self._start_worker(
+                device_id,
+                worker,
+                connection_offset=connection_offset,
+            )
+        except Exception as exc:
+            worker.client.close()
+            failed = AcquisitionStatus(
+                device_id,
+                AcquisitionLifecycleState.ERROR,
+                f"qualified worker could not start: {str(exc) or type(exc).__name__}",
+            )
+            with self._lock:
+                self._lifecycle[device_id] = failed
+            raise AcquisitionTransitionError(failed) from exc
+        return self.acquisition_status(device_id)
 
     def close_clients(self) -> None:
         with self._lock:
