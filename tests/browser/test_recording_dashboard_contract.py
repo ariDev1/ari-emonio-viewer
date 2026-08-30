@@ -1,8 +1,8 @@
 from pathlib import Path
 
 
-def test_recording_drawer_has_multi_session_dashboard_and_selected_device_controls() -> None:
-    html = Path("frontend/index.html").read_text(encoding="utf-8")
+def test_recording_drawer_builds_multi_session_dashboard_and_selected_device_controls() -> None:
+    source = Path("frontend/js/app.js").read_text(encoding="utf-8")
 
     for element_id in (
         "recording-dashboard-active",
@@ -16,7 +16,7 @@ def test_recording_drawer_has_multi_session_dashboard_and_selected_device_contro
         "recording-drawer-start",
         "recording-drawer-stop",
     ):
-        assert f'id="{element_id}"' in html
+        assert element_id in source
 
 
 def test_recording_dashboard_exposes_per_session_stop_control_without_inline_handlers() -> None:
