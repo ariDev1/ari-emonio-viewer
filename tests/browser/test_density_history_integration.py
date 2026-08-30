@@ -5,9 +5,11 @@ def _history_source() -> str:
     return Path('frontend/js/history.js').read_text(encoding='utf-8')
 
 
-def test_history_imports_density_view_without_new_backend_or_transport_path() -> None:
+def test_history_lazy_loads_density_view_without_new_backend_or_transport_path() -> None:
     source = _history_source()
-    assert 'from "./density-view.js"' in source
+    assert 'from "./density-view.js"' not in source
+    assert 'import("./density-view.js")' in source
+    assert 'let densityViewApi = null;' in source
     for name in ['initializeDensityView', 'isDensityViewActive', 'renderDensityView', 'setDensityViewActive']:
         assert name in source
 
@@ -47,3 +49,23 @@ def test_time_axis_click_and_arrow_inspection_fail_closed_while_density_is_activ
 def test_exact_sample_inspector_does_not_invite_time_clicks_in_density_mode() -> None:
     source = _history_source()
     assert 'DENSITY VIEW ACTIVE · SELECT TIME HISTORY FOR EXACT SAMPLE INSPECTION' in source
+
+
+def test_history_module_remains_data_url_importable_for_existing_math_tests() -> None:
+    import base64
+    import subprocess
+
+    source = Path('frontend/js/history.js').read_text(encoding='utf-8')
+    encoded = base64.b64encode(source.encode('utf-8')).decode('ascii')
+    program = f"""
+const moduleUrl = 'data:text/javascript;base64,{encoded}';
+const mod = await import(moduleUrl);
+console.log(JSON.stringify([mod.HISTORY_WINDOW_MS, mod.HISTORY_PHASES.map(x => x.key)]));
+"""
+    completed = subprocess.run(
+        ['node', '--input-type=module', '-e', program],
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == '[600000,["phase_a","phase_b","phase_c","total"]]'
