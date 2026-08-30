@@ -19,6 +19,7 @@ from emonio_viewer.config.model import RuntimeConfig
 from emonio_viewer.device_evidence.modbus import ModbusDeviceEvidenceReader
 from emonio_viewer.device_evidence.service import CtConfigurationService, ModbusDeviceEvidenceService
 from emonio_viewer.device_evidence.telnet import TelnetCtConfigurationReader
+from emonio_viewer.lifecycle.service import DeviceLifecycleService
 from emonio_viewer.recording.recorder import RecordingManager
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
@@ -164,6 +165,12 @@ async def run_viewer(config_path: Path) -> None:
         coordinator=coordinator,
     )
     scope_service = ScopeService()
+    lifecycle_service = DeviceLifecycleService(
+        coordinator,
+        recording,
+        scope_service,
+        store,
+    )
     recording.start_background()
 
     frontend_dir = PROJECT_ROOT / "frontend"
@@ -189,6 +196,7 @@ async def run_viewer(config_path: Path) -> None:
             ct_configuration=ct_configuration,
             modbus_evidence=modbus_evidence,
             scope_service=scope_service,
+            lifecycle_service=lifecycle_service,
         )
         runner = web.AppRunner(app)
         await runner.setup()

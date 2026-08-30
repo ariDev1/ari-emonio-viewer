@@ -11,9 +11,10 @@ from emonio_viewer.runtime.store import RuntimeStore
 from .api import register_api_routes
 from .keys import (
     CT_CONFIGURATION_SERVICE_KEY,
-    MODBUS_DEVICE_EVIDENCE_SERVICE_KEY,
     DEVICE_CONNECTOR_KEY,
+    DEVICE_LIFECYCLE_SERVICE_KEY,
     EVENT_BUS_KEY,
+    MODBUS_DEVICE_EVIDENCE_SERVICE_KEY,
     RECORDING_MANAGER_KEY,
     RUNTIME_CONFIG_KEY,
     RUNTIME_STORE_KEY,
@@ -33,6 +34,7 @@ def create_app(
     ct_configuration=None,
     modbus_evidence=None,
     scope_service=None,
+    lifecycle_service=None,
 ) -> web.Application:
     app = web.Application(client_max_size=64 * 1024)
     app[RUNTIME_CONFIG_KEY] = config
@@ -47,6 +49,8 @@ def create_app(
         app[MODBUS_DEVICE_EVIDENCE_SERVICE_KEY] = modbus_evidence
     if scope_service is not None:
         app[SCOPE_SERVICE_KEY] = scope_service
+    if lifecycle_service is not None:
+        app[DEVICE_LIFECYCLE_SERVICE_KEY] = lifecycle_service
 
     static_prefix = f"/static/{__version__}/"
 

@@ -3,16 +3,18 @@ from aiohttp import web
 
 from emonio_viewer.acquisition.connector import TargetConnectionError
 from emonio_viewer.acquisition.target import TargetInputError
+from emonio_viewer.device_evidence.telnet import CtConfigurationReadError
+from emonio_viewer.lifecycle.model import DeviceLifecycleCommandError
 from emonio_viewer.measurement.model import MeasurementSample
 from emonio_viewer.modbus.register_map import REGISTER_MAP_ID
-from emonio_viewer.device_evidence.telnet import CtConfigurationReadError
 from emonio_viewer.scope.service import ScopeServiceError, ScopeSessionConflict
 
 from .keys import (
     CT_CONFIGURATION_SERVICE_KEY,
-    MODBUS_DEVICE_EVIDENCE_SERVICE_KEY,
     DEVICE_CONNECTOR_KEY,
+    DEVICE_LIFECYCLE_SERVICE_KEY,
     EVENT_BUS_KEY,
+    MODBUS_DEVICE_EVIDENCE_SERVICE_KEY,
     RECORDING_MANAGER_KEY,
     RUNTIME_CONFIG_KEY,
     RUNTIME_STORE_KEY,
@@ -37,7 +39,12 @@ def block_to_json(block) -> dict:
     }
 
 
-def sample_to_json(sample: MeasurementSample, snapshot) -> dict:
+def sample_to_json(
+    sample: MeasurementSample,
+    snapshot,
+    *,
+    acquisition_state: str | None = None,
+) -> dict:
     return {
         "schema_version": sample.identity.schema_version,
         "event": "measurement",
@@ -47,6 +54,7 @@ def sample_to_json(sample: MeasurementSample, snapshot) -> dict:
         "firmware_version": sample.identity.firmware_version,
         "transport": sample.identity.transport,
         "state": snapshot.state.value,
+        "acquisition_state": acquisition_state,
         "sample_age_s": snapshot.sample_age_s,
         "quality": sample.quality.value,
         "warnings": list(sample.warnings),
@@ -81,6 +89,8 @@ def register_api_routes(app: web.Application) -> None:
     app.router.add_get("/api/v1/devices/{device_id}/modbus-evidence", get_modbus_evidence)
     app.router.add_post("/api/v1/devices/{device_id}/modbus-evidence/read", read_modbus_evidence)
     app.router.add_post("/api/v1/devices/{device_id}/ct-config/read", read_ct_configuration)
+    app.router.add_post("/api/v1/devices/{device_id}/disconnect", disconnect_device)
+    app.router.add_post("/api/v1/devices/{device_id}/reconnect", reconnect_device)
     app.router.add_post("/api/v1/devices/connect", connect_device)
     app.router.add_get("/api/v1/recording/status", get_recording_status)
     app.router.add_post("/api/v1/recording/start", start_recording)
@@ -105,6 +115,20 @@ def _connector(request):
     return request.app.get(DEVICE_CONNECTOR_KEY)
 
 
+def _lifecycle_service(request):
+    service = request.app.get(DEVICE_LIFECYCLE_SERVICE_KEY)
+    if service is None:
+        raise web.HTTPServiceUnavailable(text="device lifecycle service is unavailable")
+    return service
+
+
+def _acquisition_state(request, device_id: str) -> str | None:
+    service = request.app.get(DEVICE_LIFECYCLE_SERVICE_KEY)
+    if service is None:
+        return None
+    return service.status(device_id).acquisition_state
+
+
 def _ct_configuration(request):
     service = request.app.get(CT_CONFIGURATION_SERVICE_KEY)
     if service is None:
@@ -117,7 +141,6 @@ def _modbus_evidence(request):
     if service is None:
         raise web.HTTPServiceUnavailable(text="Modbus device evidence service is unavailable")
     return service
-
 
 
 def _scope_service(request):
@@ -165,6 +188,7 @@ async def get_devices(request):
             {
                 "device_id": snapshot.device_id,
                 "state": snapshot.state.value,
+                "acquisition_state": _acquisition_state(request, snapshot.device_id),
                 "sample_age_s": snapshot.sample_age_s,
                 "transport": None if sample is None else sample.identity.transport,
                 "quality": None if sample is None else sample.quality.value,
@@ -178,15 +202,23 @@ async def get_device(request):
         snapshot = _store(request).get_device(request.match_info["device_id"])
     except KeyError as exc:
         raise web.HTTPNotFound() from exc
+    acquisition_state = _acquisition_state(request, snapshot.device_id)
     if snapshot.last_sample is None:
         return web.json_response(
             {
                 "device_id": snapshot.device_id,
                 "state": snapshot.state.value,
+                "acquisition_state": acquisition_state,
                 "sample": None,
             }
         )
-    return web.json_response(sample_to_json(snapshot.last_sample, snapshot))
+    return web.json_response(
+        sample_to_json(
+            snapshot.last_sample,
+            snapshot,
+            acquisition_state=acquisition_state,
+        )
+    )
 
 
 async def get_diagnostics(request):
@@ -201,6 +233,7 @@ async def get_diagnostics(request):
         {
             "device_id": snapshot.device_id,
             "state": snapshot.state.value,
+            "acquisition_state": _acquisition_state(request, snapshot.device_id),
             "sample_age_s": snapshot.sample_age_s,
             "firmware_version": device.firmware_version,
             "register_map_id": REGISTER_MAP_ID,
@@ -339,6 +372,28 @@ async def read_ct_configuration(request):
     return web.json_response(
         {"device_id": device_id, "status": "OBSERVED", "evidence": evidence.as_dict()}
     )
+
+
+async def disconnect_device(request):
+    device_id = request.match_info["device_id"]
+    _device_config(request, device_id)
+    service = _lifecycle_service(request)
+    try:
+        result = await service.disconnect(device_id)
+    except DeviceLifecycleCommandError as exc:
+        return web.json_response(exc.result.as_dict(), status=502)
+    return web.json_response(result.as_dict())
+
+
+async def reconnect_device(request):
+    device_id = request.match_info["device_id"]
+    _device_config(request, device_id)
+    service = _lifecycle_service(request)
+    try:
+        result = await service.reconnect(device_id)
+    except DeviceLifecycleCommandError as exc:
+        return web.json_response(exc.result.as_dict(), status=502)
+    return web.json_response(result.as_dict())
 
 
 async def connect_device(request):
