@@ -2,7 +2,24 @@ from __future__ import annotations
 
 import asyncio
 
+from emonio_viewer.acquisition.lifecycle import AcquisitionTransitionError
+
 from .model import DeviceLifecycleCommandError, DeviceLifecycleResult, LifecycleFailureStage
+
+
+_TRANSITION_CONFLICT_DETAILS = frozenset(
+    {
+        "acquisition is not RUNNING",
+        "acquisition is not DISCONNECTED",
+    }
+)
+
+
+def _is_transition_conflict(error: Exception) -> bool:
+    return (
+        isinstance(error, AcquisitionTransitionError)
+        and error.status.detail in _TRANSITION_CONFLICT_DETAILS
+    )
 
 
 class DeviceLifecycleService:
@@ -86,7 +103,10 @@ class DeviceLifecycleService:
                     failed_stage=LifecycleFailureStage.ACQUISITION,
                     detail=str(exc) or type(exc).__name__,
                 )
-                raise DeviceLifecycleCommandError(result) from exc
+                raise DeviceLifecycleCommandError(
+                    result,
+                    conflict=_is_transition_conflict(exc),
+                ) from exc
 
             return self.status(device_id)
 
@@ -100,5 +120,8 @@ class DeviceLifecycleService:
                     failed_stage=LifecycleFailureStage.ACQUISITION,
                     detail=str(exc) or type(exc).__name__,
                 )
-                raise DeviceLifecycleCommandError(result) from exc
+                raise DeviceLifecycleCommandError(
+                    result,
+                    conflict=_is_transition_conflict(exc),
+                ) from exc
             return self.status(device_id)
