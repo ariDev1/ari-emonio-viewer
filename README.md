@@ -3,6 +3,7 @@
 Local Linux measurement viewer for Emonio P3 devices.
 
 The trusted field baseline is **v0.4.12**.
+**v0.4.13 Candidate** adds a multi-session recording dashboard with live per-session progress, explicit recording errors, and per-session stop controls.
 Tested device firmware: `3.0.79-release`.
 
 ![ARI Emonio Viewer](ari-emonio-viewer_v047.png)
