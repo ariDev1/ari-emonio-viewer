@@ -14,6 +14,14 @@ def _run_app_module(expression: str, *, api_mode: str) -> object:
     source = source.replace("async function selectDevice(deviceId)", "export async function selectDevice(deviceId)")
     source = source.replace("async function refreshBackendState()", "export async function refreshBackendState()")
     source = source.replace(
+        "async function executeSelectedDeviceLifecycle()",
+        "export async function executeSelectedDeviceLifecycle()",
+    )
+    source = source.replace(
+        "function cacheBackendDeviceState(device)",
+        "export function cacheBackendDeviceState(device)",
+    )
+    source = source.replace(
         "let selectedDevice = null;",
         "let selectedDevice = null;\nexport function __setSelectedDeviceForTest(value) { selectedDevice = value; }",
     )
@@ -33,6 +41,8 @@ const __noop = () => {};
 const __asyncTrue = async () => true;
 const changeRecordingInterval = __asyncTrue;
 const connectDevice = __asyncTrue;
+let disconnectDevice = __asyncTrue;
+let reconnectDevice = __asyncTrue;
 const getRecordingStatus = async () => ({active:[]});
 const getRuntimeConfig = async () => ({devices:[]});
 const startRecording = __asyncTrue;
@@ -43,6 +53,7 @@ const initializeModbusEvidenceControls = __noop;
 const refreshModbusEvidence = __asyncTrue;
 const initializeMeasurementPanels = __noop;
 const initializeHistoryInspection = __noop;
+const initializeHistoryInspectorCopy = __noop;
 const initializeHistoryMetricSelector = __noop;
 const initializeHistoryWindowSelector = __noop;
 const initializeUtilityDrawers = __noop;
@@ -96,6 +107,21 @@ globalThis.__diagnosticRequests = [];
 const getDevice = async (deviceId) => ({device_id:deviceId, sample:null});
 const getDevices = () => new Promise((resolve) => { globalThis.__deviceListRequests.push(resolve); });
 const getDiagnostics = (deviceId) => new Promise((resolve) => { globalThis.__diagnosticRequests.push({deviceId, resolve}); });
+'''
+    elif api_mode == "lifecycle":
+        api_stubs = r'''
+globalThis.__lifecycleResolvers = {};
+disconnectDevice = (deviceId) => new Promise((resolve) => { globalThis.__lifecycleResolvers[deviceId] = resolve; });
+reconnectDevice = (deviceId) => new Promise((resolve) => { globalThis.__lifecycleResolvers[deviceId] = resolve; });
+const getDevice = async (deviceId) => ({
+  device_id:deviceId,
+  device_name:deviceId,
+  acquisition_state:"RUNNING",
+  state:"ONLINE",
+  sample:{device:deviceId},
+});
+const getDevices = async () => [{device_id:"B", acquisition_state:"RUNNING", state:"ONLINE"}];
+const getDiagnostics = async (deviceId) => ({device_id:deviceId});
 '''
     else:
         raise ValueError(api_mode)
@@ -163,3 +189,42 @@ def test_delayed_backend_diagnostics_response_cannot_cross_device_selection_gene
     )
     assert result["backends"] == ["B"]
     assert result["diagnostics"] == ["B"]
+
+
+def test_delayed_lifecycle_response_cannot_overwrite_new_selected_device() -> None:
+    result = _run_app_module(
+        r'''(async () => {
+          mod.cacheBackendDeviceState({device_id:"A", acquisition_state:"RUNNING"});
+          mod.cacheBackendDeviceState({device_id:"B", acquisition_state:"RUNNING"});
+          mod.__setSelectedDeviceForTest("A");
+
+          const lifecycle = mod.executeSelectedDeviceLifecycle();
+          await Promise.resolve();
+
+          const selection = mod.selectDevice("B");
+          await selection;
+          const before = {
+            label: document.getElementById("device-lifecycle-action").textContent,
+            disabled: document.getElementById("device-lifecycle-action").disabled,
+          };
+
+          globalThis.__lifecycleResolvers.A({device_id:"A", acquisition_state:"DISCONNECTED"});
+          const lifecycleCurrent = await lifecycle;
+          const after = {
+            label: document.getElementById("device-lifecycle-action").textContent,
+            disabled: document.getElementById("device-lifecycle-action").disabled,
+          };
+          return {
+            before,
+            after,
+            lifecycleCurrent,
+            renders: globalThis.__measurementRenders,
+          };
+        })()''',
+        api_mode="lifecycle",
+    )
+
+    assert result["before"] == {"label": "DISCONNECT EMONIO", "disabled": False}
+    assert result["after"] == result["before"]
+    assert result["lifecycleCurrent"] is False
+    assert result["renders"] == ["B"]
