@@ -32,11 +32,14 @@ def test_metric_selection_explicitly_returns_to_time_history() -> None:
     assert 'setDensityViewActive(false);' in metric_handler
 
 
-def test_density_control_callback_clears_time_sample_selection_and_rerenders() -> None:
+def test_density_control_callback_preserves_time_sample_selection_and_accepts_density_bin_selection() -> None:
     source = _history_source()
     metric_handler = source[source.index('export function initializeHistoryMetricSelector'):source.index('export function initializeHistoryWindowSelector')]
     assert 'initializeDensityView' in metric_handler
-    assert 'selectedByDevice.delete(deviceId)' in metric_handler
+    assert 'selectedByDevice.delete(deviceId)' not in metric_handler
+    assert 'selectedSampleIdentity' in metric_handler
+    assert 'densityBinCount' in metric_handler
+    assert 'source: "density_bin"' in metric_handler
     assert 'renderMeasurementHistory(deviceId)' in metric_handler
 
 
@@ -69,3 +72,8 @@ console.log(JSON.stringify([mod.HISTORY_WINDOW_MS, mod.HISTORY_PHASES.map(x => x
     )
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == '[600000,["phase_a","phase_b","phase_c","total"]]'
+
+
+def test_density_bin_inspector_state_reports_latest_exact_sample_and_bin_count() -> None:
+    source = _history_source()
+    assert 'DENSITY BIN · ${selectionIdentity.densityBinCount} SAMPLES · SHOWING LATEST EXACT SAMPLE' in source
