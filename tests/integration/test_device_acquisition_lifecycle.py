@@ -7,7 +7,11 @@ import time
 import pytest
 
 from emonio_viewer.acquisition.coordinator import AcquisitionCoordinator
-from emonio_viewer.acquisition.lifecycle import AcquisitionLifecycleState
+from emonio_viewer.acquisition.lifecycle import (
+    AcquisitionLifecycleState,
+    AcquisitionStatus,
+    AcquisitionTransitionError,
+)
 from emonio_viewer.config.model import DeviceConfig
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
@@ -183,3 +187,121 @@ def test_disconnect_interrupts_only_selected_blocked_receive(fake_emonio) -> Non
         coordinator.stop()
         coordinator.close_clients()
         hanging.stop()
+
+
+def test_reconnect_uses_next_cycle_id_fresh_worker_and_one_reconnect_metric(
+    fake_emonio,
+    device_config,
+) -> None:
+    store = RuntimeStore()
+    coordinator = AcquisitionCoordinator((device_config,), store, RuntimeEventBus())
+    coordinator.start()
+    try:
+        wait_until(lambda: store.get_device(device_config.id).cycles_valid >= 2)
+        before = store.get_device(device_config.id)
+        assert before.last_sample is not None
+        old_worker = coordinator._workers[device_config.id]
+        before_cycle = before.last_sample.identity.cycle_id
+        before_reconnects = before.metrics.reconnects
+
+        coordinator.disconnect_device(device_config.id)
+        status = coordinator.reconnect_device(device_config.id)
+
+        assert status.state is AcquisitionLifecycleState.RUNNING
+        assert coordinator._workers[device_config.id] is not old_worker
+        qualified = store.get_device(device_config.id)
+        assert qualified.last_sample is not None
+        assert qualified.last_sample.identity.cycle_id == before_cycle + 1
+        assert qualified.metrics.reconnects == before_reconnects + 1
+        wait_until(
+            lambda: (
+                store.get_device(device_config.id).last_sample is not None
+                and store.get_device(device_config.id).last_sample.identity.cycle_id
+                >= before_cycle + 2
+            )
+        )
+    finally:
+        coordinator.stop()
+        coordinator.close_clients()
+
+
+def test_failed_reconnect_keeps_last_exact_sample_and_closes_candidate(
+    fake_emonio,
+    device_config,
+    monkeypatch,
+) -> None:
+    store = RuntimeStore()
+    coordinator = AcquisitionCoordinator((device_config,), store, RuntimeEventBus())
+    coordinator.start()
+    try:
+        wait_until(lambda: store.get_device(device_config.id).cycles_valid >= 1)
+        coordinator.disconnect_device(device_config.id)
+        before = store.get_device(device_config.id)
+        assert before.last_sample is not None
+        old_worker = coordinator._workers[device_config.id]
+        old_thread = coordinator._threads[device_config.id]
+        captured_workers = []
+        original_create_worker = coordinator._create_worker
+
+        def capture_worker(*args, **kwargs):
+            worker = original_create_worker(*args, **kwargs)
+            captured_workers.append(worker)
+            return worker
+
+        monkeypatch.setattr(coordinator, "_create_worker", capture_worker)
+        fake_emonio.fail_all_reads("exception")
+
+        with pytest.raises(AcquisitionTransitionError):
+            coordinator.reconnect_device(device_config.id)
+
+        after = store.get_device(device_config.id)
+        assert coordinator.acquisition_status(device_config.id).state is AcquisitionLifecycleState.DISCONNECTED
+        assert coordinator._workers[device_config.id] is old_worker
+        assert coordinator._threads[device_config.id] is old_thread
+        assert old_thread.is_alive() is False
+        assert len(captured_workers) == 1
+        assert captured_workers[0].client.is_connected is False
+        assert after.last_sample is before.last_sample
+        assert after.cycles_valid == before.cycles_valid
+        assert after.cycles_invalid == before.cycles_invalid
+    finally:
+        coordinator.stop()
+        coordinator.close_clients()
+
+
+def test_reconnect_rejects_running_connecting_live_previous_thread_and_global_stop(
+    fake_emonio,
+    device_config,
+) -> None:
+    store = RuntimeStore()
+    coordinator = AcquisitionCoordinator((device_config,), store, RuntimeEventBus())
+    coordinator.start()
+    wait_until(lambda: store.get_device(device_config.id).cycles_valid >= 1)
+    original_worker = coordinator._workers[device_config.id]
+
+    with pytest.raises(AcquisitionTransitionError):
+        coordinator.reconnect_device(device_config.id)
+    assert coordinator._workers[device_config.id] is original_worker
+
+    coordinator._lifecycle[device_config.id] = AcquisitionStatus(
+        device_config.id,
+        AcquisitionLifecycleState.CONNECTING,
+    )
+    with pytest.raises(AcquisitionTransitionError):
+        coordinator.reconnect_device(device_config.id)
+    assert coordinator._workers[device_config.id] is original_worker
+
+    coordinator._lifecycle[device_config.id] = AcquisitionStatus(
+        device_config.id,
+        AcquisitionLifecycleState.DISCONNECTED,
+    )
+    assert coordinator._threads[device_config.id].is_alive() is True
+    with pytest.raises(AcquisitionTransitionError):
+        coordinator.reconnect_device(device_config.id)
+    assert coordinator._workers[device_config.id] is original_worker
+
+    coordinator.stop()
+    assert coordinator.acquisition_status(device_config.id).state is AcquisitionLifecycleState.DISCONNECTED
+    with pytest.raises(AcquisitionTransitionError):
+        coordinator.reconnect_device(device_config.id)
+    assert coordinator._workers[device_config.id] is original_worker
