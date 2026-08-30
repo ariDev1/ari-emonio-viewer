@@ -1,3 +1,10 @@
+import {
+  initializeDensityView,
+  isDensityViewActive,
+  renderDensityView,
+  setDensityViewActive,
+} from "./density-view.js";
+
 export const HISTORY_WINDOW_MS = 10 * 60 * 1000;
 export const HISTORY_DISPLAY_WINDOWS = Object.freeze([
   Object.freeze({ ms: 30 * 1000, label: "30 s" }),
@@ -493,9 +500,11 @@ function renderInspector(deviceId, samples, selectedSample) {
     "history-inspector-state",
     selectedSample
       ? "SELECTED MEASURED SAMPLE"
-      : samples.length
-        ? "NO SAMPLE SELECTED · CLICK THE ACTIVE HISTORY PLOT"
-        : "WAITING FOR CANONICAL SAMPLES"
+      : isDensityViewActive()
+        ? "DENSITY VIEW ACTIVE · SELECT TIME HISTORY FOR EXACT SAMPLE INSPECTION"
+        : samples.length
+          ? "NO SAMPLE SELECTED · CLICK THE ACTIVE HISTORY PLOT"
+          : "WAITING FOR CANONICAL SAMPLES"
   );
 
   const copyButton = document.getElementById("history-inspector-copy");
@@ -524,6 +533,7 @@ function renderChart(config, samples, selectedSample, windowMs) {
   const svg = document.getElementById(config.svgId);
   if (!svg) return;
   svg.replaceChildren();
+  svg.classList.remove("density-plot-active");
   svg.setAttribute("viewBox", `0 0 ${VIEWBOX.width} ${VIEWBOX.height}`);
 
   if (samples.length === 0) {
@@ -579,7 +589,8 @@ export function renderMeasurementHistory(deviceId) {
   updateActiveHistoryHeading();
   updateHistorySelectorState();
   updateHistoryWindowSelectorState();
-  renderChart(config, visibleSamples, selectedSample, activeHistoryWindowMs);
+  if (isDensityViewActive()) renderDensityView(visibleSamples);
+  else renderChart(config, visibleSamples, selectedSample, activeHistoryWindowMs);
   renderInspector(deviceId, storedSamples, selectedSample);
   const count = document.getElementById("history-sample-count");
   if (count) count.textContent = `${visibleSamples.length} / ${storedSamples.length}`;
@@ -595,10 +606,17 @@ export function initializeHistoryMetricSelector(getActiveDeviceId) {
     button.addEventListener("click", () => {
       const field = button.dataset.historySelectField;
       if (!setActiveHistoryField(field)) return;
+      setDensityViewActive(false);
       const deviceId = getActiveDeviceId?.();
       if (deviceId) renderMeasurementHistory(deviceId);
     });
   }
+  initializeDensityView(({ active }) => {
+    const deviceId = getActiveDeviceId?.();
+    if (!deviceId) return;
+    if (active) selectedByDevice.delete(deviceId);
+    renderMeasurementHistory(deviceId);
+  });
   updateHistorySelectorState();
   updateActiveHistoryHeading();
 }
@@ -645,6 +663,7 @@ export function initializeHistoryInspection(getActiveDeviceId) {
   if (!svg || svg.dataset.historyInspectionBound === "true") return;
   svg.dataset.historyInspectionBound = "true";
   svg.addEventListener("click", (event) => {
+    if (isDensityViewActive()) return;
     const deviceId = getActiveDeviceId?.();
     const samples = visibleHistorySamples(browserHistory.get(deviceId), activeHistoryWindowMs);
     if (!deviceId || samples.length === 0) return;
@@ -667,6 +686,7 @@ export function initializeHistoryInspection(getActiveDeviceId) {
     svg.focus({ preventScroll: true });
   });
   svg.addEventListener("keydown", (event) => {
+    if (isDensityViewActive()) return;
     const direction = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
     if (direction === 0) return;
     const deviceId = getActiveDeviceId?.();
