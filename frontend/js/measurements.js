@@ -142,7 +142,6 @@ export function renderMeasurementPayload(payload) {
   renderPowerDirectionIndicators(payload.sample);
 
   document.getElementById("device-name").textContent = payload.device_name || payload.device_id;
-  document.getElementById("device-ip").textContent = payload.device_ip || "—";
   document.getElementById("transport-state").textContent = payload.transport || "—";
   document.getElementById("device-state").textContent = payload.state || "—";
   if (typeof payload.acquisition_state === "string" && payload.acquisition_state) {
