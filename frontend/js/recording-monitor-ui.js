@@ -6,7 +6,7 @@ import {
   getRuntimeConfig,
 } from "./recording-monitor-api.js";
 
-const CONDITIONS = new Set(["P_NEGATIVE", "PF_NEGATIVE", "P_OR_PF_NEGATIVE"]);
+const CONDITIONS = new Set(["P_NEGATIVE"]);
 const STATES = new Set(["OFF", "WAITING", "RECORDING", "WAITING_FOR_CLEAR"]);
 const PHASES = ["A", "B", "C"];
 
@@ -17,11 +17,7 @@ function finiteNumber(value) {
 }
 
 export function conditionLabel(condition) {
-  return {
-    P_NEGATIVE: "P < 0",
-    PF_NEGATIVE: "PF < 0",
-    P_OR_PF_NEGATIVE: "P < 0 OR PF < 0",
-  }[condition] ?? "—";
+  return condition === "P_NEGATIVE" ? "P < 0" : "—";
 }
 
 export function normalizeMonitorStatus(record) {
@@ -38,9 +34,9 @@ export function normalizeMonitorStatus(record) {
 
   const active = [];
   for (const item of Array.isArray(record.active_conditions) ? record.active_conditions : []) {
-    if (!item || !PHASES.includes(item.phase) || !["P", "PF"].includes(item.measurement)) continue;
+    if (!item || !PHASES.includes(item.phase) || item.measurement !== "P") continue;
     const value = finiteNumber(item.value);
-    active.push(Object.freeze({phase: item.phase, measurement: item.measurement, value}));
+    active.push(Object.freeze({phase: item.phase, measurement: "P", value}));
   }
 
   const last = record.last_event;
@@ -48,7 +44,7 @@ export function normalizeMonitorStatus(record) {
     ? Object.freeze({
         event: last.event,
         phase: PHASES.includes(last.phase) ? last.phase : "",
-        measurement: ["P", "PF"].includes(last.measurement) ? last.measurement : "",
+        measurement: last.measurement === "P" ? "P" : "",
         cycle_id: Number.isInteger(Number(last.cycle_id)) ? Number(last.cycle_id) : null,
         utc: typeof last.utc === "string" ? last.utc : "",
         value: finiteNumber(last.value),
@@ -66,9 +62,10 @@ export function normalizeMonitorStatus(record) {
 }
 
 export function phaseStatusText(status, phase) {
-  const active = status?.active_conditions?.filter((item) => item.phase === phase) ?? [];
-  const measurements = ["P", "PF"].filter((measurement) => active.some((item) => item.measurement === measurement));
-  return measurements.length ? `${phase}  NEGATIVE ${measurements.join(" + ")}` : `${phase}  NORMAL`;
+  const negative = status?.active_conditions?.some(
+    (item) => item.phase === phase && item.measurement === "P"
+  ) ?? false;
+  return negative ? `${phase}  NEGATIVE P` : `${phase}  NORMAL`;
 }
 
 export function validateMonitorDraft(draft) {
@@ -91,8 +88,6 @@ function panelMarkup() {
         <span class="recording-monitor-label">CONDITION</span>
         <select id="recording-monitor-condition">
           <option value="P_NEGATIVE">P &lt; 0</option>
-          <option value="PF_NEGATIVE">PF &lt; 0</option>
-          <option value="P_OR_PF_NEGATIVE">P &lt; 0 OR PF &lt; 0</option>
         </select>
       </label>
       <fieldset class="recording-monitor-phases">
@@ -292,7 +287,7 @@ async function runController() {
     actionPending = true;
     try {
       await enableRecordingMonitor(deviceId);
-      setMessage("MONITOR ENABLED · waiting for exact canonical negative-condition evidence.");
+      setMessage("MONITOR ENABLED · waiting for exact canonical P < 0 evidence.");
     } catch (cause) {
       setMessage(`ENABLE FAILED: ${cause.message}`, true);
     } finally {

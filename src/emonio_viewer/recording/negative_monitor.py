@@ -8,8 +8,6 @@ from emonio_viewer.measurement.model import MeasurementSample, SampleQuality
 
 class NegativeCondition(str, Enum):
     P_NEGATIVE = "P_NEGATIVE"
-    PF_NEGATIVE = "PF_NEGATIVE"
-    P_OR_PF_NEGATIVE = "P_OR_PF_NEGATIVE"
 
 
 class MonitorPhase(str, Enum):
@@ -20,7 +18,6 @@ class MonitorPhase(str, Enum):
 
 class MonitorMeasurement(str, Enum):
     P = "P"
-    PF = "PF"
 
 
 class MonitorBoundary(str, Enum):
@@ -85,16 +82,13 @@ class NegativeMonitorEvaluation:
 
 
 _PHASE_ORDER = {MonitorPhase.A: 0, MonitorPhase.B: 1, MonitorPhase.C: 2}
-_MEASUREMENT_ORDER = {MonitorMeasurement.P: 0, MonitorMeasurement.PF: 1}
+_MEASUREMENT_ORDER = {MonitorMeasurement.P: 0}
 _PHASE_ATTR = {
     MonitorPhase.A: "phase_a",
     MonitorPhase.B: "phase_b",
     MonitorPhase.C: "phase_c",
 }
-_MEASUREMENT_ATTR = {
-    MonitorMeasurement.P: "p",
-    MonitorMeasurement.PF: "pf",
-}
+_MEASUREMENT_ATTR = {MonitorMeasurement.P: "p"}
 
 
 def _key_sort(key: ConditionKey) -> tuple[int, int]:
@@ -102,14 +96,7 @@ def _key_sort(key: ConditionKey) -> tuple[int, int]:
 
 
 def selected_condition_keys(config: NegativeMonitorConfig) -> tuple[ConditionKey, ...]:
-    measurements = (
-        (MonitorMeasurement.P,)
-        if config.condition is NegativeCondition.P_NEGATIVE
-        else (MonitorMeasurement.PF,)
-        if config.condition is NegativeCondition.PF_NEGATIVE
-        else (MonitorMeasurement.P, MonitorMeasurement.PF)
-    )
-    keys = [ConditionKey(phase, measurement) for phase in config.phases for measurement in measurements]
+    keys = [ConditionKey(phase, MonitorMeasurement.P) for phase in config.phases]
     return tuple(sorted(keys, key=_key_sort))
 
 

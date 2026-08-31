@@ -38,7 +38,33 @@
   gap: 12px;
   padding: 6px 10px;
 }
-.status-title { display: flex; flex-direction: column; min-width: 150px; }
+.status-title {
+  display: grid;
+  grid-template-columns: max-content auto;
+  align-items: center;
+  column-gap: 7px;
+  row-gap: 1px;
+  min-width: 150px;
+}
+.status-title > .eyebrow { grid-column: 1; }
+.status-title > .power-direction-indicators { grid-column: 2; }
+.status-title > #device-name { grid-column: 1 / -1; }
+.power-direction-indicators {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.power-direction-indicator {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--bg);
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.power-direction-indicator.is-neutral { background: var(--border-strong); }
+.power-direction-indicator.is-negative { background: var(--good); }
+.power-direction-indicator.is-positive { background: var(--danger); }
 .status-items { display: grid; grid-template-columns: repeat(9, minmax(62px, auto)); gap: 4px 10px; align-items: start; }
 .status-items > span { display: flex; flex-direction: column; min-width: 0; }
 .status-label { color: var(--muted); font-size: 0.54rem; text-transform: uppercase; letter-spacing: 0.08em; }

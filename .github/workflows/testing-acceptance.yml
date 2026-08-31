@@ -49,13 +49,13 @@ jobs:
             src/emonio_viewer/runtime/store.py \
             src/emonio_viewer/scope
 
-      - name: v0.4.16 monitor public-path gate
+      - name: v0.4.17 monitor public-path gate
         run: |
           grep -q 'emonio_viewer.main_v0416:main' pyproject.toml
           grep -q '/api/v1/recording/monitor/configure' src/emonio_viewer/server/api_v0416.py
           grep -q '/api/v1/recording/monitor/enable' src/emonio_viewer/server/api_v0416.py
           grep -q '/api/v1/recording/monitor/disable' src/emonio_viewer/server/api_v0416.py
           if grep -q '/api/v1/recording/trigger' src/emonio_viewer/server/api_v0416.py; then
-            echo 'obsolete trigger route exposed by v0.4.16 API' >&2
+            echo 'obsolete trigger route exposed by testing API' >&2
             exit 1
           fi

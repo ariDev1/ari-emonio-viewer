@@ -11,6 +11,56 @@ const PANEL_FIELDS = [
   ["E", "energy", "kWh"],
 ];
 
+const POWER_DIRECTION_PHASES = [
+  ["A", "phase_a", "power-direction-a"],
+  ["B", "phase_b", "power-direction-b"],
+  ["C", "phase_c", "power-direction-c"],
+];
+
+export function powerDirectionState(value) {
+  if (!Number.isFinite(value) || value === 0) return "neutral";
+  return value < 0 ? "negative" : "positive";
+}
+
+function powerDirectionAriaLabel(phase, state) {
+  if (state === "negative") return `Phase ${phase} active power is negative`;
+  if (state === "positive") return `Phase ${phase} active power is positive`;
+  return `Phase ${phase} active power is zero or unavailable`;
+}
+
+export function initializePowerDirectionIndicators() {
+  if (typeof document === "undefined") return;
+  const title = document.querySelector(".status-title .eyebrow");
+  if (!title || document.getElementById("power-direction-a")) return;
+
+  const group = document.createElement("span");
+  group.className = "power-direction-indicators";
+  group.setAttribute("aria-label", "Canonical active power direction by phase");
+
+  for (const [phase, _field, id] of POWER_DIRECTION_PHASES) {
+    const indicator = document.createElement("span");
+    indicator.id = id;
+    indicator.className = "power-direction-indicator is-neutral";
+    indicator.dataset.phase = phase;
+    indicator.setAttribute("aria-label", powerDirectionAriaLabel(phase, "neutral"));
+    indicator.title = `Phase ${phase} canonical P direction`;
+    group.appendChild(indicator);
+  }
+
+  title.insertAdjacentElement("afterend", group);
+}
+
+function renderPowerDirectionIndicators(sample) {
+  for (const [phase, field, id] of POWER_DIRECTION_PHASES) {
+    const node = document.getElementById(id);
+    if (!node) continue;
+    const state = powerDirectionState(sample?.[field]?.p);
+    node.classList.remove("is-neutral", "is-negative", "is-positive");
+    node.classList.add(`is-${state}`);
+    node.setAttribute("aria-label", powerDirectionAriaLabel(phase, state));
+  }
+}
+
 function createMeasurementRows(panel) {
   const target = panel.querySelector("[data-measurements]");
   if (target.childElementCount > 0) return;
@@ -29,6 +79,7 @@ function createMeasurementRows(panel) {
 }
 
 export function initializeMeasurementPanels() {
+  initializePowerDirectionIndicators();
   document.querySelectorAll(".phase-panel").forEach(createMeasurementRows);
 }
 
@@ -88,6 +139,7 @@ export function renderMeasurementPayload(payload) {
   renderBlock("phase-c", payload.sample.phase_c);
   renderBlock("phase-total", payload.sample.total);
   renderDerived(payload.sample.derived);
+  renderPowerDirectionIndicators(payload.sample);
 
   document.getElementById("device-name").textContent = payload.device_name || payload.device_id;
   document.getElementById("device-ip").textContent = payload.device_ip || "—";

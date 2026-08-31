@@ -3,7 +3,7 @@
 Engineering viewer for Emonio P3 electrical measurements on Linux.
 
 The trusted field baseline is **v0.4.14**.
-The `testing` branch is **v0.4.16 Testing**. Tested device firmware: `3.0.79-release`.
+The `testing` branch is **v0.4.17 Testing**. Tested device firmware: `3.0.79-release`.
 
 ## Measurement architecture
 
@@ -32,22 +32,22 @@ The `testing` branch is **v0.4.16 Testing**. Tested device firmware: `3.0.79-rel
 
 ## Negative-Condition Monitor
 
-v0.4.16 monitors Phase A, B, and C for:
+v0.4.17 monitors Phase A, B, and C for one condition only:
 
 - `P < 0`
-- `PF < 0`
-- `P < 0 OR PF < 0`
 
-TOTAL is excluded in v0.4.16. The threshold is exactly `0.0`. The monitor does not use epsilon, hysteresis, debounce, rounding, or inferred transitions.
+PF remains a canonical displayed measurement. It is not a separate direction trigger in the Negative-Condition Monitor. This avoids presenting P and PF as independent active-power direction tests.
+
+TOTAL is excluded in v0.4.17. The threshold is exactly `0.0`. The monitor does not use epsilon, hysteresis, debounce, rounding, or inferred transitions.
 
 For consecutive valid canonical samples:
 
 ```text
-NEGATIVE_START: previous >= 0 and current < 0
-NEGATIVE_END:   previous <  0 and current >= 0
+NEGATIVE_START: previous P >= 0 and current P < 0
+NEGATIVE_END:   previous P <  0 and current P >= 0
 ```
 
-The first active selected condition starts one recording. Overlapping phase or measurement conditions use the same session. A monitor-owned session stops only after all selected conditions clear. The monitor then returns to `WAITING` and is ready for the next event.
+The first active selected phase starts one recording. Overlapping phase conditions use the same session. A monitor-owned session stops only after all selected phases clear. The monitor then returns to `WAITING` and is ready for the next event.
 
 A continuity break prevents an exact crossing claim. After a gap or reconnect, the Viewer records boundary evidence such as `NEGATIVE_PRESENT_AFTER_GAP` or `NEGATIVE_PRESENT_AFTER_RECONNECT`.
 
@@ -95,7 +95,7 @@ Default server binding: `127.0.0.1`.
 ./tools/ari-emonio-acceptance.sh
 ```
 
-Latest v0.4.16 automated acceptance evidence:
+Latest completed automated acceptance evidence before v0.4.17 changes: **v0.4.16**.
 
 ```text
 Unit tests:          250 PASS
@@ -107,7 +107,7 @@ Scientific sign path: 1 PASS
 ARI Emonio Viewer Acceptance: PASS
 ```
 
-The v0.4.16 acceptance workflow also verifies the protected Modbus, measurement, acquisition, RuntimeEventBus, RuntimeStore, and SCOPE paths against the trusted pre-monitor baseline.
+The testing acceptance workflow also verifies the protected Modbus, measurement, acquisition, RuntimeEventBus, RuntimeStore, and SCOPE paths against the trusted pre-monitor baseline.
 
 ## References
 
