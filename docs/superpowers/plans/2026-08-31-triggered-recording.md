@@ -2,41 +2,42 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add deterministic one-shot LEVEL and CROSSING triggered recording for U, I, P, Q, S, PF, and f on Phase A, B, C, or TOTAL, while preserving the existing canonical measurement and manual recording paths.
+**Goal:** Add deterministic one-shot LEVEL and CROSSING triggered recording for U, I, P, Q, S, PF, and f on Phase A, B, C, or TOTAL, while preserving the canonical measurement path and existing manual recording behavior.
 
-**Architecture:** Add a small pure trigger module under `src/emonio_viewer/recording/`. `RecordingManager` remains the only owner of recording and trigger runtime state and evaluates triggers inside its existing `RuntimeEventBus` consumer. A fired trigger starts `SessionRecorder` directly from the exact firing `MeasurementSample`; no RuntimeStore re-read is allowed for triggered start.
+**Architecture:** Add a pure trigger module under `src/emonio_viewer/recording/`. `RecordingManager` remains the only owner of recording and trigger runtime state and evaluates triggers inside its existing RuntimeEventBus consumer. A fired trigger starts `SessionRecorder` from the exact firing `MeasurementSample`; no RuntimeStore re-read selects the triggered first sample.
 
-**Tech Stack:** Python 3, dataclasses, enum, aiohttp API, existing RuntimeEventBus/RuntimeStore/RecordingManager, vanilla JavaScript ES modules, structured CSS, pytest, Node-based browser tests.
+**Tech Stack:** Python 3, dataclasses, enum, aiohttp, existing RuntimeEventBus/RuntimeStore/RecordingManager, vanilla JavaScript ES modules, structured CSS, pytest, Node-based browser tests.
 
 **Spec:** `docs/superpowers/specs/2026-08-31-triggered-recording-design.md`
 
 ## Global Constraints
 
-- Target branch is `testing` only.
-- `main` must not be changed.
-- Baseline before this design work is `b539efe7eb3a11d53a3b291254ddd0c50a2cf3df`.
-- Target release identity is `v0.4.16 Testing`.
+- Work on branch `testing` only.
+- Do not modify `main`.
+- Code baseline before v0.4.16 design work: `b539efe7eb3a11d53a3b291254ddd0c50a2cf3df`.
+- Target identity: `v0.4.16 Testing`.
 - Modbus/TCP remains read-only.
-- Do not change `src/emonio_viewer/modbus/*`.
-- Do not change `src/emonio_viewer/measurement/*`.
-- Do not change `src/emonio_viewer/acquisition/*`.
-- Do not change `src/emonio_viewer/runtime/events.py` or `src/emonio_viewer/runtime/store.py`.
-- Do not change `src/emonio_viewer/scope/*`.
-- Canonical P/Q signs, quadrants, validation, acquisition timing, and register decoding remain unchanged.
-- Trigger evaluation uses exact canonical numeric values. Display rounding is irrelevant to trigger decisions.
-- Eligible trigger quality is exactly `VALID` or `DEGRADED`, matching the current recorder.
-- Qualification count is fixed at one sample.
-- No smoothing, averaging, interpolation, resampling, hysteresis, debounce, or synthetic samples.
+- Do not modify `src/emonio_viewer/modbus/*`.
+- Do not modify `src/emonio_viewer/measurement/*`.
+- Do not modify `src/emonio_viewer/acquisition/*`.
+- Do not modify `src/emonio_viewer/runtime/events.py` or `src/emonio_viewer/runtime/store.py`.
+- Do not modify `src/emonio_viewer/scope/*`.
+- Canonical P/Q signs, quadrants, measurement validation, acquisition timing, and register decoding remain unchanged.
+- Trigger decisions use exact canonical numeric values.
+- Eligible trigger quality is exactly `VALID` or `DEGRADED`.
+- Qualification count is exactly one sample.
+- No smoothing, averaging, interpolation, resampling, hysteresis, debounce, epsilon, or synthetic samples.
 - Trigger state is per Emonio and runtime-only.
 - One-shot only. No automatic retry and no automatic re-arm.
-- LEVEL may fire on the first eligible post-ARM sample.
-- CROSSING requires two proven consecutive post-ARM measurement cycles.
-- CROSSING continuity is cleared by a same-device `DiagnosticEvent` or any cycle gap.
+- LEVEL can fire on the first eligible post-ARM sample.
+- CROSSING requires two consecutive post-ARM canonical cycles.
+- Same-device diagnostic evidence or a cycle gap clears CROSSING continuity.
 - Manual START while ARMED disarms the trigger before manual session creation.
-- ARM while recording returns conflict and does not affect the active recording.
-- Any trigger configuration update results in DISARMED state.
-- The exact firing `MeasurementSample` is the first sample of a successful triggered recording.
-- Triggered start time is the firing sample `cycle_finished_utc`.
+- Manual STOP is a master abort: it disarms an armed trigger; if recording is active it also stops recording.
+- ARM while recording is a conflict and leaves the recording unchanged.
+- Any accepted trigger configuration update forces DISARMED state.
+- The exact firing sample is the first sample of a successful triggered recording.
+- Triggered session start time is the firing sample `cycle_finished_utc`.
 - Pre-trigger recording is out of scope.
 
 ---
@@ -45,29 +46,30 @@
 
 ### Create
 
-- `src/emonio_viewer/recording/trigger.py` — pure trigger configuration, exact field extraction, LEVEL/CROSSING evaluation, and continuity state.
-- `tests/unit/test_recording_trigger.py` — pure trigger math and continuity tests.
-- `tests/integration/test_recording_trigger_api.py` — HTTP validation, ownership, ARM/DISARM, and status contract.
-- `tests/browser/test_triggered_recording_ui.py` — static/Node checks for frontend trigger state and drawer wiring.
-- `frontend/js/recording-trigger.js` — frontend trigger-status normalization and selected-device trigger model.
+- `src/emonio_viewer/recording/trigger.py` — pure trigger enums, config, exact value extraction, LEVEL/CROSSING evaluation, and continuity state.
+- `tests/unit/test_recording_trigger.py` — pure trigger tests.
+- `frontend/js/recording-trigger.js` — frontend trigger-status normalization only.
 - `frontend/css/recording-trigger.css` — trigger drawer styles only.
+- `tests/browser/test_triggered_recording_ui.py` — frontend trigger state, API wiring, drawer, and CSS contract tests.
 
 ### Modify
 
-- `src/emonio_viewer/recording/recorder.py` — per-device trigger ownership, ARM floor, event evaluation, exact-sample start, failure reporting.
-- `src/emonio_viewer/recording/session.py` — optional triggered-start metadata only; manual metadata stays structurally unchanged.
-- `src/emonio_viewer/server/api.py` — trigger routes, validation, status exposure, and conflict mapping.
-- `frontend/js/api.js` — trigger configure/arm/disarm requests.
-- `frontend/js/recording-state.js` — include normalized trigger status without changing active/error semantics.
-- `frontend/js/app.js` — render and operate trigger controls inside the existing Recording drawer.
-- `frontend/css/recording.css` — import `recording-trigger.css` only; keep trigger selectors in the new file.
-- `tests/unit/test_recording.py` — RecordingManager ownership, exact first sample, trigger provenance, and start-failure tests.
-- `tests/unit/test_recording_dashboard.py` — status contract remains valid for manual recording.
-- `tests/integration/test_server.py` only if the existing application fixture is the established API-test entry point; do not duplicate fixture infrastructure.
-- `pyproject.toml` — version `0.4.16` after feature tests pass.
-- `src/emonio_viewer/__init__.py` — version `0.4.16` only.
-- `tests/unit/test_release_identity.py` — expected version `0.4.16`.
-- `README.md` — document `v0.4.16 Testing` as a testing-branch feature, not a trusted `main` release.
+- `src/emonio_viewer/recording/recorder.py` — trigger ownership, ARM floor, manual START/STOP authority, event evaluation, exact-sample start, trigger-start failure reporting.
+- `src/emonio_viewer/recording/session.py` — optional trigger provenance only.
+- `src/emonio_viewer/server/api.py` — trigger endpoints and status.
+- `frontend/js/api.js` — configure/arm/disarm requests.
+- `frontend/js/recording-state.js` — normalize trigger status while preserving active/error behavior.
+- `frontend/js/app.js` — trigger controls inside the existing Recording drawer.
+- `frontend/css/recording.css` — one import of `recording-trigger.css`; no trigger selector definitions here.
+- `tests/unit/test_recording.py` — manager ownership, exact first sample, provenance, failure, STOP semantics.
+- `tests/unit/test_recording_dashboard.py` — preserve manual status behavior.
+- `tests/integration/test_server.py` — extend existing FakeRecordingManager and API tests; do not create a second API-test fixture system.
+- `tests/integration/test_multi_device.py` — per-Emonio trigger isolation.
+- `tests/integration/test_end_to_end_sign.py` — only add assertions if required to prove trigger use does not alter canonical sign behavior.
+- `pyproject.toml` — set version to `0.4.16` after feature tests pass.
+- `src/emonio_viewer/__init__.py` — set `__version__` to `0.4.16` only.
+- `tests/unit/test_release_identity.py` — expect `0.4.16`.
+- `README.md` — describe v0.4.16 as Testing only.
 
 ---
 
@@ -78,22 +80,33 @@
 - Create: `tests/unit/test_recording_trigger.py`
 
 **Interfaces:**
-- Consumes: `MeasurementSample`, `SampleQuality` from the existing canonical measurement model.
-- Produces:
-  - `TriggerMode(str, Enum)`: `LEVEL`, `CROSSING`
-  - `TriggerBlock(str, Enum)`: `A`, `B`, `C`, `TOTAL`
-  - `TriggerMeasurement(str, Enum)`: `U`, `I`, `P`, `Q`, `S`, `PF`, `F`
-  - `TriggerOperator(str, Enum)`: `GT`, `GE`, `LT`, `LE`
-  - `@dataclass(frozen=True, slots=True) TriggerConfig`
-  - `@dataclass(slots=True) TriggerRuntimeState`
-  - `@dataclass(frozen=True, slots=True) TriggerFire`
-  - `extract_trigger_value(sample, config) -> float`
-  - `evaluate_measurement(state, sample) -> TriggerFire | None`
-  - `invalidate_crossing_continuity(state) -> None`
-
-Use this exact data contract:
 
 ```python
+class TriggerMode(str, Enum):
+    LEVEL = "LEVEL"
+    CROSSING = "CROSSING"
+
+class TriggerBlock(str, Enum):
+    A = "A"
+    B = "B"
+    C = "C"
+    TOTAL = "TOTAL"
+
+class TriggerMeasurement(str, Enum):
+    U = "U"
+    I = "I"
+    P = "P"
+    Q = "Q"
+    S = "S"
+    PF = "PF"
+    F = "F"
+
+class TriggerOperator(str, Enum):
+    GT = "GT"
+    GE = "GE"
+    LT = "LT"
+    LE = "LE"
+
 @dataclass(frozen=True, slots=True)
 class TriggerConfig:
     device_id: str
@@ -104,7 +117,6 @@ class TriggerConfig:
     mode: TriggerMode
     recording_interval_s: float
 
-
 @dataclass(slots=True)
 class TriggerRuntimeState:
     config: TriggerConfig
@@ -113,23 +125,21 @@ class TriggerRuntimeState:
     previous_cycle_id: int | None = None
     previous_value: float | None = None
     previous_sample_utc: datetime | None = None
-    last_fired_cycle_id: int | None = None
-    last_fired_utc: datetime | None = None
-    last_fired_value: float | None = None
-
 
 @dataclass(frozen=True, slots=True)
 class TriggerFire:
     cycle_id: int
     fired_utc: datetime
     value: float
+
+extract_trigger_value(sample: MeasurementSample, config: TriggerConfig) -> float
+evaluate_measurement(state: TriggerRuntimeState, sample: MeasurementSample) -> TriggerFire | None
+invalidate_crossing_continuity(state: TriggerRuntimeState) -> None
 ```
 
-`TriggerRuntimeState` exists only while ARMED. `RecordingManager` stores last-fired evidence separately after it consumes the armed state.
+- [ ] **Step 1: Write failing field-extraction tests**
 
-- [ ] **Step 1: Write failing tests for exact field extraction and validation**
-
-Create parameterized tests that replace the selected canonical block measurement and prove all seven fields map exactly:
+Use `real_sample` and `dataclasses.replace` to set unique values. Cover all seven fields and all four blocks.
 
 ```python
 @pytest.mark.parametrize(
@@ -144,34 +154,32 @@ Create parameterized tests that replace the selected canonical block measurement
         (TriggerMeasurement.F, "frequency"),
     ],
 )
-def test_extract_trigger_value_uses_exact_canonical_field(real_sample, measurement, field):
+def test_extract_uses_exact_canonical_field(real_sample, measurement, field):
     config = TriggerConfig(
-        device_id=real_sample.identity.device_id,
-        block=TriggerBlock.B,
-        measurement=measurement,
-        operator=TriggerOperator.GT,
-        threshold=0.0,
-        mode=TriggerMode.LEVEL,
-        recording_interval_s=1.0,
+        real_sample.identity.device_id,
+        TriggerBlock.B,
+        measurement,
+        TriggerOperator.GT,
+        0.0,
+        TriggerMode.LEVEL,
+        1.0,
     )
     assert extract_trigger_value(real_sample, config) == getattr(real_sample.phase_b.measurement, field)
 ```
 
-Also test A/B/C/TOTAL mapping and reject non-finite `threshold` and `recording_interval_s` in `TriggerConfig.__post_init__`.
+Also assert `TriggerConfig` rejects non-finite `threshold`, non-finite interval, and interval `<= 0`.
 
-- [ ] **Step 2: Run the new tests and confirm RED**
-
-Run:
+- [ ] **Step 2: Run RED**
 
 ```bash
 pytest -q tests/unit/test_recording_trigger.py
 ```
 
-Expected: FAIL because `emonio_viewer.recording.trigger` does not exist.
+Expected: FAIL because the trigger module does not exist.
 
-- [ ] **Step 3: Implement enums, config validation, and exact field extraction**
+- [ ] **Step 3: Implement config validation and explicit maps**
 
-Use explicit maps, not reflection on UI strings:
+Use explicit maps:
 
 ```python
 _BLOCK_ATTR = {
@@ -180,7 +188,6 @@ _BLOCK_ATTR = {
     TriggerBlock.C: "phase_c",
     TriggerBlock.TOTAL: "total",
 }
-
 _MEASUREMENT_ATTR = {
     TriggerMeasurement.U: "vrms",
     TriggerMeasurement.I: "irms",
@@ -192,27 +199,15 @@ _MEASUREMENT_ATTR = {
 }
 ```
 
-Validate with `math.isfinite()` and reject `recording_interval_s <= 0`. Device acquisition-interval validation remains in `RecordingManager`/API because the pure config does not own `DeviceConfig`.
+Do not import Modbus or acquisition code.
 
-- [ ] **Step 4: Add failing LEVEL operator tests**
+- [ ] **Step 4: Write failing LEVEL truth-table tests**
 
-For each operator, test threshold equality and both sides of the threshold. LEVEL must not use previous-state evidence.
+Cover equality and both sides for GT, GE, LT, LE. The first eligible post-ARM sample may fire.
 
-Example:
+- [ ] **Step 5: Implement LEVEL rules**
 
-```python
-def test_level_ge_fires_on_exact_threshold(real_sample):
-    sample = sample_with_value(real_sample, block="A", field="p", value=100.0)
-    state = armed_state(operator=TriggerOperator.GE, threshold=100.0, mode=TriggerMode.LEVEL)
-    fire = evaluate_measurement(state, sample)
-    assert fire is not None
-    assert fire.value == 100.0
-    assert fire.cycle_id == sample.identity.cycle_id
-```
-
-- [ ] **Step 5: Implement LEVEL comparison and eligible-sample rules**
-
-Rules in code:
+Before comparison:
 
 ```python
 if sample.identity.device_id != state.config.device_id:
@@ -226,11 +221,11 @@ if not math.isfinite(value):
     return None
 ```
 
-Implement operator comparison exactly; use no epsilon.
+Use exact Python comparisons with no epsilon.
 
-- [ ] **Step 6: Add failing CROSSING truth-table tests**
+- [ ] **Step 6: Write failing CROSSING truth-table and continuity tests**
 
-Cover exact approved semantics:
+Required semantics:
 
 ```text
 GT: previous <= T and current > T
@@ -239,29 +234,24 @@ LT: previous >= T and current < T
 LE: previous >  T and current <= T
 ```
 
-Tests must prove the first eligible sample establishes baseline only and cannot fire.
-
-- [ ] **Step 7: Add failing continuity tests**
-
-Test all of these cases:
+Required continuity tests:
 
 ```text
-cycle N -> N+1: crossing may fire
-cycle N -> N+2: no fire; N+2 becomes new baseline
-cycle N -> N: duplicate ignored
-cycle N -> N-1: stale sample ignored
-same-device continuity invalidation: previous evidence cleared
-other-device sample: no state change
-pre-ARM queued cycle <= arm floor: no state change
+first eligible sample -> baseline only
+N -> N+1 -> crossing may fire
+N -> N+2 -> no fire; N+2 becomes baseline
+N -> N -> duplicate ignored
+N -> N-1 -> stale ignored
+invalidate_crossing_continuity() -> previous evidence cleared
+other-device sample -> no state change
+pre-ARM queued cycle -> no state change
 ```
 
-- [ ] **Step 8: Implement CROSSING state transitions**
+- [ ] **Step 7: Implement CROSSING state transitions**
 
-Only update previous evidence with an eligible, newer post-ARM sample. On a gap, set the current sample as the new baseline and return `None`. On a fire, return exact `TriggerFire` evidence from the current sample.
+Only eligible, newer, post-ARM samples can become baseline. A gap sets the current sample as a new baseline and returns no fire. A duplicate or stale sample is ignored and must not replace the baseline.
 
-- [ ] **Step 9: Run focused pure tests**
-
-Run:
+- [ ] **Step 8: Run GREEN**
 
 ```bash
 pytest -q tests/unit/test_recording_trigger.py
@@ -269,7 +259,7 @@ pytest -q tests/unit/test_recording_trigger.py
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit the pure engine**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/emonio_viewer/recording/trigger.py tests/unit/test_recording_trigger.py
@@ -278,15 +268,13 @@ git commit -m "feat: add deterministic recording trigger engine"
 
 ---
 
-### Task 2: RecordingManager Trigger Ownership and ARM State
+### Task 2: RecordingManager Ownership, ARM/DISARM, and Manual Authority
 
 **Files:**
-- Modify: `src/emonio_viewer/recording/recorder.py` in `RecordingManager.__init__`, `register_device`, `start`, `stop`, `stop_all`, and new trigger methods.
+- Modify: `src/emonio_viewer/recording/recorder.py` in `RecordingManager.__init__`, `start`, `stop`, `stop_all`, and new trigger methods.
 - Modify: `tests/unit/test_recording.py`
 
 **Interfaces:**
-- Consumes: `TriggerConfig`, `TriggerRuntimeState`, `invalidate_crossing_continuity` from Task 1.
-- Produces:
 
 ```python
 RecordingManager.configure_trigger(config: TriggerConfig) -> dict
@@ -295,7 +283,7 @@ RecordingManager.disarm_trigger(device_id: str) -> dict
 RecordingManager.trigger_statuses() -> tuple[dict, ...]
 ```
 
-Internal maps:
+Internal maps under the existing `RLock`:
 
 ```python
 self._trigger_configs: dict[str, TriggerConfig] = {}
@@ -303,74 +291,68 @@ self._armed_triggers: dict[str, TriggerRuntimeState] = {}
 self._trigger_last_fired: dict[str, dict] = {}
 ```
 
-All three maps are protected by the existing `RLock`.
+Exact manager errors:
+
+```text
+unknown device -> KeyError(device_id)
+trigger not configured -> RuntimeError("trigger not configured")
+ARM while recording -> RuntimeError("recording already active")
+commands disabled -> RuntimeError("recording commands disabled")
+```
 
 - [ ] **Step 1: Write failing per-device configuration/status tests**
 
-Prove:
+Prove A and B configurations are independent, status order is sorted by `device_id`, and a new manager instance has no armed trigger state.
+
+- [ ] **Step 2: Write failing command-disable and interval tests**
+
+`configure_trigger`, `arm_trigger`, and `disarm_trigger` must call `_require_commands_enabled()`. `configure_trigger` must reject `recording_interval_s < device.poll_interval_s` using the existing recording interval rule.
+
+- [ ] **Step 3: Implement configure/disarm/status**
+
+`configure_trigger()`:
 
 ```text
-configure A -> A DISARMED with exact config
-configure B -> independent B DISARMED
-status order is deterministic by device_id
-new manager instance -> no ARMED state
+require commands enabled
+require known device
+validate interval against acquisition interval
+remove existing armed state for that device
+store config
+return DISARMED status
 ```
 
-`configure_trigger()` must validate that the device exists and that `recording_interval_s >= device.poll_interval_s` using the same interval rule as manual recording.
+`disarm_trigger()`:
 
-- [ ] **Step 2: Run the ownership tests and confirm RED**
-
-Run only the new test names in `tests/unit/test_recording.py`; expected FAIL because the manager methods do not exist.
-
-- [ ] **Step 3: Implement configure/disarm/status under the existing lock**
-
-`configure_trigger()` must always remove any existing `_armed_triggers[device_id]` before storing the new config. It must not alter another device.
-
-`disarm_trigger()` removes only the armed runtime state. It keeps the stored config and last-fired evidence.
-
-Status JSON shape:
-
-```python
-{
-    "device_id": device_id,
-    "state": "ARMED" if device_id in self._armed_triggers else "DISARMED",
-    "config": {
-        "block": config.block.value,
-        "measurement": config.measurement.value,
-        "operator": config.operator.value,
-        "threshold": config.threshold,
-        "mode": config.mode.value,
-        "recording_interval_s": config.recording_interval_s,
-    },
-    "armed_utc": None or state.armed_utc.isoformat(),
-    "last_fired_cycle_id": None or int,
-    "last_fired_utc": None or str,
-    "last_fired_value": None or float,
-}
+```text
+require commands enabled
+require known device
+remove armed runtime state if present
+keep config and last-fired evidence
+return DISARMED status
 ```
 
 - [ ] **Step 4: Write failing ARM-floor tests**
 
-Test that `arm_trigger()` snapshots `RuntimeStore.get_device(device_id).last_sample.identity.cycle_id` when a sample exists. Test `None` when no sample exists.
+Assert ARM snapshots the current store sample cycle as `arm_floor_cycle_id`, or `None` when no sample exists.
 
-- [ ] **Step 5: Write failing ownership-conflict tests**
+- [ ] **Step 5: Write failing ARM conflict and manual START tests**
 
-Test:
+Prove:
 
 ```text
-ARM while active recording -> RuntimeError("recording already active") or dedicated deterministic conflict error
-manual START while ARMED -> trigger becomes DISARMED and manual recording starts
-manual START failure after disarm -> trigger stays DISARMED
+recording active + ARM -> RuntimeError("recording already active")
+ARMED + manual START -> trigger DISARMED and manual recording active
+manual START creation failure after ownership transfer -> trigger stays DISARMED
 ```
-
-Keep API-specific HTTP translation for Task 4.
 
 - [ ] **Step 6: Implement ARM and manual START precedence**
 
-`arm_trigger()` must:
+`arm_trigger()`:
 
 ```python
 self._require_commands_enabled()
+if device_id not in self._devices:
+    raise KeyError(device_id)
 if device_id in self._active:
     raise RuntimeError("recording already active")
 config = self._trigger_configs.get(device_id)
@@ -385,38 +367,61 @@ self._armed_triggers[device_id] = TriggerRuntimeState(
 )
 ```
 
-In manual `start()`, after normal command/device/interval validation and before `SessionRecorder.create()`, remove the selected device from `_armed_triggers`. Do not restore it if manual session creation fails.
+Manual `start()` removes `_armed_triggers[device_id]` before `SessionRecorder.create()` and does not restore it on failure.
 
-- [ ] **Step 7: Run RecordingManager ownership tests**
+- [ ] **Step 7: Write failing manual STOP master-abort tests**
 
-Run:
+Cover three exact cases:
+
+```text
+active recording + STOP -> recorder stopped; trigger absent
+ARMED only + STOP -> trigger DISARMED; no KeyError
+neither active nor ARMED + STOP -> KeyError as existing inactive-stop behavior
+```
+
+- [ ] **Step 8: Implement STOP semantics**
+
+Under the existing lock:
+
+```python
+was_armed = self._armed_triggers.pop(device_id, None) is not None
+recorder = self._active.pop(device_id, None)
+if recorder is not None:
+    recorder.stop()
+    return
+if was_armed:
+    return
+raise KeyError(device_id)
+```
+
+`stop_all()` clears all armed runtime states during shutdown. Stored config persistence is not required because manager lifetime ends.
+
+- [ ] **Step 9: Run GREEN**
 
 ```bash
-pytest -q tests/unit/test_recording.py tests/unit/test_recording_trigger.py
+pytest -q tests/unit/test_recording_trigger.py tests/unit/test_recording.py
 ```
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit ownership state**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add src/emonio_viewer/recording/recorder.py tests/unit/test_recording.py
-git commit -m "feat: add per-emonio recording trigger ownership"
+git commit -m "feat: add per-emonio trigger ownership"
 ```
 
 ---
 
-### Task 3: Exact Trigger Firing, Session Provenance, and Failure Evidence
+### Task 3: Exact Firing Sample, Provenance, and Trigger-Start Failure
 
 **Files:**
-- Modify: `src/emonio_viewer/recording/recorder.py` in `SessionRecorder.create`, `RecordingManager._consume`, and new exact-sample start/failure helpers.
+- Modify: `src/emonio_viewer/recording/recorder.py` in `SessionRecorder.create`, `RecordingManager._consume`, and new triggered-start helpers.
 - Modify: `src/emonio_viewer/recording/session.py` in `initial_session_metadata`.
 - Modify: `tests/unit/test_recording.py`
-- Modify: `tests/unit/test_recording_dashboard.py` only to prove manual metadata/status remains unchanged.
+- Modify: `tests/unit/test_recording_dashboard.py`
 
 **Interfaces:**
-- Consumes: `evaluate_measurement()` and `TriggerFire` from Task 1; armed state from Task 2.
-- Produces an internal exact-sample start path with this semantic contract:
 
 ```python
 RecordingManager._start_triggered_from_sample(
@@ -427,116 +432,109 @@ RecordingManager._start_triggered_from_sample(
 ) -> SessionRecorder
 ```
 
-Add optional provenance to session creation without altering the manual call contract:
+Add optional provenance without changing existing callers:
 
 ```python
 SessionRecorder.create(
-    ...,
-    started_utc: datetime | None = None,
-    trigger_evidence: dict | None = None,
-) -> SessionRecorder
+    root,
+    first_sample,
+    device,
+    recording_interval_s,
+    application_version,
+    started_utc=None,
+    trigger_evidence=None,
+)
 ```
 
-`initial_session_metadata(..., trigger_evidence: dict | None = None)` adds trigger metadata only when `trigger_evidence is not None`.
+`initial_session_metadata(..., trigger_evidence: dict | None = None)` adds trigger data only when supplied.
 
 - [ ] **Step 1: Write failing exact-first-sample test**
 
-Arm a LEVEL trigger. Publish a firing sample with a distinct cycle ID and distinct P value. Before consumption, make RuntimeStore contain a newer sample. Assert the first measurement CSV row still contains the firing sample cycle/value, proving no RuntimeStore re-read selected the first sample.
+Arm LEVEL. Deliver a firing sample with unique cycle/value. Put a newer sample into RuntimeStore before the manager processes the firing event. Assert the first CSV row still contains the firing cycle/value.
 
-- [ ] **Step 2: Write failing CROSSING event-consumer tests**
+- [ ] **Step 2: Write failing manager-level CROSSING tests**
 
-Test the manager consumer with:
+Through RuntimeEventBus and the background manager consumer, prove:
 
 ```text
 first post-ARM sample -> no recording
 consecutive crossing sample -> recording starts
-DiagnosticEvent between baseline and crossing candidate -> no recording
-cycle gap between baseline and candidate -> no recording
-next consecutive pair after reset -> may fire
+same-device DiagnosticEvent between pair -> no recording
+cycle gap -> no recording
+next real consecutive pair after reset -> may fire
 ```
-
-Use the existing `RuntimeEventBus` and manager background consumer. Do not call trigger math directly in these integration-with-manager tests.
 
 - [ ] **Step 3: Write failing one-shot test**
 
-After the trigger fires, publish more satisfying samples. Assert there is still exactly one active session and trigger status is DISARMED.
+After firing, publish more satisfying samples. Assert one active session only and trigger state DISARMED.
 
-- [ ] **Step 4: Write failing provenance test**
+- [ ] **Step 4: Write failing provenance tests**
 
-Read `session.json` and assert:
+Triggered `session.json` must contain:
 
 ```python
-assert metadata["recording"]["start_source"] == "TRIGGER"
-assert metadata["recording"]["trigger"] == {
-    "mode": "LEVEL",
-    "block": "A",
-    "measurement": "P",
-    "operator": "GT",
-    "threshold": 1000.0,
-    "fired_cycle_id": firing_sample.identity.cycle_id,
-    "fired_utc": firing_sample.timing.cycle_finished_utc.isoformat(),
-    "fired_value": exact_value,
+{
+    "interval_s": interval,
+    "start_source": "TRIGGER",
+    "trigger": {
+        "mode": config.mode.value,
+        "block": config.block.value,
+        "measurement": config.measurement.value,
+        "operator": config.operator.value,
+        "threshold": config.threshold,
+        "fired_cycle_id": sample.identity.cycle_id,
+        "fired_utc": sample.timing.cycle_finished_utc.isoformat(),
+        "fired_value": fire.value,
+    },
 }
 ```
 
-Assert `events.csv` contains `TRIGGER_FIRED` with the same cycle ID and exact-value text. Assert measurement CSV remains normal canonical recording output.
+`events.csv` contains one `TRIGGER_FIRED` event with the same exact evidence.
 
 - [ ] **Step 5: Write failing manual-metadata compatibility test**
 
-Create a manual `SessionRecorder` with no trigger evidence. Assert its `recording` object is still exactly:
+Manual `session.json["recording"]` remains exactly:
 
 ```python
 {"interval_s": recording_interval_s}
 ```
 
-No `start_source` or `trigger` key may appear in a manual session in v0.4.16.
+- [ ] **Step 6: Implement optional provenance**
 
-- [ ] **Step 6: Implement optional session provenance**
+Only triggered sessions add `start_source` and `trigger` keys. Do not add them to manual sessions.
 
-In `initial_session_metadata`, construct the current metadata first. Only when trigger evidence exists:
+- [ ] **Step 7: Implement trigger evaluation inside existing `_consume()`**
 
-```python
-metadata["recording"] = {
-    "interval_s": recording_interval_s,
-    "start_source": "TRIGGER",
-    "trigger": dict(trigger_evidence),
-}
-```
-
-Manual path leaves the existing object unchanged.
-
-- [ ] **Step 7: Implement trigger evaluation in `_consume()`**
-
-For `MeasurementSample` under the existing lock:
+For each `MeasurementSample` under the existing lock:
 
 ```text
-1. Existing active recorder path remains first and unchanged for active sessions.
+1. Preserve current active-recorder handling.
 2. If no recorder is active and this device is ARMED, evaluate the exact event.
-3. If no fire, retain updated trigger runtime evidence only.
-4. If fire, copy last-fired evidence, remove ARMED state, then call exact-sample triggered start with this same event object.
+3. If no fire, keep updated runtime state only.
+4. If fire, save last-fired evidence, remove ARMED state, and start from the same event object.
 ```
 
-For `DiagnosticEvent`, preserve existing active-recorder invalid-cycle behavior. Additionally, if the same device is ARMED in CROSSING mode, call `invalidate_crossing_continuity(state)`.
+For `DiagnosticEvent`, preserve existing recorder invalid-cycle evidence. If the same device is ARMED in CROSSING mode, clear crossing continuity.
 
-Do not add another RuntimeEventBus subscriber.
+Do not add another event subscriber.
 
-- [ ] **Step 8: Write failing triggered-start initialization failure test**
+- [ ] **Step 8: Write failing trigger-start creation failure test**
 
-Monkeypatch `SessionRecorder.create` to raise `OSError("simulated trigger start failure")`. Publish a firing sample. Assert:
+Monkeypatch `SessionRecorder.create` to raise `OSError("simulated trigger start failure")`. Assert:
 
 ```text
-trigger state = DISARMED
-active recording absent
-recording_failures contains device-specific entry
-failure start_source = TRIGGER
-failed_cycle_id = firing sample cycle
-DiagnosticEvent event = TRIGGERED_RECORDING_START_ERROR
-no automatic second attempt
+trigger DISARMED
+no active recorder
+recording_failures has device entry
+start_source == TRIGGER
+failed_cycle_id == firing cycle
+one DiagnosticEvent event == TRIGGERED_RECORDING_START_ERROR
+no automatic second start
 ```
 
-- [ ] **Step 9: Implement deterministic trigger-start failure reporting**
+- [ ] **Step 9: Implement failure evidence**
 
-Use the existing `_failed` collection. The failure object must contain these keys when no usable recorder exists:
+Store this minimum failure shape:
 
 ```python
 {
@@ -553,11 +551,9 @@ Use the existing `_failed` collection. The failure object must contain these key
 }
 ```
 
-Publish one same-device `DiagnosticEvent` named `TRIGGERED_RECORDING_START_ERROR`. Do not re-arm.
+Publish one `TRIGGERED_RECORDING_START_ERROR` DiagnosticEvent for the same device.
 
-- [ ] **Step 10: Run recording tests**
-
-Run:
+- [ ] **Step 10: Run GREEN**
 
 ```bash
 pytest -q tests/unit/test_recording_trigger.py tests/unit/test_recording.py tests/unit/test_recording_dashboard.py
@@ -565,34 +561,32 @@ pytest -q tests/unit/test_recording_trigger.py tests/unit/test_recording.py test
 
 Expected: PASS.
 
-- [ ] **Step 11: Commit exact triggered recording**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add src/emonio_viewer/recording/recorder.py src/emonio_viewer/recording/session.py tests/unit/test_recording.py tests/unit/test_recording_dashboard.py
-git commit -m "feat: start triggered recordings from exact firing sample"
+git commit -m "feat: start trigger sessions from exact firing sample"
 ```
 
 ---
 
-### Task 4: Trigger HTTP API and Status Contract
+### Task 4: HTTP API and Existing Server Test Harness
 
 **Files:**
-- Modify: `src/emonio_viewer/server/api.py` in route registration, recording status, and new trigger handlers/validators.
-- Create: `tests/integration/test_recording_trigger_api.py`
-- Modify: `tests/integration/test_server.py` only if existing app/test-client fixtures must expose the new endpoints.
+- Modify: `src/emonio_viewer/server/api.py` in route registration, recording status, STOP response handling, and new trigger handlers.
+- Modify: `tests/integration/test_server.py` in `FakeRecordingManager` and recording API tests.
 
 **Interfaces:**
-- Consumes RecordingManager methods from Task 2.
-- Produces endpoints:
 
 ```text
 POST /api/v1/recording/trigger/configure
 POST /api/v1/recording/trigger/arm
 POST /api/v1/recording/trigger/disarm
-GET  /api/v1/recording/status   # now includes triggers
+GET  /api/v1/recording/status
+POST /api/v1/recording/stop   # existing endpoint; armed-only STOP now returns DISARMED
 ```
 
-Configure request body:
+Configure body:
 
 ```json
 {
@@ -606,94 +600,74 @@ Configure request body:
 }
 ```
 
-ARM/DISARM request body:
+- [ ] **Step 1: Extend FakeRecordingManager first and write failing API tests**
 
-```json
-{"device_id": "emonio-id"}
+Add fake methods with call recording:
+
+```python
+configure_trigger(config)
+arm_trigger(device_id)
+disarm_trigger(device_id)
+trigger_statuses()
 ```
 
-- [ ] **Step 1: Write failing configure validation tests**
+Add fake STOP state so tests can distinguish active-stop and armed-only disarm.
 
-Assert 400 for:
+- [ ] **Step 2: Write failing validation tests**
 
-```text
-missing/invalid block
-missing/invalid measurement
-missing/invalid operator
-missing/invalid mode
-non-numeric threshold
-NaN/Infinity threshold
-non-positive interval
-non-finite interval
-interval below device acquisition interval
-```
+Require 400 for invalid/missing block, measurement, operator, mode, threshold, non-finite threshold, invalid interval, or interval below acquisition interval. Require 404 for unknown device.
 
-Assert 404 for unknown `device_id`.
+- [ ] **Step 3: Write failing state/HTTP tests**
 
-- [ ] **Step 2: Write failing state-transition HTTP tests**
-
-Assert:
+Require:
 
 ```text
-valid configure -> 200 DISARMED
+configure -> 200 DISARMED
 ARM without config -> 409
-valid ARM -> 200 ARMED
+ARM -> 200 ARMED
 DISARM -> 200 DISARMED
-ARM while recording -> 409 and recording remains active
-manual START while ARMED -> 200 RECORDING and trigger becomes DISARMED
+ARM while recording -> 409
+manual START while ARMED -> 200 RECORDING and later status DISARMED
+STOP while only ARMED -> 200 DISARMED
+STOP when neither recording nor ARMED -> 404
 commands disabled -> 503 for configure/arm/disarm
 ```
 
-- [ ] **Step 3: Write failing status response test**
+- [ ] **Step 4: Write failing status test**
 
-Existing keys remain:
+Existing keys remain `active` and `errors`; add `triggers`. Exact threshold and last-fired values remain JSON numbers, not formatted strings or enum representations.
 
-```json
-{"active": [], "errors": []}
+- [ ] **Step 5: Implement explicit API parsing**
+
+Use a helper that converts request strings to the exact trigger enums. Catch `ValueError` as `HTTPBadRequest`. Use `math.isfinite()` for threshold. Reuse `_positive_interval()` and `_validate_recording_interval_for_device()`.
+
+- [ ] **Step 6: Implement routes and error translation**
+
+Map:
+
+```text
+trigger not configured -> 409
+recording already active -> 409
+recording commands disabled -> 503
+unknown device -> 404
 ```
 
-and add:
+For existing STOP, distinguish manager result so armed-only STOP returns `{"state":"DISARMED"}` while active recording STOP remains `{"state":"STOPPED"}`. Preserve 404 when neither state existed.
 
-```json
-"triggers": [ ... ]
-```
-
-Verify exact numeric threshold is returned as a number and status does not expose Python enum representations.
-
-- [ ] **Step 4: Implement parsers with explicit enum conversion**
-
-Use narrow helpers in `api.py`:
-
-```python
-def _trigger_config(request, body: dict) -> TriggerConfig:
-    device_id = _require_device_id(request, body)
-    ...
-```
-
-Convert strings with the enum constructors and catch `ValueError` to `HTTPBadRequest`. Use `math.isfinite()` for threshold. Reuse `_positive_interval()` and `_validate_recording_interval_for_device()`.
-
-- [ ] **Step 5: Implement routes and conflict translation**
-
-Register exactly the three new POST routes. Convert `RuntimeError("trigger not configured")` and `RuntimeError("recording already active")` to HTTP 409. Convert `recording commands disabled` to 503.
-
-- [ ] **Step 6: Run API tests**
-
-Run:
+- [ ] **Step 7: Run GREEN**
 
 ```bash
-pytest -q tests/integration/test_recording_trigger_api.py tests/integration/test_server.py
+pytest -q tests/integration/test_server.py
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit API contract**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/emonio_viewer/server/api.py tests/integration/test_recording_trigger_api.py tests/integration/test_server.py
+git add src/emonio_viewer/server/api.py tests/integration/test_server.py
 git commit -m "feat: expose triggered recording API"
 ```
-
-If `tests/integration/test_server.py` required no change, do not stage it.
 
 ---
 
@@ -706,15 +680,12 @@ If `tests/integration/test_server.py` required no change, do not stage it.
 - Create: `tests/browser/test_triggered_recording_ui.py`
 
 **Interfaces:**
-- Produces API functions:
 
 ```javascript
 configureRecordingTrigger(deviceId, config)
 armRecordingTrigger(deviceId)
 disarmRecordingTrigger(deviceId)
 ```
-
-- Produces frontend trigger model:
 
 ```javascript
 export class RecordingTriggerState {
@@ -723,47 +694,37 @@ export class RecordingTriggerState {
 }
 ```
 
-Normalized trigger shape:
-
-```javascript
-Object.freeze({
-  device_id,
-  state,              // "ARMED" | "DISARMED"
-  config: configOrNull,
-  armed_utc,
-  last_fired_cycle_id,
-  last_fired_utc,
-  last_fired_value,
-})
-```
-
-`RecordingState` owns one `RecordingTriggerState` instance and exposes:
+`RecordingState` adds:
 
 ```javascript
 triggerForDevice(deviceId)
 ```
 
-- [ ] **Step 1: Write failing Node/static tests for normalization**
+and changes:
 
-Use the repository's existing Node/data-URL test style. Test valid records, malformed records fail closed, and exact threshold/last-fired numeric values are retained without formatting conversion.
+```javascript
+replaceStatus(activeRecords, errorRecords, triggerRecords = [])
+```
 
-- [ ] **Step 2: Run browser test and confirm RED**
+The default third argument preserves existing two-argument callers.
 
-Run:
+- [ ] **Step 1: Write failing Node/static normalization tests**
+
+Test valid ARMED/DISARMED records, malformed records fail closed, and exact numeric threshold/last-fired values are retained without display formatting.
+
+- [ ] **Step 2: Run RED**
 
 ```bash
 pytest -q tests/browser/test_triggered_recording_ui.py
 ```
 
-Expected: FAIL because `recording-trigger.js` and API functions do not exist.
+Expected: FAIL because trigger frontend module/functions do not exist.
 
-- [ ] **Step 3: Implement small independent trigger-state module**
+- [ ] **Step 3: Implement independent trigger state module**
 
-Keep it independent of DOM and `app.js`. Do not import acquisition/history modules.
+No DOM dependency. No history, acquisition, Modbus, or SCOPE imports.
 
-- [ ] **Step 4: Add API request functions**
-
-Use existing `requestJson()`:
+- [ ] **Step 4: Add API functions through existing `requestJson()`**
 
 ```javascript
 export function configureRecordingTrigger(deviceId, config) {
@@ -774,23 +735,21 @@ export function configureRecordingTrigger(deviceId, config) {
 }
 ```
 
-ARM and DISARM send only `device_id`.
+ARM/DISARM send only `device_id`.
 
-- [ ] **Step 5: Extend RecordingState without changing active/error behavior**
+- [ ] **Step 5: Extend RecordingState**
 
-`replaceStatus(activeRecords, errorRecords, triggerRecords = [])` must preserve existing two-argument callers. It updates trigger state separately and does not classify ARMED as active recording.
+Trigger state is independent of active/error state. ARMED must never make `isActive(deviceId)` true.
 
-- [ ] **Step 6: Run focused frontend state tests**
-
-Run:
+- [ ] **Step 6: Run GREEN**
 
 ```bash
-pytest -q tests/browser/test_triggered_recording_ui.py tests/unit/test_recording_dashboard.py
+pytest -q tests/browser/test_triggered_recording_ui.py
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit frontend data model**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add frontend/js/recording-trigger.js frontend/js/api.js frontend/js/recording-state.js tests/browser/test_triggered_recording_ui.py
@@ -799,17 +758,15 @@ git commit -m "feat: add triggered recording frontend state"
 
 ---
 
-### Task 6: Recording Drawer Trigger Controls and Structured CSS
+### Task 6: Recording Drawer Controls and Structured CSS
 
 **Files:**
-- Modify: `frontend/js/app.js` in recording imports, `ensureRecordingDashboardStructure`, recording-state refresh, selected-device rendering, and recording-control initialization.
+- Modify: `frontend/js/app.js` in recording imports, `ensureRecordingDashboardStructure`, `refreshRecordingState`, selected-device rendering, and recording control initialization.
 - Create: `frontend/css/recording-trigger.css`
-- Modify: `frontend/css/recording.css` only to import the new stylesheet.
+- Modify: `frontend/css/recording.css` only for the import.
 - Modify: `tests/browser/test_triggered_recording_ui.py`
 
-**Interfaces:**
-- Consumes API/state from Task 5.
-- Adds Recording drawer controls with stable IDs:
+**Stable control IDs:**
 
 ```text
 recording-trigger-state
@@ -825,72 +782,69 @@ recording-trigger-disarm
 recording-trigger-last-fired
 ```
 
-- [ ] **Step 1: Write failing structural browser tests**
+- [ ] **Step 1: Write failing structure/wiring tests**
 
-Assert source contains the stable IDs, imports `recording-trigger.css`, and wires configure/arm/disarm API functions. Assert the compact main recording strip is not replaced by trigger controls.
+Assert stable IDs, trigger API imports, and `recording-trigger.css` import. Assert the compact main recording strip remains present.
 
-- [ ] **Step 2: Write failing behavior tests for control-state rules**
+- [ ] **Step 2: Write failing control-state tests**
 
-Using the existing browser-test approach, prove rendering logic expresses:
+Backend-authoritative rules:
 
 ```text
-no selected device -> controls disabled
+no selected device -> trigger controls disabled
 active recording -> ARM disabled
 DISARMED configured trigger -> ARM enabled
-ARMED trigger -> DISARM enabled
-configuration input change -> backend configure call; returned state becomes DISARMED
-manual RECORD while ARMED -> normal manual start call; refreshed backend status determines DISARMED state
+ARMED -> DISARM enabled
+ARMED -> main STOP enabled
+configuration change -> configure request; returned state DISARMED
+manual RECORD while ARMED -> normal manual start; refreshed backend status controls final state
+manual STOP while only ARMED -> existing stop request; returned state DISARMED
 ```
 
-Do not simulate final backend state only in the browser.
+- [ ] **Step 3: Add trigger section inside existing Recording drawer**
 
-- [ ] **Step 3: Add trigger section to existing Recording drawer**
-
-Create the section from JavaScript in the same style as `ensureRecordingDashboardStructure()` so current HTML layout remains stable. Use select options:
+Controls:
 
 ```text
 MODE: LEVEL, CROSSING
 PHASE: A, B, C, TOTAL
 MEASUREMENT: U, I, P, Q, S, PF, f
 OPERATOR: >, >=, <, <=
-INTERVAL: reuse the same valid recording intervals used by manual recording controls
+THRESHOLD: free numeric input
+INTERVAL: existing valid recording intervals
+STATE
+CONFIGURE / ARM / DISARM
+LAST FIRED
 ```
 
-Threshold input must be `type="number"` and use a free numeric value; do not round a backend status value before assigning it to the input.
+Do not add trigger controls to the main measurement layout.
 
-- [ ] **Step 4: Wire backend-authoritative state refresh**
+- [ ] **Step 4: Refresh from backend after every state-changing command**
 
-`refreshRecordingState()` must pass `payload.triggers` into `recordingState.replaceStatus(...)`. After configure/arm/disarm/manual start/stop, refresh status before rendering final trigger state.
+`refreshRecordingState()` passes `payload.triggers` to `recordingState.replaceStatus(...)`. Configure, ARM, DISARM, manual START, and manual STOP all refresh before final render.
 
-- [ ] **Step 5: Add scoped trigger CSS**
+- [ ] **Step 5: Add scoped CSS**
 
-`frontend/css/recording-trigger.css` owns only `.recording-trigger-*` selectors. Keep layout compact and instrument-like. Use existing CSS variables and no inline style attributes.
+`frontend/css/recording-trigger.css` owns only `.recording-trigger-*` selectors. Use existing CSS variables. No inline styles.
 
-At the top of `frontend/css/recording.css`, add:
+Add only this to `frontend/css/recording.css`:
 
 ```css
 @import url("./recording-trigger.css");
 ```
 
-Do not move existing recording styles into the new file.
+Do not move existing recording CSS.
 
-- [ ] **Step 6: Run frontend tests**
-
-Run:
+- [ ] **Step 6: Run browser regression**
 
 ```bash
 pytest -q tests/browser/test_triggered_recording_ui.py
-```
-
-Then run the existing browser suite:
-
-```bash
 pytest -q tests/browser
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit UI**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add frontend/js/app.js frontend/css/recording.css frontend/css/recording-trigger.css tests/browser/test_triggered_recording_ui.py
@@ -899,100 +853,82 @@ git commit -m "feat: add triggered recording controls"
 
 ---
 
-### Task 7: Multi-Device and Scientific Regression Tests
+### Task 7: Multi-Device and Scientific Regression Evidence
 
 **Files:**
-- Modify: `tests/unit/test_recording.py`
 - Modify: `tests/integration/test_multi_device.py`
-- Modify: `tests/integration/test_end_to_end_sign.py` only if necessary to assert unchanged sign behavior; do not change production science code.
+- Modify: `tests/integration/test_end_to_end_sign.py` only when the existing fixture can directly prove unchanged sign behavior.
+- Modify: `tests/unit/test_recording.py` for any manager-level isolation case not already covered.
 
-**Interfaces:**
-- Consumes complete backend feature.
-- Produces regression evidence only.
+- [ ] **Step 1: Add failing two-Emonio isolation test**
 
-- [ ] **Step 1: Add failing multi-device trigger-isolation test**
+Configure and ARM A and B independently. Fire A. Assert A becomes recording/DISARMED while B remains ARMED and its previous-value evidence is unchanged by A samples. Then fire B from B evidence only.
 
-Configure and ARM A and B with different thresholds. Publish an A firing sample. Assert:
+- [ ] **Step 2: Add event-gap regression**
 
-```text
-A starts one recording and A trigger becomes DISARMED
-B remains ARMED
-A sample never changes B previous-value/cycle evidence
-B later fires from B evidence only
-```
+CROSSING baseline N followed by N+2 beyond threshold must not fire. N+2 becomes baseline. Only a real consecutive N+2 -> N+3 crossing can fire.
 
-- [ ] **Step 2: Add event-loss continuity regression**
+- [ ] **Step 3: Add canonical sign regression**
 
-Create a CROSSING state with baseline cycle N, then deliver cycle N+2 with a value beyond the threshold. Assert no trigger. Deliver N+3 from the opposite side as appropriate and assert only a real N+2 -> N+3 crossing can fire.
+Use negative P/Q evidence and prove trigger evaluation does not modify the sample or canonical sign. If `test_end_to_end_sign.py` already proves the same sample path and needs no trigger-specific edit, keep it byte-identical and rely on the full sign-path acceptance gate.
 
-- [ ] **Step 3: Add canonical sign regression around trigger usage**
-
-Use negative P/Q fixture evidence. Configure numeric thresholds that cross zero and prove trigger evaluation does not alter the measurement sample or canonical sign. Assert the same sample object values remain negative/positive exactly as supplied.
-
-- [ ] **Step 4: Run backend regression groups**
-
-Run:
+- [ ] **Step 4: Run backend regression group**
 
 ```bash
-pytest -q tests/unit/test_recording_trigger.py tests/unit/test_recording.py tests/integration/test_recording_trigger_api.py tests/integration/test_multi_device.py tests/integration/test_end_to_end_sign.py
+pytest -q \
+  tests/unit/test_recording_trigger.py \
+  tests/unit/test_recording.py \
+  tests/integration/test_server.py \
+  tests/integration/test_multi_device.py \
+  tests/integration/test_end_to_end_sign.py
 ```
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit regression evidence**
+- [ ] **Step 5: Commit only changed test files**
 
 ```bash
 git add tests/unit/test_recording.py tests/integration/test_multi_device.py tests/integration/test_end_to_end_sign.py
-git commit -m "test: verify triggered recording isolation and sign integrity"
+git diff --cached --quiet || git commit -m "test: verify trigger isolation and sign integrity"
 ```
 
-If `test_end_to_end_sign.py` required no modification, do not stage it.
+Do not modify production science code to make this regression task pass.
 
 ---
 
-### Task 8: Release Identity and Testing-Branch Documentation
+### Task 8: Release Identity, Full Acceptance, and Protected-Path Audit
 
 **Files:**
+- Modify: `tests/unit/test_release_identity.py`
 - Modify: `pyproject.toml`
 - Modify: `src/emonio_viewer/__init__.py`
-- Modify: `tests/unit/test_release_identity.py`
 - Modify: `README.md`
+- No other production changes unless a failing test proves a defect and systematic debugging identifies the cause.
 
-**Interfaces:**
-- Produces release identity `0.4.16` and documents feature status as Testing only.
+- [ ] **Step 1: Write failing release identity expectation**
 
-- [ ] **Step 1: Write the failing release identity expectation**
+Change the expected identity to `0.4.16` first.
 
-Change the expected release identity test to `0.4.16` before changing production version files.
-
-- [ ] **Step 2: Run release identity test and confirm RED**
-
-Run:
+- [ ] **Step 2: Run RED**
 
 ```bash
 pytest -q tests/unit/test_release_identity.py
 ```
 
-Expected: FAIL because runtime/package identity is still `0.4.15`.
+Expected: FAIL while package/runtime still report `0.4.15`.
 
-- [ ] **Step 3: Change only release identity values**
-
-Set:
+- [ ] **Step 3: Set version only**
 
 ```text
 pyproject.toml version = "0.4.16"
 src/emonio_viewer/__init__.py __version__ = "0.4.16"
 ```
 
-Do not alter other package metadata as part of the version bump.
+- [ ] **Step 4: Update README without promotion claims**
 
-- [ ] **Step 4: Update README status**
+Document v0.4.16 Testing and Triggered Recording. Keep trusted `main` baseline wording unchanged. Do not call v0.4.16 field-confirmed yet.
 
-Document that `v0.4.16 Testing` adds one-shot LEVEL/CROSSING triggered recording and is on `testing`. Keep the trusted `main` baseline statement unchanged. Do not claim field confirmation or full acceptance before those gates occur.
-
-- [ ] **Step 5: Run release identity and publication-sensitive unit tests**
-
-Run:
+- [ ] **Step 5: Run release/publication-sensitive tests**
 
 ```bash
 pytest -q tests/unit/test_release_identity.py tests/unit/test_publication_contract.py tests/unit/test_publication_gate.py tests/unit/test_release_builder.py
@@ -1000,38 +936,24 @@ pytest -q tests/unit/test_release_identity.py tests/unit/test_publication_contra
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit release identity**
+- [ ] **Step 6: Commit version/docs**
 
 ```bash
 git add pyproject.toml src/emonio_viewer/__init__.py tests/unit/test_release_identity.py README.md
 git commit -m "chore: set v0.4.16 testing identity"
 ```
 
----
-
-### Task 9: Full Verification and Protected-Path Audit
-
-**Files:**
-- No production changes unless a test proves a defect.
-- If any failure appears, stop this task and use `superpowers:systematic-debugging` before changing code.
-
-**Interfaces:**
-- Produces acceptance evidence for the testing candidate. It does not promote or merge `main`.
-
-- [ ] **Step 1: Verify working tree and branch**
-
-Run:
+- [ ] **Step 7: Verify branch and clean diff syntax**
 
 ```bash
 git status -sb
 git branch --show-current
+git diff --check b539efe7eb3a11d53a3b291254ddd0c50a2cf3df..HEAD
 ```
 
-Expected branch: `testing`.
+Expected branch: `testing`. Expected diff-check output: none.
 
-- [ ] **Step 2: Verify protected scientific/runtime paths are unchanged from the v0.4.15 field-confirmed code baseline**
-
-Run:
+- [ ] **Step 8: Prove protected paths remain unchanged from v0.4.15 code baseline**
 
 ```bash
 git diff --exit-code b539efe7eb3a11d53a3b291254ddd0c50a2cf3df -- \
@@ -1042,41 +964,29 @@ git diff --exit-code b539efe7eb3a11d53a3b291254ddd0c50a2cf3df -- \
   src/emonio_viewer/scope
 ```
 
-Expected: no output and exit status 0.
+Expected: no output, exit 0.
 
-`src/emonio_viewer/recording/*` is intentionally changed and is not part of this byte-identical check.
-
-- [ ] **Step 3: Run whitespace/diff validation**
-
-```bash
-git diff --check b539efe7eb3a11d53a3b291254ddd0c50a2cf3df..HEAD
-```
-
-Expected: no errors.
-
-- [ ] **Step 4: Run focused triggered-recording tests**
+- [ ] **Step 9: Run focused trigger regression**
 
 ```bash
 pytest -q \
   tests/unit/test_recording_trigger.py \
   tests/unit/test_recording.py \
   tests/unit/test_recording_dashboard.py \
-  tests/integration/test_recording_trigger_api.py \
+  tests/integration/test_server.py \
   tests/integration/test_multi_device.py \
   tests/browser/test_triggered_recording_ui.py
 ```
 
 Expected: PASS.
 
-- [ ] **Step 5: Run complete project acceptance**
-
-Run the canonical project acceptance script:
+- [ ] **Step 10: Run complete project acceptance**
 
 ```bash
 ./tools/ari-emonio-acceptance.sh
 ```
 
-Required evidence before calling the candidate automated-acceptance complete:
+Require explicit evidence for:
 
 ```text
 unit PASS
@@ -1088,47 +998,43 @@ scientific sign path PASS
 publication/package gates PASS
 ```
 
-Do not infer any PASS result that the script does not print or otherwise prove.
+Do not infer a gate that was not proved.
 
-- [ ] **Step 6: Verify `main` remains untouched**
+If any failure occurs, stop and invoke `superpowers:systematic-debugging` before modifying code.
 
-Run:
+- [ ] **Step 11: Verify `main` remains unchanged**
 
 ```bash
 git fetch origin
 git rev-parse origin/main
 ```
 
-Expected exact SHA:
+Expected:
 
 ```text
 a0c19118f5a83fb61c559c1470b6aeb0950f058e
 ```
 
-If `origin/main` differs, do not modify it. Report the difference as external repository state.
-
-- [ ] **Step 7: Record candidate evidence without promotion**
-
-At this point the result can be called `v0.4.16 Testing automated-acceptance candidate` only if every required gate passed. It must not be called field-confirmed until real Emonio testing succeeds. It must not be merged to `main`.
+If it differs, do not modify `main`; report the external repository state.
 
 ---
 
-## Field Test Checklist After Automated Acceptance
+## Field Test Checklist
 
-Use one real Emonio first, then a second device if available. These are operator checks, not substitutes for automated tests.
+After complete automated acceptance:
 
-1. Configure `LEVEL`, Phase A, P, `>`, threshold safely above/below current P as needed, and ARM it.
-2. Confirm ARMED does not fire from the pre-ARM displayed/stored sample.
-3. Cause the next real canonical sample to satisfy the LEVEL condition and verify recording starts on that sample.
-4. Inspect `measurements.csv` and `session.json`; verify firing cycle ID/time/value match the trigger evidence.
-5. Configure `CROSSING` and prove the first post-ARM sample only establishes baseline.
-6. Produce a real threshold crossing and verify one session starts once.
-7. Verify trigger state is DISARMED after firing and remains DISARMED after STOP.
-8. ARM a trigger, press manual RECORD, and verify manual recording starts and trigger becomes DISARMED.
-9. While recording, attempt ARM and verify conflict without disturbing the active recording.
-10. Change trigger configuration while ARMED and verify it becomes DISARMED.
-11. Restart Viewer after ARM and verify it starts DISARMED.
-12. With two Emonios, verify a trigger on one device cannot be fired by the other device.
-13. Verify existing manual recording, Density, History Inspector, Vector, Modbus evidence, and SCOPE behavior remain normal.
+1. ARM LEVEL and verify the pre-ARM stored/displayed sample cannot fire it.
+2. Make the next real canonical sample satisfy LEVEL and verify recording starts from that exact cycle.
+3. Verify first `measurements.csv` row and trigger evidence use the same firing cycle/time/value.
+4. ARM CROSSING and verify the first post-ARM sample establishes baseline only.
+5. Produce a real consecutive threshold crossing and verify one recording starts.
+6. Verify trigger is DISARMED after firing and does not re-arm after STOP.
+7. ARM, then use manual RECORD; verify trigger disarms and manual recording starts normally.
+8. ARM without recording, then press main STOP; verify trigger becomes DISARMED.
+9. While recording, attempt ARM; verify conflict and uninterrupted recording.
+10. Change trigger configuration while ARMED; verify DISARMED.
+11. Restart Viewer after ARM; verify DISARMED.
+12. With two Emonios, verify one device cannot fire or alter the other device trigger.
+13. Verify existing manual recording, Density, History Inspector, Vector, Modbus evidence, and SCOPE remain normal.
 
-Field evidence is required before v0.4.16 can be called field-confirmed. `main` remains frozen unless the user explicitly changes that policy.
+Only after real-device success can v0.4.16 be called field-confirmed. Do not merge to `main`.
