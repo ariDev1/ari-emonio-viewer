@@ -24,12 +24,12 @@ jobs:
 
           history = Path('tests/browser/test_history_math.py')
           text = history.read_text(encoding='utf-8')
-          old = 'classList: { toggle() {} },'
+          old = 'classList: {{ toggle() {{}} }},'
           count = text.count(old)
           if count < 1:
               raise SystemExit('expected fake classList pattern not found')
           history.write_text(
-              text.replace(old, 'classList: { toggle() {}, remove() {} },'),
+              text.replace(old, 'classList: {{ toggle() {{}}, remove() {{}} }},'),
               encoding='utf-8',
           )
           print(f'updated {count} fake classList definition(s)')
