@@ -83,3 +83,69 @@ def test_recording_state_keeps_trigger_state_separate_from_active_recording_stat
     assert "this._triggers.replace(triggerRecords);" in source
     assert "triggerForDevice(deviceId)" in source
     assert "return this._triggers.forDevice(deviceId);" in source
+
+
+def test_recording_drawer_contains_stable_trigger_controls_without_replacing_main_strip() -> None:
+    source = Path("frontend/js/app.js").read_text(encoding="utf-8")
+    for control_id in (
+        "recording-trigger-state",
+        "recording-trigger-mode",
+        "recording-trigger-block",
+        "recording-trigger-measurement",
+        "recording-trigger-operator",
+        "recording-trigger-threshold",
+        "recording-trigger-interval",
+        "recording-trigger-configure",
+        "recording-trigger-arm",
+        "recording-trigger-disarm",
+        "recording-trigger-last-fired",
+    ):
+        assert control_id in source
+    assert 'document.getElementById("record-start").addEventListener' in source
+    assert 'document.getElementById("record-stop").addEventListener' in source
+
+
+def test_recording_status_refresh_is_backend_authoritative_for_trigger_state() -> None:
+    source = Path("frontend/js/app.js").read_text(encoding="utf-8")
+    assert "payload?.triggers ?? []" in source
+    assert "recordingState.replaceStatus(" in source
+    assert "configureRecordingTrigger" in source
+    assert "armRecordingTrigger" in source
+    assert "disarmRecordingTrigger" in source
+    assert "await refreshRecordingState(" in source
+
+
+def test_trigger_controls_encode_recording_and_armed_ownership_rules() -> None:
+    source = Path("frontend/js/app.js").read_text(encoding="utf-8")
+    assert "selectedTrigger = selectedDevice ? recordingState.triggerForDevice(selectedDevice) : null" in source
+    assert 'selectedTrigger?.state === "ARMED"' in source
+    assert "renderRecordingTriggerPanel" in source
+    assert "configureSelectedTrigger" in source
+    assert "armSelectedTrigger" in source
+    assert "disarmSelectedTrigger" in source
+    assert "recordingState.isActive(deviceId) || recordingState.triggerForDevice(deviceId)?.state === \"ARMED\"" in source
+
+
+def test_trigger_configuration_changes_are_sent_to_backend_not_only_simulated_locally() -> None:
+    source = Path("frontend/js/app.js").read_text(encoding="utf-8")
+    handler = source[source.index("function initializeRecordingTriggerControls"):source.index("async function main")]
+    for control_id in (
+        "recording-trigger-mode",
+        "recording-trigger-block",
+        "recording-trigger-measurement",
+        "recording-trigger-operator",
+        "recording-trigger-threshold",
+        "recording-trigger-interval",
+    ):
+        assert f'"{control_id}"' in handler
+    assert 'addEventListener("change", configureSelectedTrigger)' in handler
+
+
+def test_trigger_css_is_structured_and_scoped() -> None:
+    recording_css = Path("frontend/css/recording.css").read_text(encoding="utf-8")
+    trigger_css = Path("frontend/css/recording-trigger.css").read_text(encoding="utf-8")
+    assert recording_css.startswith('@import url("./recording-trigger.css");')
+    assert ".recording-trigger-" not in recording_css.replace('@import url("./recording-trigger.css");', "")
+    assert ".recording-trigger-panel" in trigger_css
+    assert ".recording-trigger-grid" in trigger_css
+    assert "style=" not in trigger_css
