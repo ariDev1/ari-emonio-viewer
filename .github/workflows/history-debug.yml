@@ -1,0 +1,39 @@
+name: History Test Diagnostic
+
+on:
+  push:
+    branches:
+      - testing
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Print Node runtime
+        run: node --version
+      - name: Reproduce history keyboard failure and print Node stderr tail
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import subprocess
+
+          path = "tests/browser/test_history_math.py"
+          spec = importlib.util.spec_from_file_location("history_test", path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          try:
+              module.test_history_keyboard_handler_steps_selected_real_sample_and_does_not_wrap()
+          except subprocess.CalledProcessError as exc:
+              print("=== NODE STDERR TAIL ===")
+              print((exc.stderr or "")[-12000:])
+              print("=== END NODE STDERR TAIL ===")
+              raise
+          PY
