@@ -38,6 +38,7 @@ let socket = null;
 let reconnectTimer = null;
 const recordingState = new RecordingState();
 let recordingStatusKnown = false;
+let triggerDraftDevice = null;
 const backendDeviceState = new Map();
 
 function setText(id, value) {
@@ -467,6 +468,11 @@ function setRecordingIntervalValue(value) {
   }
 }
 
+function setRecordingTriggerControlValue(id, value) {
+  const node = document.getElementById(id);
+  if (node && document.activeElement !== node) node.value = String(value);
+}
+
 function renderRecordingTriggerPanel(selectedTrigger, selectedRecording) {
   const stateNode = document.getElementById("recording-trigger-state");
   if (!stateNode) return;
@@ -497,11 +503,12 @@ function renderRecordingTriggerPanel(selectedTrigger, selectedRecording) {
 
   controls.forEach((node) => { node.disabled = false; });
   if (selectedTrigger?.config) {
-    document.getElementById("recording-trigger-mode").value = selectedTrigger.config.mode;
-    document.getElementById("recording-trigger-block").value = selectedTrigger.config.block;
-    document.getElementById("recording-trigger-measurement").value = selectedTrigger.config.measurement;
-    document.getElementById("recording-trigger-operator").value = selectedTrigger.config.operator;
-    document.getElementById("recording-trigger-threshold").value = String(selectedTrigger.config.threshold);
+    triggerDraftDevice = selectedDevice;
+    setRecordingTriggerControlValue("recording-trigger-mode", selectedTrigger.config.mode);
+    setRecordingTriggerControlValue("recording-trigger-block", selectedTrigger.config.block);
+    setRecordingTriggerControlValue("recording-trigger-measurement", selectedTrigger.config.measurement);
+    setRecordingTriggerControlValue("recording-trigger-operator", selectedTrigger.config.operator);
+    setRecordingTriggerControlValue("recording-trigger-threshold", selectedTrigger.config.threshold);
     const triggerInterval = document.getElementById("recording-trigger-interval");
     const intervalValue = String(selectedTrigger.config.recording_interval_s);
     if (![...triggerInterval.options].some((option) => option.value === intervalValue)) {
@@ -509,13 +516,14 @@ function renderRecordingTriggerPanel(selectedTrigger, selectedRecording) {
       option.value = intervalValue;
       triggerInterval.appendChild(option);
     }
-    triggerInterval.value = intervalValue;
-  } else {
-    document.getElementById("recording-trigger-mode").value = "LEVEL";
-    document.getElementById("recording-trigger-block").value = "A";
-    document.getElementById("recording-trigger-measurement").value = "P";
-    document.getElementById("recording-trigger-operator").value = "GT";
-    document.getElementById("recording-trigger-threshold").value = "";
+    setRecordingTriggerControlValue("recording-trigger-interval", intervalValue);
+  } else if (triggerDraftDevice !== selectedDevice) {
+    triggerDraftDevice = selectedDevice;
+    setRecordingTriggerControlValue("recording-trigger-mode", "LEVEL");
+    setRecordingTriggerControlValue("recording-trigger-block", "A");
+    setRecordingTriggerControlValue("recording-trigger-measurement", "P");
+    setRecordingTriggerControlValue("recording-trigger-operator", "GT");
+    setRecordingTriggerControlValue("recording-trigger-threshold", "");
   }
 
   const armed = selectedTrigger?.state === "ARMED";
@@ -923,7 +931,12 @@ function initializeRecordingTriggerControls() {
   const configureSelectedTrigger = async () => {
     const deviceId = selectedDevice;
     if (!recordingStatusKnown || !deviceId) return;
-    const threshold = Number(document.getElementById("recording-trigger-threshold").value);
+    const thresholdText = document.getElementById("recording-trigger-threshold").value.trim();
+    if (thresholdText === "") {
+      document.getElementById("recording-detail").textContent = "Trigger threshold is required.";
+      return;
+    }
+    const threshold = Number(thresholdText);
     const interval = Number(document.getElementById("recording-trigger-interval").value);
     if (!Number.isFinite(threshold) || !Number.isFinite(interval) || interval <= 0) {
       document.getElementById("recording-detail").textContent = "Trigger configuration requires a finite threshold and recording interval.";
