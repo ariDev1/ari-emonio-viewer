@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 import json
 import math
 import os
@@ -12,6 +13,12 @@ from emonio_viewer.runtime.events import DiagnosticEvent, RuntimeEventBus, Sever
 from emonio_viewer.runtime.store import RuntimeStore
 
 from .csv_writer import CsvWriters, sample_to_csv_row
+from .negative_monitor import (
+    MonitorBoundary,
+    NegativeMonitorConfig,
+    NegativeMonitorRuntime,
+    invalidate_monitor_continuity,
+)
 from .session import create_session_directory, initial_session_metadata
 from .trigger import (
     TriggerConfig,
@@ -32,6 +39,18 @@ def _validate_recording_interval(interval_s: float, acquisition_interval_s: floa
             "recording interval must be greater than or equal to acquisition interval "
             f"({acquisition_interval_s:g} s)"
         )
+
+
+class MonitorOperationalState(str, Enum):
+    OFF = "OFF"
+    WAITING = "WAITING"
+    RECORDING = "RECORDING"
+    WAITING_FOR_CLEAR = "WAITING_FOR_CLEAR"
+
+
+class RecordingOwner(str, Enum):
+    MANUAL = "MANUAL"
+    NEGATIVE_CONDITION_MONITOR = "NEGATIVE_CONDITION_MONITOR"
 
 
 class SessionRecorder:
@@ -307,6 +326,11 @@ class RecordingManager:
         self._trigger_configs: dict[str, TriggerConfig] = {}
         self._armed_triggers: dict[str, TriggerRuntimeState] = {}
         self._trigger_last_fired: dict[str, dict] = {}
+        self._monitor_configs: dict[str, NegativeMonitorConfig] = {}
+        self._monitor_runtime: dict[str, NegativeMonitorRuntime] = {}
+        self._monitor_state: dict[str, MonitorOperationalState] = {}
+        self._monitor_last_event: dict[str, dict] = {}
+        self._active_owner: dict[str, RecordingOwner] = {}
         self._lock = threading.RLock()
         self._accept_commands = True
         self._subscriber = bus.subscribe(maxsize=256)
@@ -335,6 +359,114 @@ class RecordingManager:
     def _require_commands_enabled(self) -> None:
         if not self._accept_commands:
             raise RuntimeError("recording commands disabled")
+
+    def _monitor_status(self, device_id: str) -> dict:
+        config = self._monitor_configs[device_id]
+        runtime = self._monitor_runtime.get(device_id)
+        active_conditions = []
+        if runtime is not None:
+            active_conditions = [
+                {"phase": key.phase.value, "measurement": key.measurement.value}
+                for key in sorted(
+                    runtime.active_keys,
+                    key=lambda item: (item.phase.value, item.measurement.value),
+                )
+            ]
+        last_event = self._monitor_last_event.get(device_id)
+        return {
+            "device_id": device_id,
+            "state": self._monitor_state.get(
+                device_id, MonitorOperationalState.OFF
+            ).value,
+            "config": {
+                "condition": config.condition.value,
+                "phases": [phase.value for phase in config.phases],
+                "recording_interval_s": config.recording_interval_s,
+            },
+            "active_conditions": active_conditions,
+            "last_event": None if last_event is None else dict(last_event),
+        }
+
+    def _disable_monitor_locked(self, device_id: str) -> None:
+        if self._active_owner.get(device_id) is RecordingOwner.NEGATIVE_CONDITION_MONITOR:
+            recorder = self._active.get(device_id)
+            if recorder is not None:
+                recorder.stop()
+            self._active.pop(device_id, None)
+            self._active_owner.pop(device_id, None)
+        self._monitor_runtime.pop(device_id, None)
+        self._monitor_state[device_id] = MonitorOperationalState.OFF
+
+    def configure_monitor(self, config: NegativeMonitorConfig) -> dict:
+        with self._lock:
+            self._require_commands_enabled()
+            if config.device_id not in self._devices:
+                raise KeyError(config.device_id)
+            _validate_recording_interval(
+                config.recording_interval_s,
+                self._devices[config.device_id].poll_interval_s,
+            )
+            self._disable_monitor_locked(config.device_id)
+            self._monitor_configs[config.device_id] = config
+            self._monitor_state[config.device_id] = MonitorOperationalState.OFF
+            return self._monitor_status(config.device_id)
+
+    def enable_monitor(self, device_id: str) -> dict:
+        with self._lock:
+            self._require_commands_enabled()
+            if device_id not in self._devices:
+                raise KeyError(device_id)
+            config = self._monitor_configs.get(device_id)
+            if config is None:
+                raise RuntimeError("monitor not configured")
+            snapshot = self._store.get_device(device_id)
+            floor = (
+                None
+                if snapshot.last_sample is None
+                else snapshot.last_sample.identity.cycle_id
+            )
+            self._monitor_runtime[device_id] = NegativeMonitorRuntime(
+                config=config,
+                enabled_utc=datetime.now(timezone.utc),
+                enable_floor_cycle_id=floor,
+            )
+            self._monitor_state[device_id] = MonitorOperationalState.WAITING
+            return self._monitor_status(device_id)
+
+    def disable_monitor(self, device_id: str) -> dict:
+        with self._lock:
+            self._require_commands_enabled()
+            if device_id not in self._devices:
+                raise KeyError(device_id)
+            if device_id not in self._monitor_configs:
+                raise RuntimeError("monitor not configured")
+            self._disable_monitor_locked(device_id)
+            return self._monitor_status(device_id)
+
+    def monitor_statuses(self) -> tuple[dict, ...]:
+        with self._lock:
+            return tuple(
+                self._monitor_status(device_id)
+                for device_id in sorted(self._monitor_configs)
+            )
+
+    def note_device_disconnect(self, device_id: str, occurred_utc: datetime) -> None:
+        with self._lock:
+            if device_id not in self._devices:
+                raise KeyError(device_id)
+            runtime = self._monitor_runtime.get(device_id)
+            if runtime is None:
+                return
+            invalidate_monitor_continuity(runtime, MonitorBoundary.RECONNECT)
+            recorder = self._active.get(device_id)
+            if recorder is not None:
+                recorder.record_event(
+                    occurred_utc,
+                    "DEVICE_DISCONNECTED",
+                    "INFO",
+                    0,
+                    "monitor continuity boundary=RECONNECT",
+                )
 
     def _trigger_status(self, device_id: str) -> dict:
         config = self._trigger_configs[device_id]
@@ -438,6 +570,7 @@ class RecordingManager:
                 )
             self._failed.pop(device_id, None)
             self._active[device_id] = recorder
+            self._active_owner[device_id] = RecordingOwner.MANUAL
             return recorder.session_dir
 
     def stop(self, device_id: str) -> None:
@@ -446,6 +579,7 @@ class RecordingManager:
             was_armed = self._armed_triggers.pop(device_id, None) is not None
             recorder = self._active.pop(device_id, None)
             if recorder is not None:
+                self._active_owner.pop(device_id, None)
                 recorder.stop()
                 return
             if was_armed:
@@ -472,8 +606,10 @@ class RecordingManager:
         cleanup_errors: list[str] = []
         with self._lock:
             self._armed_triggers.clear()
+            self._monitor_runtime.clear()
             for device_id in tuple(self._active):
                 recorder = self._active.pop(device_id)
+                self._active_owner.pop(device_id, None)
                 try:
                     recorder.stop()
                 except Exception as exc:
@@ -500,6 +636,7 @@ class RecordingManager:
         current = self._active.get(device_id)
         if current is recorder:
             self._active.pop(device_id, None)
+            self._active_owner.pop(device_id, None)
         status = recorder.fail(error, failed_utc=failed_utc, cycle_id=cycle_id)
         self._failed[device_id] = status
 
