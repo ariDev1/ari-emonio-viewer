@@ -3,7 +3,7 @@
 Engineering viewer for Emonio P3 electrical measurements on Linux.
 
 The trusted field baseline is **v0.4.14**.
-The `testing` branch is **v0.4.16**. Tested device firmware: `3.0.79-release`.
+The `testing` branch is **v0.4.16 Testing**. Tested device firmware: `3.0.79-release`.
 
 ## Measurement architecture
 
@@ -114,4 +114,4 @@ The v0.4.16 acceptance workflow also verifies the protected Modbus, measurement,
 - [ARI_EMONIO_VIEWER_TECHNICAL_OVERVIEW.md](ARI_EMONIO_VIEWER_TECHNICAL_OVERVIEW.md)
 - [SECURITY.md](SECURITY.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
-- [LICENSE](LICENSE)
+- Source-available software: [LICENSE](LICENSE)
