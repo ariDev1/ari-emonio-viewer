@@ -14,6 +14,11 @@ def test_measurement_renderer_has_no_removed_device_ip_write() -> None:
     assert 'getElementById("device-ip")' not in source
 
 
+def test_application_controller_has_no_removed_device_ip_write() -> None:
+    source = Path("frontend/js/app.js").read_text(encoding="utf-8")
+    assert 'getElementById("device-ip")' not in source
+
+
 def test_status_header_grid_has_eight_measurement_status_columns() -> None:
     css = Path("frontend/css/layout.css").read_text(encoding="utf-8")
     assert "grid-template-columns: repeat(8, minmax(62px, auto));" in css
