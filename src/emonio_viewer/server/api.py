@@ -7,6 +7,13 @@ from emonio_viewer.device_evidence.telnet import CtConfigurationReadError
 from emonio_viewer.lifecycle.model import DeviceLifecycleCommandError
 from emonio_viewer.measurement.model import MeasurementSample
 from emonio_viewer.modbus.register_map import REGISTER_MAP_ID
+from emonio_viewer.recording.trigger import (
+    TriggerBlock,
+    TriggerConfig,
+    TriggerMeasurement,
+    TriggerMode,
+    TriggerOperator,
+)
 from emonio_viewer.scope.service import ScopeServiceError, ScopeSessionConflict
 
 from .keys import (
@@ -96,6 +103,9 @@ def register_api_routes(app: web.Application) -> None:
     app.router.add_post("/api/v1/recording/start", start_recording)
     app.router.add_post("/api/v1/recording/stop", stop_recording)
     app.router.add_post("/api/v1/recording/interval", change_recording_interval)
+    app.router.add_post("/api/v1/recording/trigger/configure", configure_recording_trigger)
+    app.router.add_post("/api/v1/recording/trigger/arm", arm_recording_trigger)
+    app.router.add_post("/api/v1/recording/trigger/disarm", disarm_recording_trigger)
     app.router.add_get("/api/v1/devices/{device_id}/scope", get_scope_status)
     app.router.add_post("/api/v1/devices/{device_id}/scope/start", start_scope)
     app.router.add_post("/api/v1/devices/{device_id}/scope/hold", hold_scope)
@@ -309,6 +319,57 @@ def _validate_recording_interval_for_device(request, device_id: str, interval_s:
         )
 
 
+def _trigger_config(request, body: dict) -> TriggerConfig:
+    device_id = _require_device_id(request, body)
+    try:
+        threshold = float(body["threshold"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise web.HTTPBadRequest(text="threshold must be numeric") from exc
+    if not math.isfinite(threshold):
+        raise web.HTTPBadRequest(text="threshold must be finite")
+
+    try:
+        interval = float(body["recording_interval_s"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise web.HTTPBadRequest(text="recording_interval_s must be numeric") from exc
+    if not math.isfinite(interval):
+        raise web.HTTPBadRequest(text="recording_interval_s must be finite")
+    if interval <= 0:
+        raise web.HTTPBadRequest(text="recording_interval_s must be > 0")
+    _validate_recording_interval_for_device(request, device_id, interval)
+
+    try:
+        block = TriggerBlock(body["block"])
+        measurement = TriggerMeasurement(body["measurement"])
+        operator = TriggerOperator(body["operator"])
+        mode = TriggerMode(body["mode"])
+    except (KeyError, ValueError) as exc:
+        raise web.HTTPBadRequest(text="invalid trigger configuration") from exc
+
+    return TriggerConfig(
+        device_id=device_id,
+        block=block,
+        measurement=measurement,
+        operator=operator,
+        threshold=threshold,
+        mode=mode,
+        recording_interval_s=interval,
+    )
+
+
+def _trigger_command_result(call):
+    try:
+        return call()
+    except KeyError as exc:
+        raise web.HTTPNotFound(text="unknown device_id") from exc
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    except RuntimeError as exc:
+        if str(exc) == "recording commands disabled":
+            raise web.HTTPServiceUnavailable(text=str(exc)) from exc
+        raise web.HTTPConflict(text=str(exc)) from exc
+
+
 async def get_ct_configuration(request):
     device_id = request.match_info["device_id"]
     _device_config(request, device_id)
@@ -440,10 +501,12 @@ async def connect_device(request):
 
 async def get_recording_status(request):
     recording = _recording(request)
+    trigger_statuses = getattr(recording, "trigger_statuses", lambda: ())
     return web.json_response(
         {
             "active": list(recording.active_recordings()),
             "errors": list(recording.recording_failures()),
+            "triggers": list(trigger_statuses()),
         }
     )
 
@@ -489,6 +552,27 @@ async def change_recording_interval(request):
     except RuntimeError as exc:
         raise web.HTTPServiceUnavailable(text=str(exc)) from exc
     return web.json_response({"state": "RECORDING", "interval_s": interval})
+
+
+async def configure_recording_trigger(request):
+    body = await _body(request)
+    config = _trigger_config(request, body)
+    status = _trigger_command_result(lambda: _recording(request).configure_trigger(config))
+    return web.json_response(status)
+
+
+async def arm_recording_trigger(request):
+    body = await _body(request)
+    device_id = _require_device_id(request, body)
+    status = _trigger_command_result(lambda: _recording(request).arm_trigger(device_id))
+    return web.json_response(status)
+
+
+async def disarm_recording_trigger(request):
+    body = await _body(request)
+    device_id = _require_device_id(request, body)
+    status = _trigger_command_result(lambda: _recording(request).disarm_trigger(device_id))
+    return web.json_response(status)
 
 
 async def get_scope_status(request):
