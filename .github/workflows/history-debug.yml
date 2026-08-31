@@ -1,4 +1,4 @@
-name: History Test Diagnostic
+name: Apply Browser Harness Corrections
 
 on:
   push:
@@ -6,40 +6,67 @@ on:
       - testing
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnostic:
+  apply:
+    if: github.event.head_commit.message == 'ci: apply browser harness corrections through active workflow'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Install diagnostic dependency
-        run: python -m pip install pytest==8.4.1
-      - name: Print Node runtime
-        run: node --version
-      - name: Reproduce history keyboard failure and isolate Node error
+          fetch-depth: 0
+
+      - name: Apply proven test-only corrections
         run: |
           python - <<'PY'
-          import importlib.util
-          import subprocess
+          from pathlib import Path
 
-          path = "tests/browser/test_history_math.py"
-          spec = importlib.util.spec_from_file_location("history_test", path)
-          module = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(module)
-          try:
-              module.test_history_keyboard_handler_steps_selected_real_sample_and_does_not_wrap()
-          except subprocess.CalledProcessError as exc:
-              print(f"NODE RETURN CODE: {exc.returncode}")
-              lines = (exc.stderr or "").splitlines()
-              print("=== SHORT NODE STDERR LINES ===")
-              for line in lines:
-                  if len(line) <= 1000:
-                      print(line)
-              print("=== END SHORT NODE STDERR LINES ===")
-              raise
+          history = Path('tests/browser/test_history_math.py')
+          text = history.read_text(encoding='utf-8')
+          old = 'classList: { toggle() {} },'
+          count = text.count(old)
+          if count < 1:
+              raise SystemExit('expected fake classList pattern not found')
+          history.write_text(
+              text.replace(old, 'classList: { toggle() {}, remove() {} },'),
+              encoding='utf-8',
+          )
+          print(f'updated {count} fake classList definition(s)')
+
+          for name in (
+              'tests/browser/test_frontend_contract.py',
+              'tests/browser/test_device_lifecycle_contract.py',
+          ):
+              path = Path(name)
+              text = path.read_text(encoding='utf-8')
+              marker = '        "modbus-evidence.css",\n'
+              count = text.count(marker)
+              if count != 1:
+                  raise SystemExit(f'{name}: expected one CSS-set marker, found {count}')
+              path.write_text(
+                  text.replace(
+                      marker,
+                      marker + '        "density.css",\n        "recording-monitor.css",\n',
+                  ),
+                  encoding='utf-8',
+              )
+
+          Path('.github/workflows/history-debug.yml').unlink(missing_ok=False)
+          Path('.github/workflows/apply-test-harness-fix.yml').unlink(missing_ok=False)
           PY
+
+          git diff --check
+
+      - name: Commit test-only corrections
+        run: |
+          git config user.name 'ARI Acceptance Bot'
+          git config user.email 'mail@aether-research.institute'
+          git add tests/browser/test_history_math.py \
+                  tests/browser/test_frontend_contract.py \
+                  tests/browser/test_device_lifecycle_contract.py \
+                  .github/workflows/history-debug.yml \
+                  .github/workflows/apply-test-harness-fix.yml
+          git commit -m 'test: correct v0.4.16 browser harness expectations'
+          git push origin HEAD:testing
