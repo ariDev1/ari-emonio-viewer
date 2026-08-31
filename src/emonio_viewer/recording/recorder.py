@@ -13,7 +13,13 @@ from emonio_viewer.runtime.store import RuntimeStore
 
 from .csv_writer import CsvWriters, sample_to_csv_row
 from .session import create_session_directory, initial_session_metadata
-from .trigger import TriggerConfig, TriggerRuntimeState
+from .trigger import (
+    TriggerConfig,
+    TriggerMode,
+    TriggerRuntimeState,
+    evaluate_measurement,
+    invalidate_crossing_continuity,
+)
 
 
 def _validate_recording_interval(interval_s: float, acquisition_interval_s: float) -> None:
@@ -38,6 +44,7 @@ class SessionRecorder:
         recording_interval_s: float,
         application_version: str,
         started_utc: datetime | None = None,
+        trigger_evidence: dict | None = None,
     ) -> "SessionRecorder":
         _validate_recording_interval(recording_interval_s, device.poll_interval_s)
         start = started_utc or datetime.now(timezone.utc)
@@ -48,6 +55,7 @@ class SessionRecorder:
             device=device,
             application_version=application_version,
             recording_interval_s=recording_interval_s,
+            trigger_evidence=trigger_evidence,
         )
         (session_dir / "session.json").write_text(
             json.dumps(metadata, indent=2, sort_keys=True) + "\n",
@@ -509,6 +517,76 @@ class RecordingManager:
             detail=detail,
         )
 
+    def _start_triggered_from_sample(
+        self,
+        device_id: str,
+        sample: MeasurementSample,
+        fire,
+        config: TriggerConfig,
+    ) -> SessionRecorder:
+        trigger_evidence = {
+            "mode": config.mode.value,
+            "block": config.block.value,
+            "measurement": config.measurement.value,
+            "operator": config.operator.value,
+            "threshold": config.threshold,
+            "fired_cycle_id": fire.cycle_id,
+            "fired_utc": fire.fired_utc.isoformat(),
+            "fired_value": fire.value,
+        }
+        recorder = SessionRecorder.create(
+            self._root,
+            sample,
+            self._devices[device_id],
+            config.recording_interval_s,
+            self._application_version,
+            started_utc=fire.fired_utc,
+            trigger_evidence=trigger_evidence,
+        )
+        self._failed.pop(device_id, None)
+        self._active[device_id] = recorder
+        recorder.record_event(
+            fire.fired_utc,
+            "TRIGGER_FIRED",
+            "INFO",
+            fire.cycle_id,
+            (
+                f"mode={config.mode.value}; block={config.block.value}; "
+                f"measurement={config.measurement.value}; operator={config.operator.value}; "
+                f"threshold={repr(config.threshold)}; value={repr(fire.value)}"
+            ),
+        )
+        return recorder
+
+    def _triggered_start_failure_event(
+        self,
+        device_id: str,
+        sample: MeasurementSample,
+        error: Exception,
+    ) -> DiagnosticEvent:
+        failed_utc = datetime.now(timezone.utc)
+        status = {
+            "device_id": device_id,
+            "device_name": self._devices[device_id].name,
+            "state": "ERROR",
+            "start_source": "TRIGGER",
+            "session_id": "",
+            "session_dir": "",
+            "failed_utc": failed_utc.isoformat(),
+            "failed_cycle_id": sample.identity.cycle_id,
+            "error_type": type(error).__name__,
+            "error_detail": str(error) or type(error).__name__,
+        }
+        self._failed[device_id] = status
+        return DiagnosticEvent(
+            device_id=device_id,
+            cycle_id=sample.identity.cycle_id,
+            occurred_utc=failed_utc,
+            event="TRIGGERED_RECORDING_START_ERROR",
+            severity=Severity.ERROR,
+            detail=f"{type(error).__name__}: {str(error) or type(error).__name__}",
+        )
+
     def _consume(self) -> None:
         while not self._stop.is_set():
             try:
@@ -529,6 +607,40 @@ class RecordingManager:
                             failure_event = self._recording_failure_event(
                                 device_id, recorder, cycle_id, exc
                             )
+                    else:
+                        state = self._armed_triggers.get(device_id)
+                        if state is not None:
+                            fire = evaluate_measurement(state, event)
+                            if fire is not None:
+                                config = state.config
+                                self._trigger_last_fired[device_id] = {
+                                    "cycle_id": fire.cycle_id,
+                                    "utc": fire.fired_utc.isoformat(),
+                                    "value": fire.value,
+                                }
+                                self._armed_triggers.pop(device_id, None)
+                                try:
+                                    self._start_triggered_from_sample(
+                                        device_id,
+                                        event,
+                                        fire,
+                                        config,
+                                    )
+                                except Exception as exc:
+                                    started_recorder = self._active.get(device_id)
+                                    if started_recorder is not None:
+                                        failure_event = self._recording_failure_event(
+                                            device_id,
+                                            started_recorder,
+                                            cycle_id,
+                                            exc,
+                                        )
+                                    else:
+                                        failure_event = self._triggered_start_failure_event(
+                                            device_id,
+                                            event,
+                                            exc,
+                                        )
                 elif isinstance(event, DiagnosticEvent):
                     device_id = event.device_id
                     recorder = self._active.get(device_id)
@@ -543,6 +655,9 @@ class RecordingManager:
                             failure_event = self._recording_failure_event(
                                 device_id, recorder, event.cycle_id, exc
                             )
+                    state = self._armed_triggers.get(device_id)
+                    if state is not None and state.config.mode is TriggerMode.CROSSING:
+                        invalidate_crossing_continuity(state)
 
             if failure_event is not None:
                 self._bus.publish(failure_event)
