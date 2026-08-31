@@ -28,8 +28,9 @@ def initial_session_metadata(
     device: DeviceConfig,
     application_version: str,
     recording_interval_s: float,
+    trigger_evidence: dict | None = None,
 ) -> dict:
-    return {
+    metadata = {
         "schema_version": 1,
         "application_version": application_version,
         "session_id": session_id,
@@ -54,6 +55,13 @@ def initial_session_metadata(
         },
         "recording": {"interval_s": recording_interval_s},
     }
+    if trigger_evidence is not None:
+        metadata["recording"] = {
+            "interval_s": recording_interval_s,
+            "start_source": "TRIGGER",
+            "trigger": dict(trigger_evidence),
+        }
+    return metadata
 
 
 def discover_resumable_session(root: Path):
