@@ -103,6 +103,14 @@
   color: var(--warning);
 }
 
+.measurement-value[data-field="p"].signed-positive {
+  color: var(--danger);
+}
+
+.measurement-value[data-field="p"].signed-negative {
+  color: var(--good);
+}
+
 .derived-values {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
