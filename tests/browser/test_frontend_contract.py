@@ -20,6 +20,8 @@ def test_css_is_split_by_responsibility() -> None:
         "history.css",
         "scope.css",
         "modbus-evidence.css",
+        "density.css",
+        "recording-monitor.css",
     }
 
 

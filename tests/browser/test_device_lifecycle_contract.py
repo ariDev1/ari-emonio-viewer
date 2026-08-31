@@ -37,6 +37,8 @@ def test_lifecycle_frontend_keeps_structured_css_file_set() -> None:
         "history.css",
         "scope.css",
         "modbus-evidence.css",
+        "density.css",
+        "recording-monitor.css",
     }
 
 

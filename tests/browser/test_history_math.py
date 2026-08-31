@@ -369,7 +369,7 @@ def test_history_keyboard_handler_steps_selected_real_sample_and_does_not_wrap()
               appendChild() {{}},
               replaceChildren() {{}},
               querySelector() {{ return null; }},
-              classList: {{ toggle() {{}} }},
+              classList: {{ toggle() {{}}, remove() {{}} }},
             }};
           }}
           const svg = genericNode();
