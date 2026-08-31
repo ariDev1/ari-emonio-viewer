@@ -95,12 +95,12 @@ Default server binding: `127.0.0.1`.
 ./tools/ari-emonio-acceptance.sh
 ```
 
-Latest completed automated acceptance evidence before v0.4.17 changes: **v0.4.16**.
+Latest v0.4.17 automated acceptance evidence:
 
 ```text
-Unit tests:          250 PASS
+Unit tests:          249 PASS
 Integration tests:    87 PASS
-Frontend tests:      194 PASS
+Frontend tests:      199 PASS
 Read-only gate:        3 PASS
 Python compilation:   PASS
 Scientific sign path: 1 PASS
