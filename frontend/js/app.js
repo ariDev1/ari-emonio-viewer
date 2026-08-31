@@ -506,7 +506,6 @@ function applySelectedDeviceConfig() {
   const config = configForSelectedDevice();
   if (!config) return;
   document.getElementById("device-name").textContent = config.name;
-  document.getElementById("device-ip").textContent = config.host;
   document.getElementById("poll-interval").textContent = `${config.poll_interval_s.toFixed(2)} s`;
   document.getElementById("firmware-version").textContent = config.firmware_version;
   configureRecordingIntervals(config);
