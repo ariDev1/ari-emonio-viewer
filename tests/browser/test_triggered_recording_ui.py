@@ -141,6 +141,16 @@ def test_trigger_configuration_changes_are_sent_to_backend_not_only_simulated_lo
     assert 'addEventListener("change", configureSelectedTrigger)' in handler
 
 
+def test_trigger_threshold_requires_explicit_value_and_active_edit_is_not_overwritten() -> None:
+    source = Path("frontend/js/app.js").read_text(encoding="utf-8")
+    assert "triggerDraftDevice" in source
+    assert "document.activeElement !== node" in source
+    handler = source[source.index("function initializeRecordingTriggerControls"):source.index("async function main")]
+    assert 'const thresholdText = document.getElementById("recording-trigger-threshold").value.trim();' in handler
+    assert 'if (thresholdText === "")' in handler
+    assert "const threshold = Number(thresholdText);" in handler
+
+
 def test_trigger_css_is_structured_and_scoped() -> None:
     recording_css = Path("frontend/css/recording.css").read_text(encoding="utf-8")
     trigger_css = Path("frontend/css/recording-trigger.css").read_text(encoding="utf-8")
