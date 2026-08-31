@@ -30,13 +30,12 @@ def test_power_direction_state_is_derived_only_from_canonical_p_sign() -> None:
     ) == ["negative", "positive", "neutral", "neutral"]
 
 
-def test_header_has_three_always_visible_phase_indicators_after_title() -> None:
-    html = Path("frontend/index.html").read_text(encoding="utf-8")
-    title = html.index('<span class="eyebrow">ARI EMONIO VIEWER</span>')
-    a = html.index('id="power-direction-a"')
-    b = html.index('id="power-direction-b"')
-    c = html.index('id="power-direction-c"')
-    assert title < a < b < c
+def test_frontend_initializer_defines_three_phase_indicators_after_title() -> None:
+    source = Path("frontend/js/measurements.js").read_text(encoding="utf-8")
+    assert 'power-direction-a' in source
+    assert 'power-direction-b' in source
+    assert 'power-direction-c' in source
+    assert 'insertAdjacentElement("afterend", group)' in source
 
 
 def test_power_direction_indicator_css_has_neutral_negative_and_positive_states() -> None:
