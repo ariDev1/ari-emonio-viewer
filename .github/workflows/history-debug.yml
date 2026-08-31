@@ -21,7 +21,7 @@ jobs:
         run: python -m pip install pytest==8.4.1
       - name: Print Node runtime
         run: node --version
-      - name: Reproduce history keyboard failure and print Node stderr tail
+      - name: Reproduce history keyboard failure and isolate Node error
         run: |
           python - <<'PY'
           import importlib.util
@@ -34,8 +34,12 @@ jobs:
           try:
               module.test_history_keyboard_handler_steps_selected_real_sample_and_does_not_wrap()
           except subprocess.CalledProcessError as exc:
-              print("=== NODE STDERR TAIL ===")
-              print((exc.stderr or "")[-12000:])
-              print("=== END NODE STDERR TAIL ===")
+              print(f"NODE RETURN CODE: {exc.returncode}")
+              lines = (exc.stderr or "").splitlines()
+              print("=== SHORT NODE STDERR LINES ===")
+              for line in lines:
+                  if len(line) <= 1000:
+                      print(line)
+              print("=== END SHORT NODE STDERR LINES ===")
               raise
           PY
