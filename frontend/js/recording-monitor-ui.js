@@ -221,6 +221,7 @@ async function runController() {
   let lastDeviceId = "";
   let dirty = false;
   let actionPending = false;
+  let currentStatus = null;
 
   try {
     runtimeConfig = await getRuntimeConfig();
@@ -231,7 +232,7 @@ async function runController() {
   const markDirty = () => {
     dirty = true;
     setMessage("UNAPPLIED CHANGES · press APPLY before ENABLE MONITOR");
-    renderStatus(null, dirty);
+    renderStatus(currentStatus, dirty);
   };
   for (const id of [
     "recording-monitor-condition",
@@ -249,6 +250,7 @@ async function runController() {
     try {
       const payload = await getRecordingStatus();
       const status = normalizeMonitorStatus((payload.monitors ?? []).find((item) => item.device_id === deviceId));
+      currentStatus = status;
       if (deviceId !== lastDeviceId) {
         lastDeviceId = deviceId;
         dirty = false;
