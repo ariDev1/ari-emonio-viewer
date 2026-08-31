@@ -1,0 +1,160 @@
+.recording-monitor-panel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  background: #0d131a;
+}
+
+.recording-monitor-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.recording-monitor-title,
+.recording-monitor-label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.recording-monitor-state {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+}
+
+.recording-monitor-state[data-state="RECORDING"],
+.recording-monitor-state[data-state="WAITING_FOR_CLEAR"] {
+  color: var(--danger);
+}
+
+.recording-monitor-state[data-state="WAITING"] {
+  color: var(--accent);
+}
+
+.recording-monitor-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 0.8fr) minmax(130px, 0.6fr);
+  gap: 7px;
+  align-items: end;
+}
+
+.recording-monitor-field {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.recording-monitor-field select,
+.recording-monitor-actions button {
+  min-height: 30px;
+  min-width: 0;
+  padding: 4px 7px;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+}
+
+.recording-monitor-phases {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 30px;
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+}
+
+.recording-monitor-phases legend {
+  padding: 0 4px;
+}
+
+.recording-monitor-phases label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+}
+
+.recording-monitor-actions {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(120px, 1fr) minmax(130px, 1fr);
+  gap: 7px;
+}
+
+.recording-monitor-message,
+.recording-monitor-last-event {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.56rem;
+  overflow-wrap: anywhere;
+}
+
+.recording-monitor-message.is-error {
+  color: var(--danger);
+}
+
+.recording-monitor-phase-status {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.recording-monitor-phase-status span {
+  min-width: 0;
+  padding: 5px 7px;
+  border-right: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recording-monitor-phase-status span:last-child {
+  border-right: 0;
+}
+
+@media (max-width: 900px) {
+  .recording-monitor-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .recording-monitor-field:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  .recording-monitor-grid,
+  .recording-monitor-actions,
+  .recording-monitor-phase-status {
+    grid-template-columns: 1fr;
+  }
+
+  .recording-monitor-field:last-child {
+    grid-column: auto;
+  }
+
+  .recording-monitor-phase-status span {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .recording-monitor-phase-status span:last-child {
+    border-bottom: 0;
+  }
+}
