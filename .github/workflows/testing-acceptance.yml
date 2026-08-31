@@ -1,0 +1,61 @@
+name: Testing Acceptance
+
+on:
+  push:
+    branches:
+      - testing
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact testing commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Runtime evidence
+        run: |
+          python --version
+          node --version
+          git status --short --branch
+          git rev-parse HEAD
+
+      - name: Install project test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Full repository acceptance
+        run: ./tools/ari-emonio-acceptance.sh
+
+      - name: Protected scientific path gate
+        run: |
+          git diff --exit-code b539efe7eb3a11d53a3b291254ddd0c50a2cf3df HEAD -- \
+            src/emonio_viewer/modbus \
+            src/emonio_viewer/measurement \
+            src/emonio_viewer/acquisition \
+            src/emonio_viewer/runtime/events.py \
+            src/emonio_viewer/runtime/store.py \
+            src/emonio_viewer/scope
+
+      - name: v0.4.16 monitor public-path gate
+        run: |
+          grep -q 'emonio_viewer.main_v0416:main' pyproject.toml
+          grep -q '/api/v1/recording/monitor/configure' src/emonio_viewer/server/api_v0416.py
+          grep -q '/api/v1/recording/monitor/enable' src/emonio_viewer/server/api_v0416.py
+          grep -q '/api/v1/recording/monitor/disable' src/emonio_viewer/server/api_v0416.py
+          if grep -q '/api/v1/recording/trigger' src/emonio_viewer/server/api_v0416.py; then
+            echo 'obsolete trigger route exposed by v0.4.16 API' >&2
+            exit 1
+          fi
