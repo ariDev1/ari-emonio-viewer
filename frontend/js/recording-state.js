@@ -1,5 +1,3 @@
-import { RecordingTriggerState } from "./recording-trigger.js";
-
 function finiteNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
@@ -54,7 +52,6 @@ export class RecordingState {
   constructor() {
     this._active = new Map();
     this._errors = new Map();
-    this._triggers = new RecordingTriggerState();
   }
 
   replaceActive(records) {
@@ -66,7 +63,7 @@ export class RecordingState {
     this._active = next;
   }
 
-  replaceStatus(activeRecords, errorRecords, triggerRecords = []) {
+  replaceStatus(activeRecords, errorRecords) {
     this.replaceActive(activeRecords);
     const errors = new Map();
     for (const record of Array.isArray(errorRecords) ? errorRecords : []) {
@@ -76,7 +73,6 @@ export class RecordingState {
       }
     }
     this._errors = errors;
-    this._triggers.replace(triggerRecords);
   }
 
   forDevice(deviceId) {
@@ -85,10 +81,6 @@ export class RecordingState {
 
   errorForDevice(deviceId) {
     return this._errors.get(deviceId) ?? null;
-  }
-
-  triggerForDevice(deviceId) {
-    return this._triggers.forDevice(deviceId);
   }
 
   isActive(deviceId) {

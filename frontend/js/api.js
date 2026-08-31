@@ -128,27 +128,6 @@ export function changeRecordingInterval(deviceId, intervalS) {
   });
 }
 
-export function configureRecordingTrigger(deviceId, config) {
-  return requestJson("/api/v1/recording/trigger/configure", {
-    method: "POST",
-    body: JSON.stringify({ device_id: deviceId, ...config }),
-  });
-}
-
-export function armRecordingTrigger(deviceId) {
-  return requestJson("/api/v1/recording/trigger/arm", {
-    method: "POST",
-    body: JSON.stringify({ device_id: deviceId }),
-  });
-}
-
-export function disarmRecordingTrigger(deviceId) {
-  return requestJson("/api/v1/recording/trigger/disarm", {
-    method: "POST",
-    body: JSON.stringify({ device_id: deviceId }),
-  });
-}
-
 export function getScopeStatus(deviceId) {
   return requestJson(`/api/v1/devices/${encodeURIComponent(deviceId)}/scope`);
 }
