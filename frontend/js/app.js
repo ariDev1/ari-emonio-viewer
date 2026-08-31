@@ -1,6 +1,9 @@
 import {
+  armRecordingTrigger,
   changeRecordingInterval,
+  configureRecordingTrigger,
   connectDevice,
+  disarmRecordingTrigger,
   disconnectDevice,
   getDevice,
   getDevices,
@@ -175,6 +178,25 @@ function createRecordingSummaryCell(label, id) {
   return cell;
 }
 
+function createRecordingTriggerSelect(id, ariaLabel, options) {
+  const select = createRecordingElement("select");
+  select.id = id;
+  select.setAttribute("aria-label", ariaLabel);
+  for (const [value, label] of options) {
+    const option = createRecordingElement("option", "", label);
+    option.value = value;
+    select.appendChild(option);
+  }
+  return select;
+}
+
+function createRecordingTriggerField(labelText, control) {
+  const label = createRecordingElement("label", "recording-trigger-field");
+  label.appendChild(createRecordingElement("span", "recording-trigger-label", labelText));
+  label.appendChild(control);
+  return label;
+}
+
 function ensureRecordingDashboardStructure() {
   if (document.getElementById("recording-session-grid")) return;
   const body = document.querySelector(".recording-drawer .recording-panel-body");
@@ -218,6 +240,68 @@ function ensureRecordingDashboardStructure() {
   stop.type = "button";
   selectedControls.append(selectedState, intervalLabel, start, stop);
 
+  const triggerPanel = createRecordingElement("section", "recording-trigger-panel");
+  triggerPanel.setAttribute("aria-label", "Triggered recording controls");
+  const triggerHeader = createRecordingElement("div", "recording-trigger-header");
+  triggerHeader.appendChild(createRecordingElement("h3", "recording-trigger-title", "TRIGGERED RECORDING"));
+  const triggerState = createRecordingElement("strong", "recording-trigger-state", "NOT CONFIGURED");
+  triggerState.id = "recording-trigger-state";
+  triggerHeader.appendChild(triggerState);
+
+  const triggerGrid = createRecordingElement("div", "recording-trigger-grid");
+  const triggerMode = createRecordingTriggerSelect(
+    "recording-trigger-mode",
+    "Trigger mode",
+    [["LEVEL", "LEVEL"], ["CROSSING", "CROSSING"]]
+  );
+  const triggerBlock = createRecordingTriggerSelect(
+    "recording-trigger-block",
+    "Trigger phase",
+    [["A", "A"], ["B", "B"], ["C", "C"], ["TOTAL", "TOTAL"]]
+  );
+  const triggerMeasurement = createRecordingTriggerSelect(
+    "recording-trigger-measurement",
+    "Trigger measurement",
+    [["U", "U"], ["I", "I"], ["P", "P"], ["Q", "Q"], ["S", "S"], ["PF", "PF"], ["F", "f"]]
+  );
+  const triggerOperator = createRecordingTriggerSelect(
+    "recording-trigger-operator",
+    "Trigger operator",
+    [["GT", ">"], ["GE", ">="], ["LT", "<"], ["LE", "<="]]
+  );
+  const triggerThreshold = createRecordingElement("input");
+  triggerThreshold.id = "recording-trigger-threshold";
+  triggerThreshold.type = "number";
+  triggerThreshold.step = "any";
+  triggerThreshold.inputMode = "decimal";
+  triggerThreshold.setAttribute("aria-label", "Trigger threshold");
+  const triggerInterval = createRecordingElement("select");
+  triggerInterval.id = "recording-trigger-interval";
+  triggerInterval.setAttribute("aria-label", "Triggered recording interval");
+  triggerGrid.append(
+    createRecordingTriggerField("MODE", triggerMode),
+    createRecordingTriggerField("PHASE", triggerBlock),
+    createRecordingTriggerField("MEASUREMENT", triggerMeasurement),
+    createRecordingTriggerField("OPERATOR", triggerOperator),
+    createRecordingTriggerField("THRESHOLD", triggerThreshold),
+    createRecordingTriggerField("INTERVAL", triggerInterval)
+  );
+
+  const triggerActions = createRecordingElement("div", "recording-trigger-actions");
+  const triggerConfigure = createRecordingElement("button", "", "CONFIGURE");
+  triggerConfigure.id = "recording-trigger-configure";
+  triggerConfigure.type = "button";
+  const triggerArm = createRecordingElement("button", "", "ARM");
+  triggerArm.id = "recording-trigger-arm";
+  triggerArm.type = "button";
+  const triggerDisarm = createRecordingElement("button", "", "DISARM");
+  triggerDisarm.id = "recording-trigger-disarm";
+  triggerDisarm.type = "button";
+  triggerActions.append(triggerConfigure, triggerArm, triggerDisarm);
+  const triggerLastFired = createRecordingElement("div", "recording-trigger-last-fired", "LAST FIRED · NONE");
+  triggerLastFired.id = "recording-trigger-last-fired";
+  triggerPanel.append(triggerHeader, triggerGrid, triggerActions, triggerLastFired);
+
   const legacySummary = body.querySelector(".recording-active-summary");
   const note = body.querySelector(".recording-note");
   if (legacySummary) legacySummary.hidden = true;
@@ -229,6 +313,8 @@ function ensureRecordingDashboardStructure() {
   else body.appendChild(errorSection);
   if (note) body.insertBefore(selectedControls, note);
   else body.appendChild(selectedControls);
+  if (note) body.insertBefore(triggerPanel, note);
+  else body.appendChild(triggerPanel);
 }
 
 function appendRecordingMetric(container, label, value, className = "") {
@@ -381,11 +467,79 @@ function setRecordingIntervalValue(value) {
   }
 }
 
+function renderRecordingTriggerPanel(selectedTrigger, selectedRecording) {
+  const stateNode = document.getElementById("recording-trigger-state");
+  if (!stateNode) return;
+  const controlIds = [
+    "recording-trigger-mode",
+    "recording-trigger-block",
+    "recording-trigger-measurement",
+    "recording-trigger-operator",
+    "recording-trigger-threshold",
+    "recording-trigger-interval",
+  ];
+  const controls = controlIds.map((id) => document.getElementById(id)).filter(Boolean);
+  const configureButton = document.getElementById("recording-trigger-configure");
+  const armButton = document.getElementById("recording-trigger-arm");
+  const disarmButton = document.getElementById("recording-trigger-disarm");
+  const lastFired = document.getElementById("recording-trigger-last-fired");
+
+  if (!recordingStatusKnown || !selectedDevice) {
+    stateNode.textContent = "STATUS UNKNOWN";
+    stateNode.classList.remove("is-armed");
+    controls.forEach((node) => { node.disabled = true; });
+    if (configureButton) configureButton.disabled = true;
+    if (armButton) armButton.disabled = true;
+    if (disarmButton) disarmButton.disabled = true;
+    if (lastFired) lastFired.textContent = "LAST FIRED · UNAVAILABLE";
+    return;
+  }
+
+  controls.forEach((node) => { node.disabled = false; });
+  if (selectedTrigger?.config) {
+    document.getElementById("recording-trigger-mode").value = selectedTrigger.config.mode;
+    document.getElementById("recording-trigger-block").value = selectedTrigger.config.block;
+    document.getElementById("recording-trigger-measurement").value = selectedTrigger.config.measurement;
+    document.getElementById("recording-trigger-operator").value = selectedTrigger.config.operator;
+    document.getElementById("recording-trigger-threshold").value = String(selectedTrigger.config.threshold);
+    const triggerInterval = document.getElementById("recording-trigger-interval");
+    const intervalValue = String(selectedTrigger.config.recording_interval_s);
+    if (![...triggerInterval.options].some((option) => option.value === intervalValue)) {
+      const option = createRecordingElement("option", "", formatInterval(selectedTrigger.config.recording_interval_s));
+      option.value = intervalValue;
+      triggerInterval.appendChild(option);
+    }
+    triggerInterval.value = intervalValue;
+  } else {
+    document.getElementById("recording-trigger-mode").value = "LEVEL";
+    document.getElementById("recording-trigger-block").value = "A";
+    document.getElementById("recording-trigger-measurement").value = "P";
+    document.getElementById("recording-trigger-operator").value = "GT";
+    document.getElementById("recording-trigger-threshold").value = "";
+  }
+
+  const armed = selectedTrigger?.state === "ARMED";
+  stateNode.textContent = armed ? "ARMED" : selectedTrigger ? "DISARMED" : "NOT CONFIGURED";
+  stateNode.classList.toggle("is-armed", armed);
+  if (configureButton) configureButton.disabled = false;
+  if (armButton) armButton.disabled = Boolean(selectedRecording) || !selectedTrigger || armed;
+  if (disarmButton) disarmButton.disabled = !armed;
+
+  if (lastFired) {
+    if (selectedTrigger?.last_fired_cycle_id !== null && selectedTrigger?.last_fired_cycle_id !== undefined) {
+      lastFired.textContent = `LAST FIRED · CYCLE ${selectedTrigger.last_fired_cycle_id} · ${selectedTrigger.last_fired_utc || "UTC UNAVAILABLE"} · VALUE ${String(selectedTrigger.last_fired_value)}`;
+    } else {
+      lastFired.textContent = "LAST FIRED · NONE";
+    }
+  }
+}
+
 function renderRecordingPanel(message = "") {
   ensureRecordingDashboardStructure();
   const selectedName = displayDeviceName(selectedDevice);
   const selectedRecording = selectedDevice ? recordingState.forDevice(selectedDevice) : null;
   const selectedError = selectedDevice ? recordingState.errorForDevice(selectedDevice) : null;
+  const selectedTrigger = selectedDevice ? recordingState.triggerForDevice(selectedDevice) : null;
   const active = recordingState.activeRecordings();
   const errors = recordingState.recordingErrors();
   const summary = recordingState.summary();
@@ -418,6 +572,7 @@ function renderRecordingPanel(message = "") {
     renderRecordingSessionCards([]);
     renderRecordingErrorCards([]);
   }
+  renderRecordingTriggerPanel(selectedTrigger, selectedRecording);
 
   if (!recordingStatusKnown) {
     setText("recording-selected-state", "STATUS UNKNOWN");
@@ -435,7 +590,7 @@ function renderRecordingPanel(message = "") {
     state.textContent = "ERROR";
     state.classList.remove("active");
     state.classList.add("error");
-    setRecordingControlAvailability({ start: true, stop: false, interval: true });
+    setRecordingControlAvailability({ start: true, stop: selectedTrigger?.state === "ARMED", interval: true });
     const errorText = `${selectedError.error_type}: ${selectedError.error_detail}`;
     const sessionText = selectedError.session_dir ? ` Session: ${selectedError.session_dir}` : "";
     document.getElementById("recording-detail").textContent =
@@ -460,14 +615,18 @@ function renderRecordingPanel(message = "") {
   setText("recording-drawer-selected-state", "STOPPED");
   state.textContent = "STOPPED";
   state.classList.remove("active", "error");
-  setRecordingControlAvailability({ start: true, stop: false, interval: true });
+  setRecordingControlAvailability({ start: true, stop: selectedTrigger?.state === "ARMED", interval: true });
   document.getElementById("recording-detail").textContent = message || `No active recording for selected Emonio ${selectedName}.`;
 }
 
 async function refreshRecordingState(message = "") {
   try {
     const payload = await getRecordingStatus();
-    recordingState.replaceStatus(payload?.active ?? [], payload?.errors ?? []);
+    recordingState.replaceStatus(
+      payload?.active ?? [],
+      payload?.errors ?? [],
+      payload?.triggers ?? []
+    );
     recordingStatusKnown = true;
     renderRecordingPanel(message);
     return true;
@@ -482,12 +641,13 @@ function configureRecordingIntervals(config) {
   const minimum = Number(config.poll_interval_s);
   const preferred = Number(runtimeConfig?.recording_default_interval_s ?? minimum);
   const activeInterval = recordingState.forDevice(config.id)?.interval_s;
+  const triggerInterval = recordingState.triggerForDevice(config.id)?.config?.recording_interval_s;
   const profiles = [1, 2, 5, 10];
-  const values = [...new Set([minimum, preferred, activeInterval, ...profiles])]
+  const values = [...new Set([minimum, preferred, activeInterval, triggerInterval, ...profiles])]
     .filter((value) => Number.isFinite(value) && value >= minimum)
     .sort((a, b) => a - b);
 
-  for (const id of ["recording-interval", "recording-drawer-interval"]) {
+  for (const id of ["recording-interval", "recording-drawer-interval", "recording-trigger-interval"]) {
     const select = document.getElementById(id);
     if (!select) continue;
     select.replaceChildren();
@@ -497,7 +657,11 @@ function configureRecordingIntervals(config) {
       option.textContent = formatInterval(value);
       select.appendChild(option);
     }
-    const selected = Number.isFinite(activeInterval) ? activeInterval : preferred >= minimum ? preferred : values[0];
+    const selected = id === "recording-trigger-interval" && Number.isFinite(triggerInterval)
+      ? triggerInterval
+      : Number.isFinite(activeInterval)
+        ? activeInterval
+        : preferred >= minimum ? preferred : values[0];
     select.value = String(selected);
   }
 }
@@ -712,10 +876,11 @@ function initializeRecordingControls() {
 
   const stopSelected = async () => {
     const deviceId = selectedDevice;
-    if (!recordingStatusKnown || !deviceId || !recordingState.isActive(deviceId)) return;
+    const canStop = recordingState.isActive(deviceId) || recordingState.triggerForDevice(deviceId)?.state === "ARMED";
+    if (!recordingStatusKnown || !deviceId || !canStop) return;
     try {
       await stopRecording(deviceId);
-      await refreshRecordingState(`Recording stopped for ${displayDeviceName(deviceId)}.`);
+      await refreshRecordingState(`Recording/trigger stopped for ${displayDeviceName(deviceId)}.`);
       applySelectedDeviceConfig();
     } catch (error) {
       await refreshRecordingState(`Stop failed for ${displayDeviceName(deviceId)}: ${error.message}`);
@@ -744,11 +909,81 @@ function initializeRecordingControls() {
   drawerInterval.addEventListener("change", () => changeSelectedInterval(drawerInterval));
 }
 
+function initializeRecordingTriggerControls() {
+  ensureRecordingDashboardStructure();
+  const configurationIds = [
+    "recording-trigger-mode",
+    "recording-trigger-block",
+    "recording-trigger-measurement",
+    "recording-trigger-operator",
+    "recording-trigger-threshold",
+    "recording-trigger-interval",
+  ];
+
+  const configureSelectedTrigger = async () => {
+    const deviceId = selectedDevice;
+    if (!recordingStatusKnown || !deviceId) return;
+    const threshold = Number(document.getElementById("recording-trigger-threshold").value);
+    const interval = Number(document.getElementById("recording-trigger-interval").value);
+    if (!Number.isFinite(threshold) || !Number.isFinite(interval) || interval <= 0) {
+      document.getElementById("recording-detail").textContent = "Trigger configuration requires a finite threshold and recording interval.";
+      return;
+    }
+    const config = {
+      mode: document.getElementById("recording-trigger-mode").value,
+      block: document.getElementById("recording-trigger-block").value,
+      measurement: document.getElementById("recording-trigger-measurement").value,
+      operator: document.getElementById("recording-trigger-operator").value,
+      threshold,
+      recording_interval_s: interval,
+    };
+    try {
+      await configureRecordingTrigger(deviceId, config);
+      await refreshRecordingState(`Trigger configured and DISARMED for ${displayDeviceName(deviceId)}.`);
+      applySelectedDeviceConfig();
+    } catch (error) {
+      await refreshRecordingState(`Trigger configure failed for ${displayDeviceName(deviceId)}: ${error.message}`);
+    }
+  };
+
+  const armSelectedTrigger = async () => {
+    const deviceId = selectedDevice;
+    if (!recordingStatusKnown || !deviceId || recordingState.isActive(deviceId)) return;
+    try {
+      await armRecordingTrigger(deviceId);
+      await refreshRecordingState(`Trigger ARMED for ${displayDeviceName(deviceId)}.`);
+      applySelectedDeviceConfig();
+    } catch (error) {
+      await refreshRecordingState(`Trigger ARM failed for ${displayDeviceName(deviceId)}: ${error.message}`);
+    }
+  };
+
+  const disarmSelectedTrigger = async () => {
+    const deviceId = selectedDevice;
+    if (!recordingStatusKnown || !deviceId || recordingState.triggerForDevice(deviceId)?.state !== "ARMED") return;
+    try {
+      await disarmRecordingTrigger(deviceId);
+      await refreshRecordingState(`Trigger DISARMED for ${displayDeviceName(deviceId)}.`);
+      applySelectedDeviceConfig();
+    } catch (error) {
+      await refreshRecordingState(`Trigger DISARM failed for ${displayDeviceName(deviceId)}: ${error.message}`);
+    }
+  };
+
+  document.getElementById("recording-trigger-configure").addEventListener("click", configureSelectedTrigger);
+  document.getElementById("recording-trigger-arm").addEventListener("click", armSelectedTrigger);
+  document.getElementById("recording-trigger-disarm").addEventListener("click", disarmSelectedTrigger);
+  for (const id of configurationIds) {
+    document.getElementById(id).addEventListener("change", configureSelectedTrigger);
+  }
+}
+
 async function main() {
   initializeMeasurementPanels();
   initializeTargetControls();
   initializeDeviceLifecycleControl();
   initializeRecordingControls();
+  initializeRecordingTriggerControls();
   initializeUtilityDrawers();
   initializeCtEvidenceControls(() => selectedDevice);
   initializeModbusEvidenceControls(() => selectedDevice);
