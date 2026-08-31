@@ -31,7 +31,7 @@ The implementation must preserve these rules:
 - Display rounding never affects monitor decisions.
 - No smoothing, averaging, interpolation, resampling, hysteresis, debounce, epsilon, sign correction, or synthetic samples are permitted.
 - A transition is exact only when consecutive canonical cycle evidence proves it.
-- A missing cycle, invalid cycle, or same-device diagnostic continuity break prevents an exact crossing claim across that break.
+- A missing cycle, invalid cycle, non-finite selected P/PF value, or same-device diagnostic continuity break prevents an exact crossing claim across that break.
 - The exact activating sample is the first measurement sample of a successful monitor-owned recording.
 - One Emonio has at most one active recording session.
 - Manual operator actions have higher authority than automatic monitoring.
@@ -189,9 +189,18 @@ current.cycle_id == previous.cycle_id + 1
 
 and no same-device diagnostic evidence invalidated continuity between the two samples.
 
+A selected P/PF value must be finite. A non-finite selected value cannot activate, clear, or prove a condition. It invalidates continuity for that selected phase-measurement condition and the next finite value becomes new baseline evidence.
+
 The event time for an exact transition is the current sample `cycle_finished_utc`.
 
 The exact current value is stored as event evidence.
+
+When more than one monitor event is produced by the same sample, event order is deterministic:
+
+```text
+phase order: A, B, C
+measurement order: P, PF
+```
 
 ## 9. Monitor enable and first-sample semantics
 
@@ -199,7 +208,22 @@ Viewer restart starts with the monitor OFF.
 
 The operator must explicitly enable the monitor.
 
-The first eligible canonical sample after ENABLE establishes the current state of all selected phase-measurement conditions.
+ENABLE does not evaluate the pre-existing RuntimeStore sample as new evidence. Monitor evaluation starts with samples received after ENABLE.
+
+Immediately after ENABLE and before the first eligible sample:
+
+```text
+state = WAITING
+evidence_initialized = false
+```
+
+`WAITING` in this short interval means the monitor is enabled and waiting for its first new canonical evidence. It does not claim that all selected conditions are normal.
+
+The first eligible canonical sample after ENABLE establishes the current state of all selected phase-measurement conditions and sets:
+
+```text
+evidence_initialized = true
+```
 
 If a selected value is non-negative:
 
@@ -219,7 +243,7 @@ write NEGATIVE_PRESENT_AT_MONITOR_START
 
 If at least one monitored value is already negative on that first sample, a monitor-owned recording starts from that exact first observed negative sample unless an existing manual recording already owns the device.
 
-If several conditions are negative on the same first sample, only one recording session starts. One event is written for each negative selected phase-measurement condition.
+If several conditions are negative on the same first sample, only one recording session starts. One event is written for each negative selected phase-measurement condition in deterministic event order.
 
 ## 10. Normal automatic recording ownership
 
@@ -235,7 +259,7 @@ WAITING_FOR_CLEAR
 Meanings:
 
 - `OFF`: condition monitoring is disabled.
-- `WAITING`: monitoring is enabled, no monitored condition is active, and the monitor can start a new automatic session.
+- `WAITING`: monitoring is enabled and automatic start is permitted. Before first evidence, `evidence_initialized=false`; after initialization, no monitored condition is active.
 - `RECORDING`: one or more monitored conditions are active and evidence is being written to an active recording session.
 - `WAITING_FOR_CLEAR`: one or more monitored conditions are active, but automatic recording is suppressed because the operator stopped the session or a recording failure occurred.
 
@@ -287,6 +311,7 @@ Continuity breaks include:
 
 - missing canonical cycle ID;
 - invalid/stale sample that cannot be used as transition evidence;
+- non-finite selected P/PF value;
 - same-device `DiagnosticEvent` that represents acquisition evidence loss;
 - event-delivery loss visible to the recording consumer.
 
@@ -320,7 +345,9 @@ last valid non-negative sample time < actual start <= first valid negative sampl
 
 These are bounded intervals, not exact crossing times.
 
-If the first valid post-gap sample proves that all monitored conditions are non-negative, a monitor-owned recording may stop on that sample.
+If the monitor is `WAITING` and the first valid post-gap sample proves one or more selected conditions are negative, a monitor-owned recording starts from that exact post-gap sample and writes `NEGATIVE_PRESENT_AFTER_GAP` evidence. It does not write a fabricated `NEGATIVE_START`.
+
+If the first valid post-gap sample proves that all monitored conditions are non-negative, a monitor-owned recording that remained open through the gap may stop on that sample after writing any required `NEGATIVE_NOT_PRESENT_AFTER_GAP` evidence.
 
 ## 13. Disconnect and reconnect semantics
 
@@ -338,7 +365,9 @@ On the first eligible sample after reconnect:
 
 No crossing is fabricated across the disconnected interval.
 
-If all monitored conditions are non-negative after reconnect, a monitor-owned recording may stop on that first valid post-reconnect sample.
+If the monitor is `WAITING` and the first valid post-reconnect sample proves one or more selected conditions are negative, a monitor-owned recording starts from that exact sample and writes `NEGATIVE_PRESENT_AFTER_RECONNECT` evidence.
+
+If all monitored conditions are non-negative after reconnect, a monitor-owned recording that remained open through the disconnect may stop on that first valid post-reconnect sample after writing required boundary evidence.
 
 ## 14. Event evidence format
 
@@ -374,6 +403,10 @@ NEGATIVE_PRESENT_AFTER_RECONNECT
 NEGATIVE_NOT_PRESENT_AFTER_RECONNECT
 ```
 
+When an active recording session exists, monitor events are written to that session `events.csv` in deterministic A/B/C then P/PF order.
+
+When no recording session exists, there is no session `events.csv` to write. v0.4.16 does not add a second persistent monitor journal. The backend monitor status retains the latest monitor event as runtime evidence. A later persistent monitor journal is a separate feature if field use proves it is required.
+
 This preserves the existing event CSV columns while providing explicit phase, measurement, exact value, fixed threshold, and continuity classification.
 
 Measurement CSV columns and measurement numeric serialization remain unchanged.
@@ -403,14 +436,9 @@ Conceptual structure:
 }
 ```
 
-If several conditions activate on the same sample, `start_phase` and `start_measurement` use a deterministic order:
+If several conditions activate on the same sample, `start_phase` and `start_measurement` use the same deterministic A/B/C then P/PF event order.
 
-```text
-phase order: A, B, C
-measurement order: P, PF
-```
-
-All activating conditions are still written individually to `events.csv`.
+All activating conditions are still written individually to `events.csv` after successful session creation.
 
 Manual session metadata remains compatible with the existing manual recording format. A monitor enabled during a manual session writes monitor events into that existing session but does not convert the session owner to monitor-owned.
 
@@ -460,7 +488,9 @@ If one or more monitored conditions are still active:
 monitor -> WAITING_FOR_CLEAR
 ```
 
-While `WAITING_FOR_CLEAR`, the monitor continues to evaluate and log runtime state but does not automatically create another session for the same continuous negative condition.
+While `WAITING_FOR_CLEAR`, the monitor continues to evaluate runtime condition state but does not automatically create another session for the same continuous negative condition.
+
+Because the operator explicitly closed the recording, a later clear transition during `WAITING_FOR_CLEAR` cannot be appended to that closed session. It is retained as `last_event` runtime monitor evidence. No separate persistent monitor journal is added in v0.4.16.
 
 When all monitored conditions become non-negative:
 
@@ -497,9 +527,9 @@ There is never more than one active session per Emonio.
 
 ## 18. Automatic recording start failure
 
-If an exact activating event occurs but monitor-owned session creation fails:
+If an activating or negative-presence event occurs but monitor-owned session creation fails:
 
-- keep the negative-condition event evidence in runtime failure status and diagnostics as far as available;
+- keep the negative-condition evidence in monitor runtime `last_event`, failure status, and diagnostics as far as available;
 - do not report RECORDING;
 - do not retry automatically on every negative sample;
 - monitor remains enabled;
@@ -628,9 +658,10 @@ device_id
 state                   OFF | WAITING | RECORDING | WAITING_FOR_CLEAR
 configuration           complete stored config or null
 enabled_utc             null or UTC
+evidence_initialized    true | false
 phase_states            A/B/C current P/PF negative-state evidence as applicable
-active_conditions       deterministic list
-last_event              null or complete last monitor event evidence
+active_conditions       deterministic A/B/C then P/PF list
+last_event              null or complete latest monitor event evidence
 recording_owner         null | MANUAL | NEGATIVE_CONDITION_MONITOR
 ```
 
@@ -641,7 +672,7 @@ HTTP rules:
 - ENABLE without configuration: 409;
 - recording commands disabled: 503;
 - valid APPLY/configure: 200 and monitor OFF;
-- valid ENABLE: 200 and state based on first future eligible sample;
+- valid ENABLE: 200 WAITING with `evidence_initialized=false` until the next eligible sample;
 - valid DISABLE: 200 OFF;
 - existing manual RECORD/STOP endpoints remain available.
 
@@ -693,20 +724,24 @@ Required tests include:
 - A/B/C independent condition state;
 - deterministic same-sample multi-condition ordering;
 - first post-enable negative sample -> `NEGATIVE_PRESENT_AT_MONITOR_START`, not fabricated crossing;
+- pre-enable RuntimeStore sample cannot fire or initialize the monitor;
+- non-finite selected P/PF invalidates continuity and cannot change condition state;
 - exact activating sample is first measurement row of a monitor-owned session;
 - overlapping phase conditions share one session;
 - session stops only when final active monitored condition clears;
 - automatic re-wait after normal session completion;
 - next independent negative event starts a new session without manual re-arm;
 - cycle-gap continuity loss prevents exact crossing claim;
+- negative first sample after gap starts recording with `NEGATIVE_PRESENT_AFTER_GAP`, not fabricated crossing;
 - correct `*_AFTER_GAP` evidence;
 - disconnect/reconnect continuity behavior;
+- negative first sample after reconnect starts recording with `NEGATIVE_PRESENT_AFTER_RECONNECT`;
 - correct `*_AFTER_RECONNECT` evidence;
 - manual RECORD while monitor enabled uses one session and receives monitor events;
 - ENABLE during manual recording does not create a second session;
 - manual STOP while a condition is active -> `WAITING_FOR_CLEAR`;
 - no immediate restart while waiting for clear;
-- clear condition -> WAITING;
+- clear condition -> WAITING and updates runtime `last_event` even without an open session;
 - next new event -> automatic recording allowed;
 - DISABLE stops monitor-owned recording but not manual-owned recording;
 - monitor start failure -> explicit failure + WAITING_FOR_CLEAR, no retry loop;
