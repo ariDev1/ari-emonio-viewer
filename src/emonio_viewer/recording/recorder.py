@@ -13,6 +13,7 @@ from emonio_viewer.runtime.store import RuntimeStore
 
 from .csv_writer import CsvWriters, sample_to_csv_row
 from .session import create_session_directory, initial_session_metadata
+from .trigger import TriggerConfig, TriggerRuntimeState
 
 
 def _validate_recording_interval(interval_s: float, acquisition_interval_s: float) -> None:
@@ -295,6 +296,9 @@ class RecordingManager:
         self._application_version = application_version
         self._active: dict[str, SessionRecorder] = {}
         self._failed: dict[str, dict] = {}
+        self._trigger_configs: dict[str, TriggerConfig] = {}
+        self._armed_triggers: dict[str, TriggerRuntimeState] = {}
+        self._trigger_last_fired: dict[str, dict] = {}
         self._lock = threading.RLock()
         self._accept_commands = True
         self._subscriber = bus.subscribe(maxsize=256)
@@ -324,6 +328,80 @@ class RecordingManager:
         if not self._accept_commands:
             raise RuntimeError("recording commands disabled")
 
+    def _trigger_status(self, device_id: str) -> dict:
+        config = self._trigger_configs[device_id]
+        armed = self._armed_triggers.get(device_id)
+        fired = self._trigger_last_fired.get(device_id, {})
+        return {
+            "device_id": device_id,
+            "state": "ARMED" if armed is not None else "DISARMED",
+            "config": {
+                "block": config.block.value,
+                "measurement": config.measurement.value,
+                "operator": config.operator.value,
+                "threshold": config.threshold,
+                "mode": config.mode.value,
+                "recording_interval_s": config.recording_interval_s,
+            },
+            "armed_utc": None if armed is None else armed.armed_utc.isoformat(),
+            "last_fired_cycle_id": fired.get("cycle_id"),
+            "last_fired_utc": fired.get("utc"),
+            "last_fired_value": fired.get("value"),
+        }
+
+    def configure_trigger(self, config: TriggerConfig) -> dict:
+        with self._lock:
+            self._require_commands_enabled()
+            if config.device_id not in self._devices:
+                raise KeyError(config.device_id)
+            _validate_recording_interval(
+                config.recording_interval_s,
+                self._devices[config.device_id].poll_interval_s,
+            )
+            self._armed_triggers.pop(config.device_id, None)
+            self._trigger_configs[config.device_id] = config
+            return self._trigger_status(config.device_id)
+
+    def arm_trigger(self, device_id: str) -> dict:
+        with self._lock:
+            self._require_commands_enabled()
+            if device_id not in self._devices:
+                raise KeyError(device_id)
+            if device_id in self._active:
+                raise RuntimeError("recording already active")
+            config = self._trigger_configs.get(device_id)
+            if config is None:
+                raise RuntimeError("trigger not configured")
+            snapshot = self._store.get_device(device_id)
+            floor = (
+                None
+                if snapshot.last_sample is None
+                else snapshot.last_sample.identity.cycle_id
+            )
+            self._armed_triggers[device_id] = TriggerRuntimeState(
+                config=config,
+                armed_utc=datetime.now(timezone.utc),
+                arm_floor_cycle_id=floor,
+            )
+            return self._trigger_status(device_id)
+
+    def disarm_trigger(self, device_id: str) -> dict:
+        with self._lock:
+            self._require_commands_enabled()
+            if device_id not in self._devices:
+                raise KeyError(device_id)
+            self._armed_triggers.pop(device_id, None)
+            if device_id not in self._trigger_configs:
+                raise RuntimeError("trigger not configured")
+            return self._trigger_status(device_id)
+
+    def trigger_statuses(self) -> tuple[dict, ...]:
+        with self._lock:
+            return tuple(
+                self._trigger_status(device_id)
+                for device_id in sorted(self._trigger_configs)
+            )
+
     def start(self, device_id: str, interval_s: float, session_note: str = "") -> Path:
         with self._lock:
             self._require_commands_enabled()
@@ -332,10 +410,13 @@ class RecordingManager:
             snapshot = self._store.get_device(device_id)
             if snapshot.last_sample is None:
                 raise RuntimeError("no complete sample available for recording start")
+            device = self._devices[device_id]
+            _validate_recording_interval(interval_s, device.poll_interval_s)
+            self._armed_triggers.pop(device_id, None)
             recorder = SessionRecorder.create(
                 self._root,
                 snapshot.last_sample,
-                self._devices[device_id],
+                device,
                 interval_s,
                 self._application_version,
             )
@@ -354,8 +435,14 @@ class RecordingManager:
     def stop(self, device_id: str) -> None:
         with self._lock:
             self._require_commands_enabled()
-            recorder = self._active.pop(device_id)
-            recorder.stop()
+            was_armed = self._armed_triggers.pop(device_id, None) is not None
+            recorder = self._active.pop(device_id, None)
+            if recorder is not None:
+                recorder.stop()
+                return
+            if was_armed:
+                return
+            raise KeyError(device_id)
 
     def set_interval(self, device_id: str, interval_s: float) -> None:
         with self._lock:
@@ -376,6 +463,7 @@ class RecordingManager:
     def stop_all(self) -> None:
         cleanup_errors: list[str] = []
         with self._lock:
+            self._armed_triggers.clear()
             for device_id in tuple(self._active):
                 recorder = self._active.pop(device_id)
                 try:
