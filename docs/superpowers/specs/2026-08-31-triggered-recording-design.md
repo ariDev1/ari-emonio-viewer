@@ -1,18 +1,22 @@
-# ARI Emonio Viewer v0.4.16 Testing — Triggered Recording Design
+# ARI Emonio Viewer v0.4.16 Testing — Negative-Condition Monitor Design
 
 Date: 2026-08-31  
-Status: APPROVED DESIGN — CLARIFIED DURING PLAN SELF-REVIEW  
+Status: APPROVED ARCHITECTURE — FORMAL SPECIFICATION FOR REVIEW  
 Target branch: `testing`  
-Baseline before design work: `b539efe7eb3a11d53a3b291254ddd0c50a2cf3df`  
-Target version: `v0.4.16 Testing`
+Target version: `v0.4.16 Testing`  
+Supersedes: the earlier v0.4.16 one-shot LEVEL/CROSSING trigger design
 
 ## 1. Purpose
 
-Add deterministic one-shot triggered recording without changing the canonical measurement path.
+Add a continuous per-Emonio negative-condition monitor for three-phase electrical measurements.
 
-The trigger uses the exact canonical `MeasurementSample` objects that already reach the recording subsystem. It does not change measured values. It does not create synthetic samples. It does not infer a threshold crossing across missing evidence.
+The primary engineering question is:
 
-Existing manual recording remains available. Pre-trigger recording is not part of this version.
+> When did negative active power or negative power factor occur, on which phase, and what happened during that interval?
+
+The monitor must detect every supported negative-condition event during one enabled monitoring period. It must automatically start recording when the first monitored negative condition becomes active. It must keep one coherent recording while one or more monitored conditions are active. It must stop the monitor-owned recording when all monitored conditions are inactive. It must then remain enabled and wait for the next event.
+
+The monitor uses only exact canonical `MeasurementSample` evidence. It does not modify measurement values. It does not infer crossings across missing evidence.
 
 ## 2. Scientific invariants
 
@@ -23,12 +27,14 @@ The implementation must preserve these rules:
 - Register maps and decoders stay unchanged.
 - Canonical measurement validation stays unchanged.
 - Canonical P and Q signs and quadrants stay unchanged.
-- Trigger comparison uses exact canonical numeric values.
-- Display rounding never affects trigger evaluation.
-- No smoothing, averaging, interpolation, resampling, hysteresis, or synthetic samples are permitted.
-- Qualification count is fixed at one qualifying canonical sample.
-- One firing creates at most one recording session.
-- The exact firing sample is the first sample of a successful triggered recording.
+- Monitor decisions use exact canonical numeric values.
+- Display rounding never affects monitor decisions.
+- No smoothing, averaging, interpolation, resampling, hysteresis, debounce, epsilon, sign correction, or synthetic samples are permitted.
+- A transition is exact only when consecutive canonical cycle evidence proves it.
+- A missing cycle, invalid cycle, or same-device diagnostic continuity break prevents an exact crossing claim across that break.
+- The exact activating sample is the first measurement sample of a successful monitor-owned recording.
+- One Emonio has at most one active recording session.
+- Manual operator actions have higher authority than automatic monitoring.
 
 ## 3. Existing architecture evidence
 
@@ -36,11 +42,13 @@ The implementation must preserve these rules:
 
 `SessionRecorder.create()` already accepts a specific first sample and sends it through the normal recording path.
 
-The Runtime Event Bus uses bounded subscriber queues. A queue can drop an older event. CROSSING logic must therefore prove continuity from cycle identity and diagnostic evidence, not only from event arrival order.
+The Runtime Event Bus uses bounded subscriber queues. A queue can drop an older event. Monitor transition logic must therefore prove continuity from canonical cycle identity and diagnostic evidence, not only from event arrival order.
+
+The browser history is display state. It is not authoritative recording evidence and must not become a monitor source.
 
 ## 4. Selected architecture
 
-The trigger evaluator runs inside the existing `RecordingManager` consumer path.
+The monitor evaluator runs inside the existing `RecordingManager` consumer path.
 
 ```text
 canonical MeasurementSample
@@ -53,452 +61,698 @@ RecordingManager._consume()
         |
         +--> active SessionRecorder
         |
-        +--> armed trigger state
+        +--> per-Emonio negative-condition monitor
                  |
-                 +--> no fire: retain required runtime evidence
-                 |
-                 +--> fire: SessionRecorder.create(exact firing sample)
+                 +--> update A/B/C condition state
+                 +--> write exact/bounded event evidence
+                 +--> start one recording when first condition activates
+                 +--> keep same recording while any condition is active
+                 +--> stop monitor-owned recording when all conditions clear
+                 +--> remain enabled and wait for next event
 ```
 
-This keeps one recording owner per Emonio, one ordered evidence consumer, and one synchronization boundary for manual and triggered recording.
+This keeps one evidence consumer, one recording owner, and one synchronization boundary for manual and automatic recording.
 
 Rejected designs:
 
-- A separate backend trigger subscriber is rejected because two bounded queues can observe different event loss and timing.
-- A browser trigger is rejected because browser history is display state, not authoritative recording evidence.
+- One independent recording per phase is rejected because overlapping phase events would duplicate measurement evidence and create competing session ownership.
+- A browser monitor is rejected because browser history is not recording authority.
+- Continuous unconditional recording is rejected because it defeats event-triggered acquisition and produces unnecessary data.
 
-## 5. Supported trigger scope
+## 5. Monitor scope
 
-Measurements:
-
-| UI | Canonical field |
-| --- | --- |
-| U | `vrms` |
-| I | `irms` |
-| P | `p` |
-| Q | `q` |
-| S | `s` |
-| PF | `pf` |
-| f | `frequency` |
-
-Blocks:
-
-- A
-- B
-- C
-- TOTAL
-
-Operators:
-
-- `>`
-- `>=`
-- `<`
-- `<=`
-
-Modes:
-
-- `LEVEL`
-- `CROSSING`
-
-Deferred:
-
-- Pre-trigger recording.
-- Automatic re-arm.
-- Repeating triggers.
-- Hysteresis.
-- Configurable debounce or N-sample qualification.
-- Dedicated P/Q sign-change trigger types.
-- Dedicated quadrant-transition trigger type.
-- Compound Boolean conditions.
-- Time-based conditions.
-
-## 6. Trigger configuration
-
-The backend configuration is immutable while ARMED:
+The first monitor version supports these conditions:
 
 ```text
-TriggerConfig
+P < 0
+PF < 0
+P < 0 OR PF < 0
+```
+
+Supported phases:
+
+```text
+A
+B
+C
+```
+
+`TOTAL` is not part of v0.4.16 negative-condition monitoring. The purpose is to identify which physical phase produced the negative condition.
+
+The threshold is fixed at exact numeric `0.0`. There is no user-defined threshold in this monitor version.
+
+Recording interval uses the existing valid recording intervals and must be greater than or equal to the Emonio acquisition interval.
+
+## 6. Monitor configuration
+
+One Emonio owns one monitor configuration.
+
+Conceptual configuration:
+
+```text
+NegativeMonitorConfig
   device_id
-  block                  A | B | C | TOTAL
-  measurement            U | I | P | Q | S | PF | F
-  operator               GT | GE | LT | LE
-  threshold              finite float
-  mode                   LEVEL | CROSSING
-  recording_interval_s   finite positive float
+  condition             P_NEGATIVE | PF_NEGATIVE | P_OR_PF_NEGATIVE
+  phases                non-empty subset of A, B, C
+  recording_interval_s  finite positive float
 ```
 
-The server rejects unknown enum values, non-finite thresholds, non-finite intervals, intervals `<= 0`, and intervals lower than the Emonio acquisition interval.
+The server rejects:
 
-Any accepted configuration update first forces that Emonio to DISARMED state and then stores the new configuration. A new explicit ARM command is required.
+- unknown device ID;
+- unknown condition;
+- empty phase set;
+- a phase outside A/B/C;
+- non-finite recording interval;
+- interval `<= 0`;
+- interval lower than the device acquisition interval.
 
-## 7. Per-Emonio runtime state
+There is no clamping and no automatic substitution.
 
-Each Emonio owns independent trigger state.
+Configuration is runtime-only in v0.4.16.
+
+Changing controls in the browser does not silently change backend state. The operator must press `APPLY`.
+
+If `APPLY` is accepted while the monitor is enabled:
 
 ```text
-TriggerRuntimeState
-  config
-  armed_utc
-  arm_floor_cycle_id     optional
-  previous_cycle_id      optional
-  previous_value         optional
-  previous_sample_utc    optional
+monitor -> OFF
+new configuration stored
+explicit ENABLE MONITOR required
 ```
 
-Last-fired evidence is retained separately for status display after the one-shot is consumed:
+This prevents a live monitoring rule from changing without an explicit operator action.
+
+## 7. Per-phase and per-measurement condition state
+
+The monitor evaluates every selected phase independently.
+
+For `P_NEGATIVE`, it tracks P on each selected phase.
+
+For `PF_NEGATIVE`, it tracks PF on each selected phase.
+
+For `P_OR_PF_NEGATIVE`, it tracks P and PF independently on each selected phase. It logs P and PF transitions independently. The phase aggregate is active when either selected measurement is negative.
+
+Example:
 
 ```text
-last_fired_cycle_id
-last_fired_utc
-last_fired_value
+Phase B:
+  P  < 0   active
+  PF >= 0  inactive
+  aggregate phase state = NEGATIVE P
 ```
 
-ARMED state is runtime-only. Viewer restart always starts DISARMED. There is no auto-resume or automatic re-arm.
-
-## 8. ARM semantics
-
-ARM is explicit.
-
-When ARM is accepted, `RecordingManager` reads the current `RuntimeStore` snapshot only to establish the post-ARM cycle floor. If a last canonical sample exists, its cycle ID becomes `arm_floor_cycle_id`.
-
-A queued measurement with:
+If both are negative:
 
 ```text
-cycle_id <= arm_floor_cycle_id
+Phase B aggregate state = NEGATIVE P + PF
 ```
 
-is pre-ARM evidence and is not evaluated.
+The Emonio aggregate monitor condition is active when at least one selected phase-measurement condition is active.
 
-If no canonical sample exists at ARM time, the first later eligible sample is the first post-ARM sample.
+## 8. Exact transition semantics
 
-ARM while recording is rejected:
-
-```text
-RECORDING + ARM -> 409 CONFLICT
-```
-
-The active recording continues unchanged.
-
-## 9. Operator ownership rules
-
-Manual operator actions have higher authority than an armed trigger.
-
-### 9.1 Manual START while ARMED
-
-If normal manual START validation succeeds far enough to take recording ownership, the trigger is disarmed before manual session creation.
+For one selected measurement `x`, threshold `0.0`, previous exact valid canonical value `p`, and current exact valid canonical value `x`:
 
 ```text
-ARMED + MANUAL START -> DISARMED + MANUAL RECORDING
-```
-
-If manual session creation then fails, the trigger stays DISARMED. There is no hidden return to ARMED.
-
-### 9.2 Manual STOP is a master abort for the selected Emonio
-
-Manual STOP always disarms an armed trigger for that Emonio.
-
-If recording is active:
-
-```text
-RECORDING + STOP -> STOPPED + DISARMED
-```
-
-If no recording is active but a trigger is ARMED:
-
-```text
-ARMED + STOP -> DISARMED
-```
-
-This STOP request succeeds because it performed a real state transition.
-
-If neither recording nor an armed trigger exists, the existing `recording not active` / 404 behavior remains.
-
-The dedicated DISARM command remains available inside the trigger controls.
-
-### 9.3 Configuration change while ARMED
-
-Any accepted trigger configuration update causes:
-
-```text
-ARMED + CONFIG UPDATE -> DISARMED
-```
-
-## 10. Eligible trigger samples
-
-The trigger evaluates only a canonical `MeasurementSample` for the same Emonio.
-
-Eligible quality values are exactly:
-
-- `VALID`
-- `DEGRADED`
-
-Any other quality cannot fire the trigger.
-
-The selected numeric measurement value must be finite. A non-finite value cannot fire the trigger.
-
-A sample from another Emonio does not change this trigger's state or CROSSING continuity evidence.
-
-## 11. LEVEL semantics
-
-LEVEL uses only the current eligible post-ARM sample.
-
-The first eligible sample after ARM can fire immediately.
-
-For threshold `T` and current exact value `x`:
-
-```text
->   fires when x >  T
->=  fires when x >= T
-<   fires when x <  T
-<=  fires when x <= T
-```
-
-No previous value is required. A prior acquisition gap does not require inference for LEVEL because the decision uses only the current exact sample.
-
-## 12. CROSSING semantics
-
-The first eligible post-ARM sample establishes previous-state evidence only. It cannot fire.
-
-For previous exact value `p`, current exact value `x`, and threshold `T`:
-
-```text
->   fires when p <= T and x >  T
->=  fires when p <  T and x >= T
-<   fires when p >= T and x <  T
-<=  fires when p >  T and x <= T
+NEGATIVE_START when p >= 0 and x < 0
+NEGATIVE_END   when p <  0 and x >= 0
 ```
 
 No epsilon is used.
 
-A crossing pair is valid only when:
+A transition is exact only when:
 
 ```text
 current.cycle_id == previous.cycle_id + 1
 ```
 
-and no same-device `DiagnosticEvent` invalidated continuity between those samples.
+and no same-device diagnostic evidence invalidated continuity between the two samples.
 
-Rules:
+The event time for an exact transition is the current sample `cycle_finished_utc`.
 
-- A same-device `DiagnosticEvent` clears CROSSING previous-state evidence.
-- A cycle gap clears previous evidence. The current eligible newer sample becomes a new baseline and cannot fire on that evaluation.
-- A duplicate cycle ID is ignored and cannot fire.
-- A stale/decreasing cycle ID is ignored and cannot fire.
-- A sample from another Emonio does not alter the state.
-- A pre-ARM queued cycle does not alter the state.
+The exact current value is stored as event evidence.
 
-A crossing is never inferred across a gap.
+## 9. Monitor enable and first-sample semantics
 
-## 13. Trigger firing transaction
+Viewer restart starts with the monitor OFF.
 
-When a trigger fires, `RecordingManager` performs these actions under its existing recording synchronization boundary:
+The operator must explicitly enable the monitor.
 
-1. Keep the exact firing `MeasurementSample` object.
-2. Capture last-fired evidence from that sample.
-3. Consume the one-shot trigger.
-4. Set trigger state to DISARMED.
-5. Create the recording session from that exact sample.
-6. Set session `started_utc` to `sample.timing.cycle_finished_utc`.
-7. Pass the exact same sample to the existing first-sample recording path.
-8. Write trigger provenance to session evidence.
+The first eligible canonical sample after ENABLE establishes the current state of all selected phase-measurement conditions.
 
-There is no `RuntimeStore` re-read between trigger evaluation and triggered session creation.
+If a selected value is non-negative:
 
-A newer sample cannot replace the firing sample as the first recorded sample.
+```text
+state = NORMAL
+no negative event
+```
 
-## 14. Triggered session provenance
+If a selected value is already negative:
 
-Manual sessions keep the current metadata structure. v0.4.16 does not add `start_source` to manual sessions.
+```text
+state = NEGATIVE
+write NEGATIVE_PRESENT_AT_MONITOR_START
+```
 
-Triggered sessions add these fields inside the existing `recording` object:
+`NEGATIVE_PRESENT_AT_MONITOR_START` is not an exact crossing. The actual transition may have occurred before monitoring started.
+
+If at least one monitored value is already negative on that first sample, a monitor-owned recording starts from that exact first observed negative sample unless an existing manual recording already owns the device.
+
+If several conditions are negative on the same first sample, only one recording session starts. One event is written for each negative selected phase-measurement condition.
+
+## 10. Normal automatic recording ownership
+
+Monitor states are:
+
+```text
+OFF
+WAITING
+RECORDING
+WAITING_FOR_CLEAR
+```
+
+Meanings:
+
+- `OFF`: condition monitoring is disabled.
+- `WAITING`: monitoring is enabled, no monitored condition is active, and the monitor can start a new automatic session.
+- `RECORDING`: one or more monitored conditions are active and evidence is being written to an active recording session.
+- `WAITING_FOR_CLEAR`: one or more monitored conditions are active, but automatic recording is suppressed because the operator stopped the session or a recording failure occurred.
+
+Normal automatic sequence:
+
+```text
+WAITING
+  |
+  | first monitored condition activates
+  v
+RECORDING
+  |
+  | other conditions can activate or clear
+  | same session continues
+  |
+  | final active condition clears
+  v
+stop monitor-owned session
+  |
+  v
+WAITING
+```
+
+There is no automatic DISARM after one event. The monitor stays enabled until explicit DISABLE MONITOR or Viewer restart.
+
+## 11. Overlapping phase and measurement events
+
+A new negative event during an active recording does not create another session.
+
+Example:
+
+```text
+A P  NEGATIVE_START -> start session
+B PF NEGATIVE_START -> same session, log event
+A P  NEGATIVE_END   -> same session continues
+C P  NEGATIVE_START -> same session continues
+B PF NEGATIVE_END   -> same session continues
+C P  NEGATIVE_END   -> stop monitor-owned session
+monitor -> WAITING
+```
+
+This produces one coherent evidence package for the complete overlapping three-phase event interval.
+
+## 12. Gap and invalid-cycle semantics
+
+Any continuity break destroys exact transition evidence across that break.
+
+Continuity breaks include:
+
+- missing canonical cycle ID;
+- invalid/stale sample that cannot be used as transition evidence;
+- same-device `DiagnosticEvent` that represents acquisition evidence loss;
+- event-delivery loss visible to the recording consumer.
+
+The monitor does not fabricate `NEGATIVE_START` or `NEGATIVE_END` across such a break.
+
+If a monitor-owned recording is active when continuity is lost, the session remains open. The evidence gap is recorded through the existing recording diagnostic/event path.
+
+The first eligible sample after the gap re-establishes current condition state.
+
+For each selected phase-measurement condition:
+
+- current value negative -> `NEGATIVE_PRESENT_AFTER_GAP`;
+- previous known state negative and current value non-negative -> `NEGATIVE_NOT_PRESENT_AFTER_GAP`;
+- previous known state normal and current value non-negative -> no negative-condition event is required.
+
+`NEGATIVE_PRESENT_AFTER_GAP` means a negative condition is observed after the gap. It does not claim the exact start time.
+
+`NEGATIVE_NOT_PRESENT_AFTER_GAP` means a previously observed negative condition is no longer present. It does not claim the exact end time.
+
+For a condition that was negative before the gap and is non-negative after the gap:
+
+```text
+last valid negative sample time < actual end <= first valid non-negative sample time
+```
+
+For a condition that was normal before the gap and is negative after the gap:
+
+```text
+last valid non-negative sample time < actual start <= first valid negative sample time
+```
+
+These are bounded intervals, not exact crossing times.
+
+If the first valid post-gap sample proves that all monitored conditions are non-negative, a monitor-owned recording may stop on that sample.
+
+## 13. Disconnect and reconnect semantics
+
+A real device disconnect is a continuity break.
+
+The monitor configuration and enabled state remain in memory during a temporary disconnect. No automatic event is inferred while the device has no canonical measurement evidence.
+
+If a monitor-owned recording is active, the session remains open and existing disconnect/acquisition evidence is recorded.
+
+On the first eligible sample after reconnect:
+
+- current selected value negative -> `NEGATIVE_PRESENT_AFTER_RECONNECT`;
+- previously known negative condition now non-negative -> `NEGATIVE_NOT_PRESENT_AFTER_RECONNECT`;
+- previously known normal condition still non-negative -> no negative-condition event is required.
+
+No crossing is fabricated across the disconnected interval.
+
+If all monitored conditions are non-negative after reconnect, a monitor-owned recording may stop on that first valid post-reconnect sample.
+
+## 14. Event evidence format
+
+The existing `events.csv` schema remains compatible:
+
+```text
+utc,event,severity,cycle_id,detail
+```
+
+Negative-condition evidence uses the existing columns as follows:
+
+- `utc`: canonical `cycle_finished_utc` for measurement-based monitor events;
+- `event`: one of the defined negative-condition event names;
+- `severity`: `INFO` for normal condition transitions/presence evidence, unless a separate failure event requires `ERROR`;
+- `cycle_id`: exact canonical cycle ID;
+- `detail`: deterministic structured key-value evidence.
+
+The monitor detail format is:
+
+```text
+phase=<A|B|C>;measurement=<P|PF>;value=<exact repr>;threshold=0.0;continuity=<EXACT|MONITOR_START|GAP_BOUNDARY|RECONNECT_BOUNDARY>
+```
+
+Required monitor event names:
+
+```text
+NEGATIVE_PRESENT_AT_MONITOR_START
+NEGATIVE_START
+NEGATIVE_END
+NEGATIVE_PRESENT_AFTER_GAP
+NEGATIVE_NOT_PRESENT_AFTER_GAP
+NEGATIVE_PRESENT_AFTER_RECONNECT
+NEGATIVE_NOT_PRESENT_AFTER_RECONNECT
+```
+
+This preserves the existing event CSV columns while providing explicit phase, measurement, exact value, fixed threshold, and continuity classification.
+
+Measurement CSV columns and measurement numeric serialization remain unchanged.
+
+## 15. Monitor-owned session provenance
+
+A session started automatically by the monitor adds monitor provenance to the existing `recording` metadata object.
+
+Conceptual structure:
 
 ```json
 {
   "recording": {
-    "interval_s": 1.0,
-    "start_source": "TRIGGER",
-    "trigger": {
-      "mode": "CROSSING",
-      "block": "A",
-      "measurement": "P",
-      "operator": "GT",
-      "threshold": 1000.0,
-      "fired_cycle_id": 12345,
-      "fired_utc": "canonical cycle_finished_utc",
-      "fired_value": 1000.25
+    "interval_s": 2.0,
+    "start_source": "NEGATIVE_CONDITION_MONITOR",
+    "monitor": {
+      "condition": "P_OR_PF_NEGATIVE",
+      "phases": ["A", "B", "C"],
+      "start_phase": "B",
+      "start_measurement": "P",
+      "start_event": "NEGATIVE_START",
+      "start_cycle_id": 1254,
+      "start_utc": "canonical cycle_finished_utc",
+      "start_value": -36.807934
     }
   }
 }
 ```
 
-The triggered session also writes one `TRIGGER_FIRED` event with firing UTC, cycle ID, mode, block, measurement, operator, threshold, and exact firing value.
+If several conditions activate on the same sample, `start_phase` and `start_measurement` use a deterministic order:
 
-This event does not modify measurement CSV data.
+```text
+phase order: A, B, C
+measurement order: P, PF
+```
 
-## 15. Failure semantics
+All activating conditions are still written individually to `events.csv`.
 
-The trigger is consumed before triggered session creation.
+Manual session metadata remains compatible with the existing manual recording format. A monitor enabled during a manual session writes monitor events into that existing session but does not convert the session owner to monitor-owned.
 
-If a triggered session later fails during recording I/O, existing recording ERROR handling remains in force. There is no retry, second session, or re-arm.
+## 16. Manual operator authority
 
-If triggered session creation itself fails before a usable recorder exists:
+Manual operator actions have higher authority than automation.
 
-- trigger remains DISARMED;
-- no second start attempt occurs;
-- `RecordingManager` stores a deterministic per-device failure entry;
-- failure identifies `start_source = TRIGGER`;
-- failure includes device ID, failed cycle ID, failed UTC, error type, and error detail;
-- `session_dir` is empty when no usable directory exists;
-- one same-device `DiagnosticEvent` named `TRIGGERED_RECORDING_START_ERROR` is published.
+### 16.1 Manual RECORD while monitor is enabled
 
-The system never reports RECORDING when triggered session creation failed.
+Manual RECORD can start a session while the monitor is `WAITING`.
 
-## 16. Backend component boundaries
+The monitor remains enabled and continues to evaluate exact canonical samples.
 
-Create `src/emonio_viewer/recording/trigger.py` for:
+If a monitored condition becomes active during the manual session:
 
-- trigger enums;
-- immutable `TriggerConfig`;
-- runtime trigger state representation;
-- exact canonical field extraction;
-- LEVEL comparison;
-- CROSSING comparison;
-- continuity handling;
-- deterministic evaluation result.
+- the monitor writes the condition events into the same manual session;
+- it does not create a second session;
+- monitor state becomes `RECORDING` while one or more monitored conditions are active and evidence is being recorded.
 
-Modify `src/emonio_viewer/recording/recorder.py` only for:
+When all monitored conditions clear, monitor state returns to `WAITING`. The manual session itself continues until the operator stops it.
 
-- per-device trigger configuration/state ownership;
-- ARM/DISARM/configuration transitions;
-- manual START/STOP ownership rules;
-- event-consumer trigger evaluation;
-- exact-sample triggered start;
-- trigger-start failure reporting.
+### 16.2 ENABLE MONITOR while manual recording is already active
 
-Modify `src/emonio_viewer/recording/session.py` only for optional triggered-start provenance.
+This is allowed.
+
+The first eligible post-enable sample establishes monitor state.
+
+If a selected condition is already negative, the monitor writes `NEGATIVE_PRESENT_AT_MONITOR_START` into the active manual session.
+
+No second session is created.
+
+### 16.3 Manual STOP
+
+Manual STOP stops the active recording session.
+
+The monitor remains enabled.
+
+If no monitored condition is active after STOP:
+
+```text
+monitor -> WAITING
+```
+
+If one or more monitored conditions are still active:
+
+```text
+monitor -> WAITING_FOR_CLEAR
+```
+
+While `WAITING_FOR_CLEAR`, the monitor continues to evaluate and log runtime state but does not automatically create another session for the same continuous negative condition.
+
+When all monitored conditions become non-negative:
+
+```text
+WAITING_FOR_CLEAR -> WAITING
+```
+
+The next new negative event can start a new automatic session.
+
+This prevents automatic recording from immediately overriding an explicit operator STOP.
+
+### 16.4 DISABLE MONITOR
+
+DISABLE MONITOR stops condition monitoring and clears monitor runtime condition state.
+
+If the active recording is manual-owned, DISABLE MONITOR does not stop the manual session.
+
+If the active recording is monitor-owned, DISABLE MONITOR stops that recording cleanly and then sets monitor state to `OFF`.
+
+## 17. Recording ownership representation
+
+`RecordingManager` remains the single owner of recording sessions.
+
+It must distinguish runtime recording ownership:
+
+```text
+MANUAL
+NEGATIVE_CONDITION_MONITOR
+```
+
+This ownership is required so DISABLE MONITOR can stop only a monitor-owned session and leave a manual session unchanged.
+
+There is never more than one active session per Emonio.
+
+## 18. Automatic recording start failure
+
+If an exact activating event occurs but monitor-owned session creation fails:
+
+- keep the negative-condition event evidence in runtime failure status and diagnostics as far as available;
+- do not report RECORDING;
+- do not retry automatically on every negative sample;
+- monitor remains enabled;
+- monitor state becomes `WAITING_FOR_CLEAR` if any monitored condition remains active;
+- publish one explicit monitor recording-start failure diagnostic;
+- store deterministic per-device failure status.
+
+The monitor does not create a replacement session for the same continuous negative condition.
+
+When all monitored conditions clear, the monitor returns to `WAITING`. The next new event may start a new session.
+
+## 19. Recording write failure
+
+If measurement, event, or metadata I/O fails during an active recording:
+
+- existing recording failure handling remains authoritative;
+- fail/close the session as far as possible;
+- store explicit ERROR evidence;
+- do not create an automatic replacement session for the same continuous negative condition;
+- monitor remains enabled;
+- if any monitored condition remains active, monitor enters `WAITING_FOR_CLEAR`;
+- if all monitored conditions are inactive, monitor returns to `WAITING`.
+
+There is no automatic retry loop.
+
+## 20. Restart semantics
+
+Monitor configuration and enabled state are runtime-only in v0.4.16.
+
+Viewer restart always starts:
+
+```text
+MONITOR OFF
+```
+
+There is:
+
+- no automatic re-enable;
+- no automatic session recovery;
+- no hidden persistence subsystem.
+
+Persistent unattended monitoring can be designed later if there is a proven requirement.
+
+## 21. Backend component boundaries
+
+The existing pure trigger work can be reused only where it cleanly supports exact comparison and continuity semantics. The final v0.4.16 public model is the negative-condition monitor, not a generic one-shot trigger.
+
+The final implementation should use a focused recording-subsystem module for:
+
+- monitor configuration;
+- per-phase/per-measurement condition state;
+- exact negative transition evaluation;
+- continuity classification;
+- deterministic monitor event results.
+
+`RecordingManager` owns:
+
+- per-Emonio monitor configuration and runtime state;
+- monitor ENABLE/DISABLE/APPLY transitions;
+- manual/monitor recording ownership;
+- event-consumer monitor evaluation;
+- exact-sample automatic session start;
+- automatic stop when all conditions clear;
+- `WAITING_FOR_CLEAR` suppression;
+- failure integration.
+
+`SessionRecorder` remains the measurement/event writer and session metadata owner.
 
 No design change is required in:
 
-- `src/emonio_viewer/modbus/*`
-- `src/emonio_viewer/measurement/*`
-- `src/emonio_viewer/acquisition/*`
-- `src/emonio_viewer/runtime/events.py`
-- `src/emonio_viewer/runtime/store.py`
-- `src/emonio_viewer/scope/*`
-
-If implementation evidence shows one of those protected paths must change, implementation stops and this design is reviewed first.
-
-## 17. API contract
-
-Keep existing manual recording endpoints.
-
-Add:
-
 ```text
-POST /api/v1/recording/trigger/configure
-POST /api/v1/recording/trigger/arm
-POST /api/v1/recording/trigger/disarm
+src/emonio_viewer/modbus/*
+src/emonio_viewer/measurement/*
+src/emonio_viewer/acquisition/*
+src/emonio_viewer/runtime/events.py
+src/emonio_viewer/runtime/store.py
+src/emonio_viewer/scope/*
 ```
 
-Keep:
+If implementation evidence shows one of these protected paths must change, implementation stops and this design is reviewed first.
+
+## 22. API contract
+
+The obsolete one-shot trigger API is not part of the final v0.4.16 public contract.
+
+Use monitor-specific endpoints:
 
 ```text
-GET /api/v1/recording/status
+POST /api/v1/recording/monitor/configure
+POST /api/v1/recording/monitor/enable
+POST /api/v1/recording/monitor/disable
+GET  /api/v1/recording/status
 ```
 
-and add a `triggers` collection:
+Configure request:
+
+```json
+{
+  "device_id": "emonio-id",
+  "condition": "P_OR_PF_NEGATIVE",
+  "phases": ["A", "B", "C"],
+  "recording_interval_s": 2.0
+}
+```
+
+ENABLE/DISABLE request:
+
+```json
+{"device_id": "emonio-id"}
+```
+
+Recording status keeps existing `active` and `errors` collections and adds monitor status:
 
 ```json
 {
   "active": [],
   "errors": [],
-  "triggers": []
+  "monitors": []
 }
 ```
 
-Each trigger status includes:
+Each monitor status contains:
 
-- device ID;
-- state (`ARMED` or `DISARMED`);
-- complete stored configuration;
-- armed UTC when ARMED;
-- last fired cycle ID when available;
-- last fired UTC when available;
-- last fired value when available.
+```text
+device_id
+state                   OFF | WAITING | RECORDING | WAITING_FOR_CLEAR
+configuration           complete stored config or null
+enabled_utc             null or UTC
+phase_states            A/B/C current P/PF negative-state evidence as applicable
+active_conditions       deterministic list
+last_event              null or complete last monitor event evidence
+recording_owner         null | MANUAL | NEGATIVE_CONDITION_MONITOR
+```
 
 HTTP rules:
 
 - invalid configuration: 400;
 - unknown device: 404;
-- ARM without configuration: 409;
-- ARM while recording: 409;
-- commands disabled: 503;
-- valid configure: 200 DISARMED;
-- valid ARM: 200 ARMED;
-- valid DISARM: 200 DISARMED;
-- existing STOP while only ARMED: 200 DISARMED;
-- existing STOP when neither recording nor ARMED: existing 404.
+- ENABLE without configuration: 409;
+- recording commands disabled: 503;
+- valid APPLY/configure: 200 and monitor OFF;
+- valid ENABLE: 200 and state based on first future eligible sample;
+- valid DISABLE: 200 OFF;
+- existing manual RECORD/STOP endpoints remain available.
 
-## 18. Frontend design
+The old `/recording/trigger/*` routes must not remain as a second public automation model in the final v0.4.16 candidate.
 
-Keep the compact Session Recording strip.
+## 23. Frontend design
 
-Add trigger configuration inside the existing Recording drawer:
+Keep the existing compact Session Recording strip.
+
+Replace the current one-shot trigger controls in the Recording drawer with:
 
 ```text
-TRIGGERED RECORDING
-MODE         [ LEVEL | CROSSING ]
-PHASE        [ A | B | C | TOTAL ]
-MEASUREMENT  [ U | I | P | Q | S | PF | f ]
-OPERATOR     [ > | >= | < | <= ]
-THRESHOLD    [ numeric input ]
-INTERVAL     [ existing valid recording intervals ]
-STATE        DISARMED | ARMED
-[CONFIGURE] [ARM] [DISARM]
-LAST FIRED   cycle / UTC / exact value when available
+NEGATIVE-CONDITION MONITOR
+CONDITION   [ P < 0 | PF < 0 | P < 0 OR PF < 0 ]
+PHASES      [A] [B] [C]
+INTERVAL    [existing valid recording intervals]
+
+STATE       OFF | WAITING | RECORDING | WAITING FOR CLEAR
+
+[APPLY] [ENABLE MONITOR] [DISABLE MONITOR]
+
+PHASE STATE
+A   NORMAL
+B   NEGATIVE P
+C   NEGATIVE PF
+
+LAST EVENT
+B · P · NEGATIVE_START
+cycle 1254 · canonical UTC · exact value
 ```
 
-Backend state is authoritative. After configure, ARM, DISARM, manual START, or manual STOP, the frontend refreshes `/api/v1/recording/status` before rendering final state.
+Default phase selection is A+B+C.
 
-The existing main STOP control is enabled when the selected Emonio is recording or has an ARMED trigger. If it is used for an armed-only Emonio, it sends the existing STOP command and shows the returned DISARMED state.
+Changing a field changes only the local form. `APPLY` commits the configuration to the backend.
 
-Trigger CSS stays in a separate structured `frontend/css/recording-trigger.css` file.
+The browser must not silently mutate an enabled monitor configuration.
 
-## 19. Tests and acceptance
+Backend state is authoritative. After APPLY, ENABLE, DISABLE, manual RECORD, or manual STOP, the frontend refreshes `/api/v1/recording/status` before final rendering.
 
-Required automated evidence includes:
+Monitor CSS remains in a separate structured recording-monitor stylesheet. Do not place monitor selectors throughout unrelated CSS files.
 
-- exact field extraction for all supported measurements and blocks;
-- threshold equality semantics for all four operators;
-- LEVEL first-post-ARM firing;
-- CROSSING first-sample baseline behavior;
-- CROSSING consecutive-cycle requirement;
-- reset on same-device diagnostic evidence;
-- reset on cycle gap;
-- stale/duplicate rejection;
-- exact firing sample as first CSV sample even when RuntimeStore already contains a newer sample;
-- one-shot behavior;
-- per-Emonio isolation;
-- manual START disarms trigger;
-- manual STOP disarms trigger, including armed-only state;
-- ARM while recording conflict;
-- configuration update disarms trigger;
-- restart returns DISARMED;
-- triggered session provenance;
-- trigger-start failure evidence;
-- existing manual metadata compatibility;
-- API validation/status;
-- frontend controls and backend-authoritative state;
-- canonical sign regression;
-- read-only gate;
-- complete project acceptance.
+## 24. Required automated evidence
 
-Before field testing, run `./tools/ari-emonio-acceptance.sh` and require explicit evidence for unit, integration, frontend/browser, read-only, Python compilation, scientific sign, and publication/package gates.
+Required tests include:
 
-## 20. Release boundary
+- P exact negative-start and negative-end semantics;
+- PF exact negative-start and negative-end semantics;
+- P OR PF independent event logging and aggregate activity;
+- A/B/C independent condition state;
+- deterministic same-sample multi-condition ordering;
+- first post-enable negative sample -> `NEGATIVE_PRESENT_AT_MONITOR_START`, not fabricated crossing;
+- exact activating sample is first measurement row of a monitor-owned session;
+- overlapping phase conditions share one session;
+- session stops only when final active monitored condition clears;
+- automatic re-wait after normal session completion;
+- next independent negative event starts a new session without manual re-arm;
+- cycle-gap continuity loss prevents exact crossing claim;
+- correct `*_AFTER_GAP` evidence;
+- disconnect/reconnect continuity behavior;
+- correct `*_AFTER_RECONNECT` evidence;
+- manual RECORD while monitor enabled uses one session and receives monitor events;
+- ENABLE during manual recording does not create a second session;
+- manual STOP while a condition is active -> `WAITING_FOR_CLEAR`;
+- no immediate restart while waiting for clear;
+- clear condition -> WAITING;
+- next new event -> automatic recording allowed;
+- DISABLE stops monitor-owned recording but not manual-owned recording;
+- monitor start failure -> explicit failure + WAITING_FOR_CLEAR, no retry loop;
+- recording write failure -> explicit ERROR and deterministic monitor state;
+- restart -> monitor OFF;
+- configuration APPLY while enabled -> monitor OFF;
+- empty phase set rejected;
+- invalid/non-finite interval rejected;
+- monitor status is backend authoritative;
+- current measurement CSV numeric precision remains unchanged;
+- current canonical signs/quadrants remain unchanged;
+- multi-Emonio monitor isolation;
+- read-only gate remains PASS;
+- complete project acceptance remains PASS.
 
-The feature is `v0.4.16 Testing` on branch `testing`.
+## 25. Field test requirements
 
-It is not field-confirmed until real Emonio tests succeed.
+Field testing must use real Emonio measurement evidence.
 
-It is not merged to `main`. `main` stays frozen unless the user explicitly changes that policy.
+Minimum field scenarios:
+
+```text
+1. Monitor P < 0 on A+B+C.
+2. Cause one phase to cross from P >= 0 to P < 0.
+3. Verify exact phase/event/cycle/UTC/value and automatic recording start.
+4. Return that phase to P >= 0 and verify NEGATIVE_END and automatic stop.
+5. Repeat a second independent negative-P event and verify automatic new session without re-enable.
+6. Create overlapping negative P on two phases and verify one shared session.
+7. Monitor PF < 0 and verify independent PF event evidence.
+8. Monitor P < 0 OR PF < 0 and verify both measurement event types are distinguished.
+9. Press manual STOP during an active negative condition and verify WAITING_FOR_CLEAR with no immediate restart.
+10. Clear the condition and produce a new negative event; verify automatic recording resumes.
+11. Verify manual recording remains functional.
+12. Verify History, Density, Vector, Modbus evidence, Diagnostics, and SCOPE remain normal.
+```
+
+A candidate is not field-confirmed until this evidence succeeds on the real workflow.
+
+## 26. Release and migration boundary
+
+The feature remains `v0.4.16 Testing` on branch `testing`.
+
+The partial one-shot trigger implementation already developed on `testing` is superseded by this specification. It is development evidence, not the final v0.4.16 architecture. Useful exact comparison, continuity, exact-sample start, API validation, and frontend patterns may be retained only when they fit this monitor design cleanly.
+
+The final v0.4.16 candidate must not expose two competing automation models. One-shot ARMED/DISARMED trigger controls and public `/recording/trigger/*` routes are removed or replaced before acceptance.
+
+The implementation must not be merged to `main` as part of this work.
+
+`main` remains outside this development cycle unless the user explicitly changes that policy.
