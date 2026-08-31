@@ -154,7 +154,13 @@ export function renderMeasurementPayload(payload) {
 }
 
 export function renderBackendStatus(device) {
-  if (!device) return;
+  if (!device) {
+    renderPowerDirectionIndicators(null);
+    return;
+  }
+  if (!device.quality || device.quality === "NO SAMPLE") {
+    renderPowerDirectionIndicators(null);
+  }
   document.getElementById("device-state").textContent = device.state || "—";
   if (typeof device.acquisition_state === "string" && device.acquisition_state) {
     document.getElementById("acquisition-state").textContent = device.acquisition_state;
