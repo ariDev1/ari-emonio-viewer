@@ -3,16 +3,16 @@
 Date: 2026-08-31  
 Status: DESIGN SPECIFICATION FOR REVIEW  
 Target branch: `testing`  
-Baseline commit before this document: `b539efe7eb3a11d53a3b291254ddd0c50a2cf3df`  
+Baseline commit before this design: `b539efe7eb3a11d53a3b291254ddd0c50a2cf3df`  
 Target version: `v0.4.16 Testing`
 
 ## 1. Purpose
 
 Add deterministic triggered recording to the ARI Emonio Viewer without changing the canonical measurement path.
 
-The trigger must use the exact canonical `MeasurementSample` objects that already reach the existing recording subsystem. The trigger must never change a measured value. It must never create a synthetic sample. It must never infer a crossing across missing evidence.
+The trigger uses the exact canonical `MeasurementSample` objects that already reach the recording subsystem. The trigger does not change a measured value. It does not create a synthetic sample. It does not infer a crossing across missing evidence.
 
-The existing manual recording path remains valid and remains available.
+The existing manual recording path remains available and keeps its existing scientific behavior.
 
 Pre-trigger recording is not part of this version.
 
@@ -26,7 +26,7 @@ The implementation must preserve these rules:
 - Canonical measurement validation stays unchanged.
 - Canonical P and Q signs stay unchanged.
 - Trigger comparison uses the exact canonical numeric value.
-- Display rounding must not affect trigger evaluation.
+- Display rounding does not affect trigger evaluation.
 - No smoothing is permitted.
 - No averaging is permitted.
 - No interpolation is permitted.
@@ -34,26 +34,24 @@ The implementation must preserve these rules:
 - No hysteresis is permitted in v0.4.16.
 - No configurable debounce is permitted in v0.4.16.
 - Qualification count is fixed at one qualifying canonical sample.
-- One trigger firing can create only one recording session.
-- The exact firing sample must be the first sample of the triggered recording.
+- One trigger firing creates at most one recording session.
+- The exact firing sample is the first sample of a successful triggered recording.
 
 ## 3. Existing architecture evidence
 
-The existing `RecordingManager` already owns one `RuntimeEventBus` subscriber and consumes canonical `MeasurementSample` and `DiagnosticEvent` objects.
+The existing `RecordingManager` owns one `RuntimeEventBus` subscriber and consumes canonical `MeasurementSample` and `DiagnosticEvent` objects.
 
-The existing `SessionRecorder.create()` already accepts a specific `first_sample` and immediately passes that sample through the normal recording logic.
+The existing `SessionRecorder.create()` accepts a specific `first_sample` and sends that sample through the normal recording logic.
 
-The existing Runtime Event Bus uses bounded subscriber queues. If a queue is full, an older event can be dropped. Therefore CROSSING logic must not assume continuity only because two measurements arrive consecutively at the trigger engine. Cycle identity and diagnostic evidence must also prove continuity.
+The existing Runtime Event Bus uses bounded subscriber queues. If a subscriber queue is full, an older event can be dropped. CROSSING logic therefore must prove continuity from cycle identity and diagnostic evidence. Event arrival alone is not sufficient proof.
 
-The existing session metadata records device, application, Modbus transport, acquisition interval, and recording interval. Triggered sessions need additional start provenance, but manual-session metadata must remain compatible.
+The existing session metadata records device, application, Modbus transport, acquisition interval, and recording interval. Triggered sessions require additional start provenance. Manual-session metadata must keep its current structure and meaning.
 
-## 4. Approaches considered
+## 4. Architecture selection
 
-### 4.1 Selected: TriggerEngine inside RecordingManager
+### 4.1 Selected architecture: TriggerEngine inside RecordingManager
 
 The trigger evaluator runs inside the existing `RecordingManager` consumer path.
-
-Data flow:
 
 ```text
 canonical MeasurementSample
@@ -73,36 +71,30 @@ RecordingManager._consume()
                  +--> fire: SessionRecorder.create(exact firing sample)
 ```
 
-Advantages:
+This architecture provides:
 
-- One recording owner per device.
-- One ordered consumer path for trigger and recording.
-- The firing sample is available directly.
-- Manual and triggered recording conflicts can be resolved under the existing RecordingManager lock.
-- No new acquisition dependency is required.
-- No browser measurement becomes authoritative.
+- one recording owner per device;
+- one ordered consumer path for trigger and recording;
+- direct access to the exact firing sample;
+- one synchronization boundary for manual and triggered recording ownership;
+- no new dependency on acquisition internals;
+- no browser authority over recording start.
 
-This is the selected architecture.
+### 4.2 Rejected architecture: separate backend trigger subscriber
 
-### 4.2 Rejected: separate backend trigger subscriber
+A separate Runtime Event Bus subscriber creates a second asynchronous owner of the same evidence.
 
-A separate Runtime Event Bus subscriber would create a second asynchronous owner of the same evidence.
+It requires coordination between two bounded queues and two consumers. Event delivery and event loss can differ between subscribers. This adds race conditions without scientific benefit.
 
-It would require coordination between two bounded queues and two consumers. A sample could reach one subscriber before the other. Event loss could also differ between subscribers.
+### 4.3 Rejected architecture: frontend/browser trigger
 
-This adds race conditions without scientific benefit.
+The browser does not decide when scientific recording starts.
 
-### 4.3 Rejected: frontend/browser trigger
-
-The browser must not decide when scientific recording starts.
-
-Browser history is display state. It is not the authoritative recording evidence path. Browser suspension, reconnects, page refreshes, or WebSocket loss would weaken trigger integrity.
+Browser history is display state. It is not authoritative recording evidence. Browser suspension, reconnects, page refreshes, or WebSocket loss would weaken trigger integrity.
 
 ## 5. Scope
 
 ### 5.1 Supported measurements
-
-The first version supports these numeric canonical measurements:
 
 | UI name | Canonical field |
 | --- | --- |
@@ -128,12 +120,12 @@ The first version supports these numeric canonical measurements:
 - `<`
 - `<=`
 
-### 5.4 Supported trigger modes
+### 5.4 Supported modes
 
 - `LEVEL`
 - `CROSSING`
 
-### 5.5 Explicitly deferred
+### 5.5 Deferred features
 
 - Pre-trigger recording.
 - Automatic re-arm.
@@ -148,42 +140,44 @@ The first version supports these numeric canonical measurements:
 
 ## 6. Trigger configuration
 
-A trigger configuration is immutable while it is armed.
-
-Recommended backend model:
+The backend trigger configuration is:
 
 ```text
 TriggerConfig
   device_id
-  block          A | B | C | TOTAL
-  measurement    U | I | P | Q | S | PF | F
-  operator       GT | GE | LT | LE
-  threshold      finite float
-  mode           LEVEL | CROSSING
-  recording_interval_s
-  session_note   optional bounded text
+  block                  A | B | C | TOTAL
+  measurement            U | I | P | Q | S | PF | F
+  operator               GT | GE | LT | LE
+  threshold              finite float
+  mode                   LEVEL | CROSSING
+  recording_interval_s   finite positive float
 ```
 
-`recording_interval_s` is part of the armed configuration because it changes the resulting evidence stream. If it changes while armed, the trigger must disarm.
+The server rejects:
 
-The server must reject a non-finite threshold.
+- a non-finite threshold;
+- an unknown block;
+- an unknown measurement;
+- an unknown operator;
+- an unknown mode;
+- a non-finite recording interval;
+- a recording interval less than or equal to zero;
+- a recording interval lower than the device acquisition interval.
 
-The server must reject an unknown measurement, block, operator, or mode.
+The recording interval uses the same validation rule as existing manual recording.
 
-The recording interval must use the existing recording interval validation. It must be finite, greater than zero, and not less than the device acquisition interval.
+The complete configuration is immutable while ARMED. A configuration update replaces the stored configuration and forces DISARMED state before the new configuration becomes available for a later ARM command.
 
-## 7. Runtime trigger state
+## 7. Per-device runtime trigger state
 
-Trigger state is owned per Emonio.
-
-Recommended runtime record:
+Each Emonio owns an independent trigger runtime record:
 
 ```text
 TriggerRuntimeState
   config
   state                  DISARMED | ARMED
-  armed_utc
-  arm_floor_cycle_id
+  armed_utc              optional
+  arm_floor_cycle_id     optional
   previous_cycle_id      optional
   previous_value         optional
   previous_sample_utc    optional
@@ -200,53 +194,29 @@ Viewer restart result:
 DISARMED
 ```
 
-There is no trigger auto-resume and no automatic re-arm.
+The backend does not persist ARMED state and does not auto-resume it.
 
-Configuration values can be retained by the frontend for operator convenience, but retained UI values do not mean the backend trigger is armed.
+The frontend can retain entered configuration values in normal browser state, but those values do not represent backend ARMED state.
 
 ## 8. ARM semantics
 
 ARM is explicit.
 
-When ARM is accepted, the RecordingManager takes a snapshot of the current device store state and records the latest known canonical cycle ID as `arm_floor_cycle_id` when available.
+When ARM is accepted, `RecordingManager` reads the current device snapshot from `RuntimeStore` only to establish the post-ARM cycle floor. If a last canonical sample exists, its cycle ID becomes `arm_floor_cycle_id`.
 
-This floor prevents an event that was published before ARM but is still waiting in the recorder queue from firing the new trigger.
-
-A measurement event with:
+A queued measurement event with:
 
 ```text
 cycle_id <= arm_floor_cycle_id
 ```
 
-must not be evaluated as a post-ARM sample.
+is treated as pre-ARM evidence and is not evaluated.
 
-If no canonical sample exists at ARM time, no floor cycle is required. The first later eligible canonical sample is the first post-ARM sample.
+This prevents a measurement that was published before ARM, but is still waiting in the recorder subscriber queue, from firing the new trigger.
 
-ARM must be rejected with a conflict if recording is already active for that Emonio.
+If no canonical sample exists at ARM time, `arm_floor_cycle_id` is empty. The first later eligible canonical sample is the first post-ARM sample.
 
-Each Emonio has independent trigger state.
-
-## 9. Manual recording ownership
-
-Manual operator action has higher authority than an armed trigger.
-
-### 9.1 Manual START while ARMED
-
-When manual START can proceed, it disarms the trigger before the manual session becomes active.
-
-Result:
-
-```text
-ARMED + MANUAL START -> DISARMED + MANUAL RECORDING
-```
-
-The existing manual recording start behavior otherwise remains unchanged.
-
-If manual session creation fails after ownership has moved to manual START, the trigger stays DISARMED. There is no hidden automatic return to ARMED state.
-
-### 9.2 ARM while recording
-
-Result:
+ARM while recording is rejected:
 
 ```text
 RECORDING + ARM -> 409 CONFLICT
@@ -254,50 +224,63 @@ RECORDING + ARM -> 409 CONFLICT
 
 The active recording continues unchanged.
 
-### 9.3 Manual STOP
+## 9. Manual recording ownership
+
+Manual operator action has higher authority than an armed trigger.
+
+### 9.1 Manual START while ARMED
+
+If the manual START request passes normal input and ownership validation, `RecordingManager` disarms the trigger before it creates the manual session.
+
+```text
+ARMED + MANUAL START -> DISARMED + MANUAL RECORDING
+```
+
+The existing manual recording start path otherwise remains unchanged.
+
+If session creation then fails because of filesystem or recording initialization failure, the trigger stays DISARMED. There is no hidden automatic return to ARMED state.
+
+### 9.2 Manual STOP
 
 Manual STOP never arms or re-arms a trigger.
 
-A triggered one-shot is already consumed when recording starts. STOP leaves the trigger DISARMED.
+A one-shot triggered recording has already consumed its trigger when recording starts. STOP leaves trigger state DISARMED.
 
 ## 10. Configuration changes while ARMED
 
-Any configuration change disarms the trigger immediately.
+Any trigger configuration change causes:
 
-This includes:
+```text
+ARMED + CONFIG UPDATE -> DISARMED
+```
+
+This applies to:
 
 - block / phase;
 - measurement;
 - operator;
 - threshold;
-- trigger mode;
-- recording interval;
-- session note if the note is part of the armed session configuration.
+- mode;
+- recording interval.
 
-Result:
+The backend is authoritative for this transition. The frontend does not simulate it locally as final state.
 
-```text
-ARMED + CONFIG CHANGE -> DISARMED
-```
+A new explicit ARM command is required after any configuration update.
 
-The new values may be stored as configuration, but a new explicit ARM command is required.
+## 11. Eligible samples
 
-The backend is authoritative for this state transition. Frontend behavior alone is not sufficient.
+The trigger evaluates only a canonical `MeasurementSample` for the same device as the trigger owner.
 
-## 11. Eligible trigger samples
-
-The trigger can evaluate only a canonical `MeasurementSample` for the same device as the trigger owner.
-
-Eligible sample quality is the same quality class accepted by the existing recorder:
+Eligible quality values are the same quality values accepted by the current recorder:
 
 - `VALID`
 - `DEGRADED`
 
-Any other quality must not fire a trigger.
+Any other quality does not fire the trigger.
 
-The selected numeric value must be finite. A non-finite selected value must not fire a trigger.
+The selected numeric measurement value must be finite. A non-finite selected value does not fire the trigger.
 
-A sample from another Emonio must never affect the trigger state.
+A sample from another Emonio does not change this trigger's state or continuity evidence.
 
 ## 12. LEVEL semantics
 
@@ -305,7 +288,7 @@ LEVEL uses only the current eligible post-ARM sample.
 
 The first eligible sample after ARM can fire immediately.
 
-For threshold `T` and current exact canonical value `x`:
+For threshold `T` and exact canonical value `x`:
 
 ```text
 >   fires when x >  T
@@ -316,11 +299,11 @@ For threshold `T` and current exact canonical value `x`:
 
 No previous value is required.
 
-An acquisition gap before a later LEVEL sample does not require inference. Therefore a later valid/degraded sample can still fire LEVEL if its current value satisfies the condition.
+An acquisition gap before a later LEVEL sample does not require interpolation or inference. A later eligible sample can fire LEVEL from its own exact current value.
 
 ## 13. CROSSING semantics
 
-The first eligible post-ARM sample establishes the previous value only. It cannot fire.
+The first eligible post-ARM sample establishes previous-state evidence only. It cannot fire.
 
 For previous exact value `p`, current exact value `x`, and threshold `T`:
 
@@ -331,53 +314,54 @@ For previous exact value `p`, current exact value `x`, and threshold `T`:
 <=  fires when p >  T and x <= T
 ```
 
-These rules define threshold contact exactly. No epsilon is permitted.
+No epsilon is used.
 
 ### 13.1 Continuity requirement
 
-A crossing is valid only when continuity is proven.
-
-For two MeasurementSample events to form a crossing pair:
+A crossing pair is valid only when:
 
 ```text
 current.cycle_id == previous.cycle_id + 1
 ```
 
-and no `DiagnosticEvent` for that Emonio may have invalidated continuity between them.
+and no `DiagnosticEvent` for that Emonio invalidated continuity between the two measurement samples.
 
-If a `DiagnosticEvent` is received for the armed Emonio, CROSSING previous-state evidence is cleared.
+When a `DiagnosticEvent` for the armed Emonio is consumed, CROSSING previous-state evidence is cleared.
 
-If the next MeasurementSample cycle ID is not exactly one greater than the previous cycle ID, CROSSING previous-state evidence is cleared. The current eligible sample becomes a new baseline and cannot fire.
+When a later MeasurementSample cycle ID is not exactly one greater than the previous cycle ID, CROSSING previous-state evidence is cleared. If that later sample is otherwise eligible and newer, it becomes the new baseline and cannot fire on that evaluation.
 
-This rule detects an unseen cycle even if a bounded Runtime Event Bus queue dropped an event.
+A duplicate cycle ID is ignored and cannot fire.
 
-A duplicate or stale cycle must never fire. It must not be used as a new crossing pair.
+A stale or decreasing cycle ID is ignored and cannot fire.
 
-The implementation must never infer a crossing across a gap.
+This cycle rule also detects an unseen event after bounded Runtime Event Bus queue loss.
 
-## 14. Trigger firing
+The implementation never infers a crossing across a gap.
 
-When a trigger fires:
+## 14. Trigger firing transaction
 
-1. Capture the exact `MeasurementSample` object that satisfied LEVEL or completed CROSSING.
-2. Consume the one-shot trigger immediately.
-3. Change trigger state to DISARMED.
-4. Create the recording session from that exact sample.
-5. Set recording start time to `sample.timing.cycle_finished_utc`.
-6. Record that exact sample through the existing `SessionRecorder` path as the first measurement record.
-7. Record trigger provenance in session evidence.
+When a trigger fires, `RecordingManager` performs these actions under its recording ownership synchronization boundary:
 
-No RuntimeStore re-read is permitted between trigger evaluation and triggered session creation.
+1. Keep the exact firing `MeasurementSample` object.
+2. Record last-fired trigger evidence from that sample.
+3. Consume the one-shot trigger.
+4. Set trigger state to DISARMED.
+5. Create the recording session from that exact sample.
+6. Set session `started_utc` to `sample.timing.cycle_finished_utc`.
+7. Pass the exact sample to the existing `SessionRecorder` first-sample path.
+8. Write trigger provenance to session evidence.
 
-A later sample must never replace the firing sample as the first recording sample.
+There is no RuntimeStore re-read between evaluation and triggered session creation.
+
+A newer sample cannot replace the firing sample as the first recorded sample.
 
 ## 15. Triggered session provenance
 
-Triggered recordings must be distinguishable from manual recordings.
+Triggered recordings are distinguishable from manual recordings.
 
-The existing manual session metadata should remain compatible.
+Manual sessions keep the current session metadata structure. The implementation does not add `start_source` to existing manual sessions in v0.4.16.
 
-Recommended triggered-session evidence inside `session.json`:
+Triggered sessions add these fields inside the existing `recording` metadata object:
 
 ```json
 {
@@ -398,15 +382,7 @@ Recommended triggered-session evidence inside `session.json`:
 }
 ```
 
-Manual sessions may explicitly report `start_source: "MANUAL"` only if this can be added without breaking existing metadata consumers. Otherwise absence of trigger evidence continues to mean manual start.
-
-A triggered session should also write an event entry:
-
-```text
-TRIGGER_FIRED
-```
-
-with:
+The triggered session also writes one `TRIGGER_FIRED` event entry with:
 
 - firing UTC;
 - firing cycle ID;
@@ -417,99 +393,115 @@ with:
 - threshold;
 - exact firing value.
 
-This event is evidence only. It must not modify measurement CSV content.
+This event is evidence only. It does not change measurement CSV data.
 
-## 16. Recording failure semantics
+## 16. Failure semantics
 
-If triggered session creation or later recording I/O fails:
+### 16.1 Failure after SessionRecorder exists
+
+Existing recording failure behavior remains in force.
 
 ```text
 TRIGGER CONSUMED -> DISARMED
-RECORDING -> ERROR when a session exists and fails
+RECORDING -> ERROR
 ```
 
-There is no automatic retry.
+There is no retry, second session, or re-arm.
 
-There is no automatic second session.
+### 16.2 Failure during triggered session creation
 
-There is no automatic re-arm.
+A filesystem or initialization error can occur before a `SessionRecorder` becomes active.
 
-Existing recording write-error evidence must remain intact.
+In this case:
 
-If failure occurs before a usable session exists, the API/runtime must expose a deterministic error state or diagnostic result. It must not pretend that recording succeeded.
+- the trigger remains consumed and DISARMED;
+- no second start attempt occurs;
+- `RecordingManager` stores a deterministic per-device recording failure entry in its existing failure collection;
+- the failure entry identifies `start_source = TRIGGER`;
+- it includes device ID, failed cycle ID, failed UTC, error type, and error detail;
+- `session_dir` is empty when no session directory became usable;
+- `RecordingManager` publishes a `DiagnosticEvent` named `TRIGGERED_RECORDING_START_ERROR`.
+
+The system never reports RECORDING if triggered session creation failed.
 
 ## 17. Backend component boundaries
 
-### 17.1 New `recording/trigger.py`
+### 17.1 New `src/emonio_viewer/recording/trigger.py`
 
-This module should contain trigger-specific pure logic:
+This module contains only trigger-specific logic:
 
-- enums or validated constants;
+- trigger enums or validated constants;
 - immutable `TriggerConfig`;
-- runtime trigger state;
+- per-device trigger runtime state representation;
 - canonical field extraction;
 - LEVEL comparison;
 - CROSSING comparison;
 - continuity handling;
 - deterministic evaluation result.
 
-The module must not import Modbus code or acquisition worker code.
+It does not import Modbus transport code or acquisition worker code.
 
-The evaluation function should be independently unit-testable.
+The evaluator is independently unit-testable.
 
-### 17.2 Existing `recording/recorder.py`
+### 17.2 Existing `src/emonio_viewer/recording/recorder.py`
 
 `RecordingManager` remains the owner of:
 
-- per-device active recorders;
-- per-device trigger state;
+- active recorders per device;
+- trigger state per device;
 - manual/trigger ownership conflicts;
 - event-consumer ordering;
-- triggered session start from the exact firing sample.
+- triggered start from the exact firing sample;
+- trigger-start failure reporting.
 
-Add a narrow internal method such as:
+Add one narrow exact-sample start path, for example:
 
 ```text
-_start_from_sample(device_id, sample, interval_s, ...)
+_start_from_sample(device_id, sample, interval_s, trigger_evidence)
 ```
 
-or an equivalent deterministic interface.
+The final name can follow existing code style, but the interface must accept the exact sample directly.
 
-Manual `start()` may continue to use RuntimeStore. Triggered start must not.
+Manual `start()` continues to use `RuntimeStore` for its existing latest-sample behavior. Triggered start does not use `RuntimeStore` to select the first sample.
 
-### 17.3 Existing `recording/session.py`
+### 17.3 Existing `src/emonio_viewer/recording/session.py`
 
-Only make the smallest change required to store optional trigger start provenance.
+Make only the change required to add optional triggered-start provenance.
 
-Manual session behavior must not be weakened.
+When trigger provenance is absent, manual session metadata remains structurally unchanged.
 
-### 17.4 No change required
+### 17.4 Paths that do not change
 
 The design does not require changes to:
 
-- `modbus/*`
-- `measurement/*`
-- `acquisition/*`
-- `runtime/events.py`
-- `runtime/store.py`
-- `scope/*`
+- `src/emonio_viewer/modbus/*`
+- `src/emonio_viewer/measurement/*`
+- `src/emonio_viewer/acquisition/*`
+- `src/emonio_viewer/runtime/events.py`
+- `src/emonio_viewer/runtime/store.py`
+- `src/emonio_viewer/scope/*`
 
-If implementation evidence later shows that one of these paths must change, implementation must stop and the design must be reviewed again before that change is made.
+If implementation evidence shows that one of these paths must change, implementation stops and this design is reviewed before such a change is made.
 
 ## 18. API design
 
-Keep the existing recording endpoints.
+Keep the existing manual recording endpoints.
 
-Add narrow trigger endpoints:
+Add:
 
 ```text
-GET  /api/v1/recording/status
 POST /api/v1/recording/trigger/configure
 POST /api/v1/recording/trigger/arm
 POST /api/v1/recording/trigger/disarm
 ```
 
-The existing status response gains a trigger collection:
+The existing endpoint remains:
+
+```text
+GET /api/v1/recording/status
+```
+
+Its response adds:
 
 ```json
 {
@@ -519,40 +511,38 @@ The existing status response gains a trigger collection:
 }
 ```
 
-A trigger status record should include:
+Each trigger status record contains:
 
 - device ID;
 - state;
-- complete current configuration;
+- complete current configuration when configured;
 - armed UTC when ARMED;
 - last fired cycle ID when available;
 - last fired UTC when available;
 - last fired value when available.
 
-Do not expose internal Python object representations.
-
 ### 18.1 HTTP status rules
 
 - Invalid trigger configuration: `400 Bad Request`.
 - Unknown device: `404 Not Found`.
+- ARM without valid configuration: `409 Conflict`.
 - ARM while recording: `409 Conflict`.
 - Recording commands disabled: `503 Service Unavailable`.
-- Valid ARM: `200` with `ARMED` state.
-- Valid DISARM: `200` with `DISARMED` state.
+- Valid configure: `200` with resulting DISARMED trigger status.
+- Valid ARM: `200` with ARMED trigger status.
+- Valid DISARM: `200` with DISARMED trigger status.
 
-Manual START keeps its existing endpoint. If it succeeds while a trigger is ARMED, the trigger is disarmed as part of the same RecordingManager ownership operation.
+Manual START keeps its current endpoint and response contract. A successful manual START while ARMED performs the disarm inside `RecordingManager`.
 
 ## 19. Frontend design
 
-Keep the compact Session Recording strip.
+Keep the compact Session Recording strip unchanged except for state text that is already driven by recording status.
 
-Add trigger configuration to the existing Recording drawer so the main workstation remains compact.
+Add a `TRIGGERED RECORDING` section to the existing Recording drawer for the selected Emonio.
 
-Recommended selected-device controls:
+Controls:
 
 ```text
-TRIGGERED RECORDING
-
 MODE         [ LEVEL | CROSSING ]
 PHASE        [ A | B | C | TOTAL ]
 MEASUREMENT  [ U | I | P | Q | S | PF | f ]
@@ -565,115 +555,115 @@ INTERVAL     [ existing valid recording intervals ]
 STATUS: DISARMED
 ```
 
-When armed, status should show the complete armed condition. Example:
+When armed, the status shows the complete condition. Example:
 
 ```text
 ARMED · PHASE A · P > 1000 W · CROSSING
 ```
 
-The displayed threshold can use normal UI formatting, but the backend configuration value is authoritative.
+The backend status is authoritative.
 
-Changing any armed configuration control must cause a backend DISARM before the changed configuration can later be armed again.
+The frontend does not simulate trigger evaluation from WebSocket measurements.
 
-The UI must not simulate ARMED state before the backend confirms ARM.
+A control change sends a configure request. If the previous trigger was ARMED, the returned backend state is DISARMED.
 
-The UI must not simulate trigger firing from WebSocket measurement data.
+The UI does not display ARMED until the ARM request succeeds.
 
-When a triggered recording is active, the normal recording session status remains the source of truth.
+When a triggered session starts, the existing recording status and session-card UI remain the authoritative indication of active recording.
+
+Triggered session cards add start-source evidence when the backend returns it. Existing manual session cards remain valid.
+
+Trigger-specific CSS is placed in a dedicated structured stylesheet or a clearly isolated recording-trigger section in the existing recording stylesheet. Unrelated workstation CSS is not rewritten.
 
 ## 20. State model
 
-Per device:
+Trigger state and recording state are separate.
+
+### 20.1 Trigger state
 
 ```text
-                 configure
-                    |
-                    v
-               +----------+
-               | DISARMED |
-               +----------+
-                  |     ^
-               ARM|     |DISARM / config change / restart
-                  v     |
-               +----------+
-               |  ARMED   |
-               +----------+
-                  |     |
-     qualifying   |     |manual START
-       sample     |     |
-                  v     v
-             +----------------+
-             |   RECORDING    |
-             +----------------+
-                 |        |
-              STOP|        |write/storage failure
-                 v        v
-             +---------+  +-------+
-             | STOPPED |  | ERROR |
-             +---------+  +-------+
-
-Trigger state after firing, STOP, or ERROR: DISARMED.
+DISARMED --ARM----------------------> ARMED
+ARMED ----DISARM--------------------> DISARMED
+ARMED ----CONFIG UPDATE-------------> DISARMED
+ARMED ----MANUAL START--------------> DISARMED
+ARMED ----QUALIFYING ONE-SHOT-------> DISARMED
+RESTART ----------------------------> DISARMED
+TRIGGER START ERROR-----------------> DISARMED
 ```
 
-`STOPPED` is a recording result, not a persistent trigger state.
+### 20.2 Recording state
+
+```text
+IDLE --MANUAL START-----------------> RECORDING
+IDLE --TRIGGER FIRE + START OK------> RECORDING
+IDLE --TRIGGER FIRE + START ERROR---> ERROR EVIDENCE
+RECORDING --STOP--------------------> STOPPED
+RECORDING --WRITE/STORAGE ERROR-----> ERROR
+```
+
+A trigger can be ARMED only when no recording is active for that Emonio.
 
 ## 21. Determinism and concurrency
 
-All trigger ownership changes and recording ownership changes must use the existing RecordingManager lock or an equivalent single synchronization boundary.
+All trigger ownership changes and recording ownership changes use the existing `RecordingManager` lock or one equivalent single synchronization boundary.
 
-The following operations must be atomic from the RecordingManager point of view:
+These operations are atomic from the RecordingManager point of view:
 
-- ARM conflict check and state creation;
-- configuration update and forced disarm;
+- configuration replacement and forced disarm;
+- ARM conflict check and ARMED state creation;
 - manual START and trigger disarm;
 - trigger fire and one-shot consumption;
 - triggered recorder creation from the firing sample;
-- recording failure removal and error-state publication.
+- triggered start-failure recording;
+- active recording failure removal and error publication.
 
-The trigger evaluator must not launch a second worker thread.
+The TriggerEngine does not create a worker thread.
 
-The trigger evaluator must not use wall-clock polling.
+The TriggerEngine does not use wall-clock polling.
 
-The trigger fires only while processing canonical runtime events.
+A trigger evaluates only when canonical runtime events are consumed.
 
-## 22. Tests required before implementation can be accepted
+## 22. Required tests
 
-### 22.1 Unit tests — trigger math and state
+### 22.1 Unit tests — trigger logic
 
-Test at least:
+Test:
 
 - all four LEVEL operators;
 - all four CROSSING operators;
-- exact equality behavior at threshold;
+- exact threshold equality behavior;
 - first CROSSING sample cannot fire;
-- fixed qualification count equals one;
+- fixed qualification count is one;
 - no hysteresis;
 - non-finite threshold rejected;
-- non-finite measurement value cannot fire;
+- non-finite selected value cannot fire;
 - wrong device cannot affect trigger;
-- wrong phase/measurement extraction cannot occur;
+- A/B/C/TOTAL field extraction;
+- U/I/P/Q/S/PF/f field extraction;
 - DiagnosticEvent resets CROSSING continuity;
 - cycle gap resets CROSSING continuity;
-- stale pre-ARM queued cycle cannot fire;
+- stale pre-ARM cycle cannot fire;
 - duplicate cycle cannot fire;
-- configuration change disarms.
+- decreasing cycle cannot fire;
+- configuration update disarms.
 
 ### 22.2 RecordingManager integration tests
 
-Test at least:
+Test:
 
 - LEVEL firing creates one session;
 - CROSSING firing creates one session;
-- exact firing sample is first measurement row;
+- exact firing sample is the first measurement row;
 - recording `started_utc` equals firing `cycle_finished_utc`;
-- trigger provenance contains exact firing cycle and value;
+- trigger provenance contains exact firing cycle and exact value;
 - no RuntimeStore re-read can substitute a newer sample;
 - trigger is DISARMED after fire;
-- no automatic second firing;
+- one-shot does not fire a second time;
 - manual START disarms ARMED trigger;
-- ARM while recording returns conflict behavior;
+- ARM while recording is rejected;
 - manual STOP leaves trigger DISARMED;
-- write error leaves trigger DISARMED;
+- triggered write error leaves trigger DISARMED;
+- triggered start error leaves trigger DISARMED and creates failure evidence;
 - independent Emonio triggers do not interfere;
 - event gap cannot create a false CROSSING.
 
@@ -681,28 +671,31 @@ Test at least:
 
 Test:
 
-- configuration validation;
+- configure validation;
 - finite threshold validation;
 - interval validation;
+- ARM without configuration conflict;
 - ARM response;
 - DISARM response;
 - 409 ARM conflict while recording;
 - status serialization;
 - manual START ownership rule;
-- command-disable behavior.
+- recording-command disable behavior.
 
 ### 22.4 Browser tests
 
 Test:
 
-- trigger controls use backend API only;
-- correct A/B/C/TOTAL options;
-- correct U/I/P/Q/S/PF/f options;
-- correct operators and modes;
+- trigger controls call backend API only;
+- A/B/C/TOTAL options;
+- U/I/P/Q/S/PF/f options;
+- operator options;
+- mode options;
 - ARMED status comes from backend status;
-- configuration change while ARMED causes DISARM;
+- configuration change while ARMED returns DISARMED state;
 - device switching preserves independent backend trigger status;
-- triggered session appears in normal recording status UI.
+- triggered session appears in normal recording status UI;
+- trigger controls do not evaluate WebSocket samples locally.
 
 ### 22.5 Regression tests
 
@@ -710,7 +703,7 @@ All existing recording, measurement, history, Density, vector, device lifecycle,
 
 ## 23. Acceptance gates
 
-v0.4.16 must remain `Testing` until all required evidence exists.
+v0.4.16 remains `Testing` until all required evidence exists.
 
 Required evidence:
 
@@ -729,36 +722,36 @@ Required evidence:
 13. Real Emonio field testing confirms CROSSING behavior.
 14. Real Emonio field testing confirms exact first-sample evidence.
 
-`main` is not part of this work. Development and testing stay on `testing`.
+`main` is not part of this work. Development and field testing stay on `testing`.
 
 ## 24. Implementation sequence
 
-Implementation must use test-driven development.
+Implementation uses test-driven development.
 
-Recommended sequence:
+Sequence:
 
 1. Add failing pure TriggerEngine tests.
 2. Implement `recording/trigger.py` until the pure tests pass.
 3. Add failing RecordingManager ownership and exact-first-sample tests.
 4. Add the minimal RecordingManager integration.
-5. Add failing session provenance tests.
-6. Add minimal trigger metadata/event evidence.
+5. Add failing session provenance and triggered-start-failure tests.
+6. Add minimal trigger provenance and failure evidence.
 7. Add failing API tests.
 8. Add trigger API endpoints.
-9. Add failing frontend state/API tests.
+9. Add failing frontend API/state tests.
 10. Add trigger controls in the existing Recording drawer with structured CSS.
 11. Run focused trigger regression tests.
 12. Run complete project acceptance.
 13. Perform real-device field testing on `testing`.
 
-No implementation step may modify `main`.
+No implementation step modifies `main`.
 
 ## 25. Success criteria
 
-v0.4.16 Triggered Recording is successful only when all of these statements are true:
+v0.4.16 Triggered Recording is successful only when all statements below are true:
 
-- A numeric LEVEL condition can start recording from the first qualifying new canonical sample.
-- A numeric CROSSING condition can start recording only from two proven consecutive post-ARM canonical samples.
+- A numeric LEVEL condition starts recording from the first qualifying new canonical sample.
+- A numeric CROSSING condition starts recording only from two proven consecutive post-ARM canonical samples.
 - A gap cannot create a false crossing.
 - The exact firing sample is the first recorded sample.
 - The trigger fires once only.
@@ -766,6 +759,7 @@ v0.4.16 Triggered Recording is successful only when all of these statements are 
 - Multiple Emonios remain independent.
 - Restart never automatically re-arms a trigger.
 - Recording failure never automatically retries or re-arms.
-- Trigger provenance is recoverable from recording evidence.
+- Trigger start failure creates explicit failure evidence.
+- Trigger provenance is recoverable from session evidence.
 - Existing manual recording behavior remains functional.
 - Canonical measurement and acquisition architecture remain unchanged.
