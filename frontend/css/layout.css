@@ -33,11 +33,12 @@
 
 .status-bar {
   display: grid;
-  grid-template-columns: minmax(150px, 0.75fr) minmax(0, 4fr) auto;
+  grid-template-columns: max-content max-content 1fr;
   align-items: center;
-  gap: 12px;
+  gap: 24px;
   padding: 6px 10px;
 }
+
 .status-title {
   display: grid;
   grid-template-columns: max-content auto;
@@ -65,7 +66,14 @@
 .power-direction-indicator.is-neutral { background: var(--border-strong); }
 .power-direction-indicator.is-negative { background: var(--good); }
 .power-direction-indicator.is-positive { background: var(--danger); }
-.status-items { display: grid; grid-template-columns: repeat(8, minmax(62px, auto)); gap: 4px 10px; align-items: start; }
+.status-items {
+  display: grid;
+  grid-template-columns: repeat(8, max-content);
+  column-gap: 24px;
+  align-items: start;
+  justify-content: start;
+  min-width: 0;
+}
 .status-items > span { display: flex; flex-direction: column; min-width: 0; }
 .status-label { color: var(--muted); font-size: 0.54rem; text-transform: uppercase; letter-spacing: 0.08em; }
 .status-items strong { font-family: var(--mono); font-size: 0.68rem; white-space: nowrap; }
@@ -73,6 +81,7 @@
 .utility-status-controls {
   display: flex;
   justify-content: flex-end;
+  justify-self: end;
   gap: 6px;
   min-width: 0;
 }
