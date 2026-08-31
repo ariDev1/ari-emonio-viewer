@@ -40,25 +40,15 @@ def runtime(config=None, floor=None):
     )
 
 
+def test_negative_monitor_exposes_only_p_condition_and_measurement():
+    assert tuple(NegativeCondition) == (NegativeCondition.P_NEGATIVE,)
+    assert tuple(MonitorMeasurement) == (MonitorMeasurement.P,)
+
+
 def test_p_negative_selects_p_for_each_selected_phase():
     assert selected_condition_keys(cfg(phases=(MonitorPhase.A, MonitorPhase.C))) == (
         ConditionKey(MonitorPhase.A, MonitorMeasurement.P),
         ConditionKey(MonitorPhase.C, MonitorMeasurement.P),
-    )
-
-
-def test_pf_negative_selects_pf_only():
-    assert selected_condition_keys(cfg(NegativeCondition.PF_NEGATIVE, (MonitorPhase.B,))) == (
-        ConditionKey(MonitorPhase.B, MonitorMeasurement.PF),
-    )
-
-
-def test_p_or_pf_uses_deterministic_phase_then_measurement_order():
-    assert selected_condition_keys(cfg(NegativeCondition.P_OR_PF_NEGATIVE, (MonitorPhase.C, MonitorPhase.A))) == (
-        ConditionKey(MonitorPhase.A, MonitorMeasurement.P),
-        ConditionKey(MonitorPhase.A, MonitorMeasurement.PF),
-        ConditionKey(MonitorPhase.C, MonitorMeasurement.P),
-        ConditionKey(MonitorPhase.C, MonitorMeasurement.PF),
     )
 
 
@@ -75,10 +65,9 @@ def test_config_rejects_empty_duplicate_phases_and_invalid_interval():
             cfg(interval=value)
 
 
-def test_extract_condition_value_uses_exact_phase_field():
-    s = sample(b_p=-12.3456789, b_pf=-0.87654321)
+def test_extract_condition_value_uses_exact_phase_p_field():
+    s = sample(b_p=-12.3456789, b_pf=0.87654321)
     assert extract_condition_value(s, ConditionKey(MonitorPhase.B, MonitorMeasurement.P)) == -12.3456789
-    assert extract_condition_value(s, ConditionKey(MonitorPhase.B, MonitorMeasurement.PF)) == -0.87654321
 
 
 @pytest.mark.parametrize(("previous","current","event"), [
@@ -122,11 +111,11 @@ def test_first_post_enable_negative_is_presence_not_crossing_and_is_first_activa
     assert result.aggregate_active is True
 
 
-def test_first_sample_multiple_negative_keys_use_deterministic_order():
-    r = runtime(cfg(NegativeCondition.P_OR_PF_NEGATIVE, (MonitorPhase.C, MonitorPhase.A)), floor=0)
-    result = evaluate_monitor_sample(r, sample(cycle=1, a_p=-1, a_pf=-0.5, c_p=-2, c_pf=-0.7))
+def test_first_sample_multiple_negative_phases_use_deterministic_order():
+    r = runtime(cfg(NegativeCondition.P_NEGATIVE, (MonitorPhase.C, MonitorPhase.A)), floor=0)
+    result = evaluate_monitor_sample(r, sample(cycle=1, a_p=-1, c_p=-2))
     assert [(e.phase.value, e.measurement.value) for e in result.events] == [
-        ("A", "P"), ("A", "PF"), ("C", "P"), ("C", "PF")
+        ("A", "P"), ("C", "P")
     ]
     assert result.first_activation == result.events[0]
 
@@ -177,25 +166,20 @@ def test_invalid_quality_breaks_continuity():
     assert [e.name for e in result.events] == ["NEGATIVE_PRESENT_AFTER_GAP"]
 
 
-def test_non_finite_selected_value_breaks_all_selected_sample_continuity():
-    r = runtime(cfg(NegativeCondition.P_OR_PF_NEGATIVE, (MonitorPhase.A,)), floor=0)
-    evaluate_monitor_sample(r, sample(cycle=1, a_p=1, a_pf=1))
-    assert evaluate_monitor_sample(r, sample(cycle=2, a_p=-1, a_pf=float("nan"))).events == ()
-    result = evaluate_monitor_sample(r, sample(cycle=3, a_p=-1, a_pf=1))
+def test_non_finite_selected_p_breaks_continuity():
+    r = runtime(cfg(NegativeCondition.P_NEGATIVE, (MonitorPhase.A,)), floor=0)
+    evaluate_monitor_sample(r, sample(cycle=1, a_p=1))
+    assert evaluate_monitor_sample(r, sample(cycle=2, a_p=float("nan"))).events == ()
+    result = evaluate_monitor_sample(r, sample(cycle=3, a_p=-1))
     assert [e.name for e in result.events] == ["NEGATIVE_PRESENT_AFTER_GAP"]
 
 
-def test_p_or_pf_activity_remains_active_until_both_are_nonnegative():
-    r = runtime(cfg(NegativeCondition.P_OR_PF_NEGATIVE, (MonitorPhase.A,)), floor=0)
-    evaluate_monitor_sample(r, sample(cycle=1, a_p=1, a_pf=1))
-    start_p = evaluate_monitor_sample(r, sample(cycle=2, a_p=-1, a_pf=1))
-    assert start_p.aggregate_active is True
-    start_pf = evaluate_monitor_sample(r, sample(cycle=3, a_p=-1, a_pf=-0.5))
-    assert [e.name for e in start_pf.events] == ["NEGATIVE_START"]
-    end_p = evaluate_monitor_sample(r, sample(cycle=4, a_p=1, a_pf=-0.5))
-    assert [e.name for e in end_p.events] == ["NEGATIVE_END"]
-    assert end_p.aggregate_active is True
-    end_pf = evaluate_monitor_sample(r, sample(cycle=5, a_p=1, a_pf=0))
-    assert [e.name for e in end_pf.events] == ["NEGATIVE_END"]
-    assert end_pf.aggregate_active is False
-    assert end_pf.all_clear_transition is True
+def test_monitor_activity_clears_when_p_is_nonnegative():
+    r = runtime(cfg(NegativeCondition.P_NEGATIVE, (MonitorPhase.A,)), floor=0)
+    evaluate_monitor_sample(r, sample(cycle=1, a_p=1))
+    start = evaluate_monitor_sample(r, sample(cycle=2, a_p=-1))
+    assert start.aggregate_active is True
+    end = evaluate_monitor_sample(r, sample(cycle=3, a_p=0))
+    assert [e.name for e in end.events] == ["NEGATIVE_END"]
+    assert end.aggregate_active is False
+    assert end.all_clear_transition is True

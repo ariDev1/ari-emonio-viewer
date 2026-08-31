@@ -28,7 +28,7 @@ def device(device_id, poll=2.0):
 def config(device_id="a", interval=2.0, phases=(MonitorPhase.A, MonitorPhase.B, MonitorPhase.C)):
     return NegativeMonitorConfig(
         device_id,
-        NegativeCondition.P_OR_PF_NEGATIVE,
+        NegativeCondition.P_NEGATIVE,
         phases,
         interval,
     )
@@ -44,7 +44,7 @@ def manager(tmp_path, devices=None, store=None):
         tuple(devices or (device("a"),)),
         store or FakeStore(),
         RuntimeEventBus(),
-        "0.4.15",
+        "0.4.17",
     )
 
 
@@ -58,7 +58,7 @@ def test_monitor_configuration_is_per_device_and_status_is_sorted(tmp_path):
         "device_id": "a",
         "state": "OFF",
         "config": {
-            "condition": "P_OR_PF_NEGATIVE",
+            "condition": "P_NEGATIVE",
             "phases": ["C"],
             "recording_interval_s": 2.0,
         },
