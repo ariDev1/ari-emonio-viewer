@@ -3,7 +3,7 @@
 Engineering viewer for Emonio P3 electrical measurements on Linux.
 
 The trusted field baseline is **v0.4.14**.
-The `testing` branch is **v0.4.20 Testing**. Tested device firmware: `3.0.79-release`.
+The `testing` branch is **v0.4.21 Testing**. Tested device firmware: `3.0.79-release`.
 
 ## Measurement architecture
 
