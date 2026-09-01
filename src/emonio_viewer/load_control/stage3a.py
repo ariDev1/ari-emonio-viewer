@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -60,6 +61,10 @@ class Stage3AError(RuntimeError):
 
 
 class _SourceAcquisitionFailure(RuntimeError):
+    pass
+
+
+class _ActuatorDisconnected(RuntimeError):
     pass
 
 
@@ -132,6 +137,7 @@ class Stage3ASafeCommandService:
         self._rejection_reason: str | None = None
         self._next_sequence = 1
         self._active = False
+        self._ack_wait_active = False
 
         self._sample_waiter: asyncio.Future[MeasurementSample] | None = None
         self._sample_source_id: str | None = None
@@ -229,8 +235,50 @@ class Stage3ASafeCommandService:
         self._sample_source_id = None
         self._selected_source_id = None
         self._active = False
+        self._ack_wait_active = False
         self._started = False
         self._state = Stage3AState.IDLE
+
+    def _log_status(self, frame: StatusFrame) -> None:
+        self._diagnostic_log.append(
+            "SAFE_STATUS_RECEIVED",
+            node_id=frame.node_id,
+            boot_id=frame.boot_id,
+            state=frame.state,
+            applied_p_a_w=frame.applied_p.a,
+            applied_p_b_w=frame.applied_p.b,
+            applied_p_c_w=frame.applied_p.c,
+        )
+
+    def _log_unexpected_ack(self, frame: AckFrame) -> None:
+        self._diagnostic_log.append(
+            "SAFE_ACK_UNEXPECTED",
+            node_id=frame.node_id,
+            boot_id=frame.boot_id,
+            viewer_session_id=frame.viewer_session_id,
+            sequence=frame.sequence,
+            result=frame.result,
+            applied_p_a_w=frame.applied_p.a,
+            applied_p_b_w=frame.applied_p.b,
+            applied_p_c_w=frame.applied_p.c,
+        )
+
+    def _drain_unsolicited_actuator_frames(self) -> None:
+        if self._ack_wait_active or self._channel.hello() is None:
+            return
+        while True:
+            try:
+                frame = self._channel.receive_nowait()
+            except asyncio.QueueEmpty:
+                return
+            except (ConnectionError, QualifiedActuatorChannelError, ProtocolError):
+                return
+            except Exception:
+                return
+            if isinstance(frame, AckFrame):
+                self._log_unexpected_ack(frame)
+            elif isinstance(frame, StatusFrame):
+                self._log_status(frame)
 
     async def _consume_events(self) -> None:
         assert self._subscriber is not None
@@ -242,10 +290,12 @@ class Stage3ASafeCommandService:
                     _EVENT_QUEUE_WAIT_S,
                 )
             except Empty:
+                self._drain_unsolicited_actuator_frames()
                 continue
             if item is self._stop_sentinel:
                 return
             self._handle_runtime_event(item)
+            self._drain_unsolicited_actuator_frames()
 
     def _handle_runtime_event(self, event: RuntimeEvent) -> None:
         if isinstance(event, MeasurementSample):
@@ -317,6 +367,26 @@ class Stage3ASafeCommandService:
         self._reject(reason)
         raise Stage3AError(reason)
 
+    async def _sample_or_disconnect(
+        self,
+        waiter: asyncio.Future[MeasurementSample],
+        disconnect_event: asyncio.Event,
+    ) -> MeasurementSample:
+        disconnect_task = asyncio.create_task(disconnect_event.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                {waiter, disconnect_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if disconnect_task in done:
+                raise _ActuatorDisconnected()
+            return waiter.result()
+        finally:
+            if not disconnect_task.done():
+                disconnect_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await disconnect_task
+
     async def _next_valid_sample(
         self,
         *,
@@ -330,14 +400,23 @@ class Stage3ASafeCommandService:
         self._sample_source_id = source.id
         self._sample_boundary_cycle = boundary_cycle
         self._sample_request_monotonic_ns = request_monotonic_ns
+        combined_task = asyncio.create_task(
+            self._sample_or_disconnect(waiter, self._channel.disconnect_event())
+        )
         try:
             return await self._wait_for(
-                waiter,
+                combined_task,
                 2.0 * float(source.poll_interval_s),
             )
         except asyncio.TimeoutError:
             return None
         finally:
+            if not combined_task.done():
+                combined_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await combined_task
+            if not waiter.done():
+                waiter.cancel()
             self._sample_waiter = None
             self._sample_source_id = None
             self._sample_boundary_cycle = 0
@@ -416,18 +495,17 @@ class Stage3ASafeCommandService:
                 return self._reject("UNEXPECTED_ACTUATOR_FRAME")
 
             if isinstance(frame, StatusFrame):
-                self._diagnostic_log.append(
-                    "SAFE_STATUS_RECEIVED",
-                    node_id=frame.node_id,
-                    boot_id=frame.boot_id,
-                    state=frame.state,
-                    applied_p_a_w=frame.applied_p.a,
-                    applied_p_b_w=frame.applied_p.b,
-                    applied_p_c_w=frame.applied_p.c,
-                )
+                self._log_status(frame)
                 continue
             if not isinstance(frame, AckFrame):
                 return self._reject("UNEXPECTED_ACTUATOR_FRAME")
+
+            if (
+                frame.viewer_session_id == command.viewer_session_id
+                and frame.sequence < command.sequence
+            ):
+                self._log_unexpected_ack(frame)
+                continue
 
             self._diagnostic_log.append(
                 "SAFE_ACK_RECEIVED",
@@ -486,6 +564,15 @@ class Stage3ASafeCommandService:
                 self._reject_and_raise("ACTUATOR_NOT_QUALIFIED")
             assert hello is not None
 
+            self._drain_unsolicited_actuator_frames()
+            current_hello = self._channel.hello()
+            if (
+                current_hello is None
+                or current_hello.node_id != hello.node_id
+                or current_hello.boot_id != hello.boot_id
+            ):
+                return self._reject("ACTUATOR_DISCONNECTED")
+
             self._sample_cycle_id = None
             self._command_sequence = None
             self._ack_result = None
@@ -515,6 +602,8 @@ class Stage3ASafeCommandService:
                 )
             except _SourceAcquisitionFailure:
                 return self._reject("SOURCE_ACQUISITION_FAILURE")
+            except _ActuatorDisconnected:
+                return self._reject("ACTUATOR_DISCONNECTED")
             if sample is None:
                 return self._reject("NO_NEW_VALID_SAMPLE")
 
@@ -550,6 +639,15 @@ class Stage3ASafeCommandService:
             ):
                 return self._reject("ACTUATOR_DISCONNECTED")
 
+            self._drain_unsolicited_actuator_frames()
+            current_hello = self._channel.hello()
+            if (
+                current_hello is None
+                or current_hello.node_id != hello.node_id
+                or current_hello.boot_id != hello.boot_id
+            ):
+                return self._reject("ACTUATOR_DISCONNECTED")
+
             sequence = self._next_sequence
             self._next_sequence += 1
             self._command_sequence = sequence
@@ -559,27 +657,31 @@ class Stage3ASafeCommandService:
                 sample=sample,
                 sequence=sequence,
             )
+            self._ack_wait_active = True
             try:
-                await self._channel.send(command)
-            except (ConnectionError, QualifiedActuatorChannelError):
-                return self._reject("ACTUATOR_DISCONNECTED")
-            except Exception:
-                return self._reject("COMMAND_SEND_FAILED")
+                try:
+                    await self._channel.send(command)
+                except (ConnectionError, QualifiedActuatorChannelError):
+                    return self._reject("ACTUATOR_DISCONNECTED")
+                except Exception:
+                    return self._reject("COMMAND_SEND_FAILED")
 
-            self._state = Stage3AState.COMMAND_SENT
-            self._diagnostic_log.append(
-                "SAFE_COMMAND_SENT",
-                emonio_device_id=source.id,
-                measurement_cycle_id=sample.identity.cycle_id,
-                viewer_session_id=command.viewer_session_id,
-                node_id=command.node_id,
-                boot_id=command.boot_id,
-                sequence=command.sequence,
-                control_enabled=command.control_enabled,
-                requested_p_a_w=command.p_load_request.a,
-                requested_p_b_w=command.p_load_request.b,
-                requested_p_c_w=command.p_load_request.c,
-            )
-            return await self._wait_for_ack(command)
+                self._state = Stage3AState.COMMAND_SENT
+                self._diagnostic_log.append(
+                    "SAFE_COMMAND_SENT",
+                    emonio_device_id=source.id,
+                    measurement_cycle_id=sample.identity.cycle_id,
+                    viewer_session_id=command.viewer_session_id,
+                    node_id=command.node_id,
+                    boot_id=command.boot_id,
+                    sequence=command.sequence,
+                    control_enabled=command.control_enabled,
+                    requested_p_a_w=command.p_load_request.a,
+                    requested_p_b_w=command.p_load_request.b,
+                    requested_p_c_w=command.p_load_request.c,
+                )
+                return await self._wait_for_ack(command)
+            finally:
+                self._ack_wait_active = False
         finally:
             self._active = False
