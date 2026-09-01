@@ -21,5 +21,5 @@ def test_application_controller_has_no_removed_device_ip_write() -> None:
 
 def test_status_header_grid_has_eight_measurement_status_columns() -> None:
     css = Path("frontend/css/layout.css").read_text(encoding="utf-8")
-    assert "grid-template-columns: repeat(8, minmax(62px, auto));" in css
+    assert "grid-template-columns: repeat(8, max-content);" in css
     assert "grid-template-columns: repeat(9, minmax(62px, auto));" not in css
