@@ -11,6 +11,10 @@ from emonio_viewer.load_control.qualification import (
     LoadControlQualificationService,
     QualificationState,
 )
+from emonio_viewer.load_control.qualified_channel import (
+    QualifiedActuatorChannel,
+    QualifiedActuatorChannelError,
+)
 
 
 class FakeLanDiscoveryService:
@@ -169,10 +173,12 @@ def _diagnostic_log() -> LoadControlDiagnosticLog:
     return LoadControlDiagnosticLog(max_events=50, utc_now=lambda: fixed)
 
 
-def _service(discovery, factory, *, diagnostic_log=None):
+def _service(discovery, factory, *, diagnostic_log=None, qualified_channel=None):
     kwargs = {"session_factory": factory}
     if diagnostic_log is not None:
         kwargs["diagnostic_log"] = diagnostic_log
+    if qualified_channel is not None:
+        kwargs["qualified_channel"] = qualified_channel
     service = LoadControlQualificationService(discovery, **kwargs)
     factory.state_getter = service.status
     return service
@@ -214,8 +220,13 @@ def test_stage2_service_rejects_missing_or_ambiguous_operator_selection() -> Non
 
 def test_stage2_service_uses_required_state_order_and_timeouts() -> None:
     async def scenario() -> None:
+        channel = QualifiedActuatorChannel()
         factory = FakeSessionFactory({"hello": _hello()})
-        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+        service = _service(
+            FakeLanDiscoveryService(_descriptor()),
+            factory,
+            qualified_channel=channel,
+        )
 
         status = await service.connect("ARI-LOAD-001")
 
@@ -234,22 +245,29 @@ def test_stage2_service_uses_required_state_order_and_timeouts() -> None:
         assert factory.created[0].receive_loop_starts == 1
         assert factory.created[0].sent == []
         assert service.qualified_hello() == _hello()
+        assert channel.hello() == _hello()
 
         await service.close()
 
     asyncio.run(scenario())
 
 
-def test_stage2_qualified_transport_is_closed_until_hello_is_qualified() -> None:
+def test_stage2_qualified_channel_is_closed_until_hello_is_qualified() -> None:
     async def scenario() -> None:
+        channel = QualifiedActuatorChannel()
         factory = FakeSessionFactory({"hello": _hello()})
-        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+        service = _service(
+            FakeLanDiscoveryService(_descriptor()),
+            factory,
+            qualified_channel=channel,
+        )
 
         assert service.qualified_hello() is None
-        with pytest.raises(LoadControlQualificationError, match="not HELLO-qualified"):
-            await service.send_qualified_command(_command())
-        with pytest.raises(LoadControlQualificationError, match="not HELLO-qualified"):
-            await service.receive_qualified_frame(0.5)
+        assert channel.hello() is None
+        with pytest.raises(QualifiedActuatorChannelError, match="not HELLO-qualified"):
+            await channel.send(_command())
+        with pytest.raises(QualifiedActuatorChannelError, match="not HELLO-qualified"):
+            await channel.receive(0.5)
 
         assert factory.created == []
         await service.close()
@@ -257,15 +275,20 @@ def test_stage2_qualified_transport_is_closed_until_hello_is_qualified() -> None
     asyncio.run(scenario())
 
 
-def test_stage2_qualified_transport_delegates_only_after_qualification() -> None:
+def test_stage2_qualified_channel_delegates_only_after_qualification() -> None:
     async def scenario() -> None:
+        channel = QualifiedActuatorChannel()
         factory = FakeSessionFactory({"hello": _hello(), "frames": (_ack(),)})
-        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+        service = _service(
+            FakeLanDiscoveryService(_descriptor()),
+            factory,
+            qualified_channel=channel,
+        )
 
         await service.connect("ARI-LOAD-001")
         command = _command()
-        await service.send_qualified_command(command)
-        frame = await service.receive_qualified_frame(0.75)
+        await channel.send(command)
+        frame = await channel.receive(0.75)
 
         assert factory.created[0].sent == [command]
         assert factory.created[0].frame_timeouts == [0.75]
@@ -273,8 +296,9 @@ def test_stage2_qualified_transport_delegates_only_after_qualification() -> None
 
         await service.disconnect()
         assert service.qualified_hello() is None
-        with pytest.raises(LoadControlQualificationError, match="not HELLO-qualified"):
-            await service.send_qualified_command(command)
+        assert channel.hello() is None
+        with pytest.raises(QualifiedActuatorChannelError, match="not HELLO-qualified"):
+            await channel.send(command)
 
     asyncio.run(scenario())
 
@@ -288,8 +312,13 @@ def test_stage2_qualified_transport_delegates_only_after_qualification() -> None
 )
 def test_stage2_service_rejects_transport_or_hello_failure_without_sending(error) -> None:
     async def scenario() -> None:
+        channel = QualifiedActuatorChannel()
         factory = FakeSessionFactory({"receive_error": error})
-        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+        service = _service(
+            FakeLanDiscoveryService(_descriptor()),
+            factory,
+            qualified_channel=channel,
+        )
 
         status = await service.connect("ARI-LOAD-001")
 
@@ -300,6 +329,7 @@ def test_stage2_service_rejects_transport_or_hello_failure_without_sending(error
         assert status.boot_id is None
         assert factory.created[0].receive_loop_starts == 0
         assert factory.created[0].sent == []
+        assert channel.hello() is None
 
         await service.close()
 
@@ -381,8 +411,13 @@ def test_stage2_disconnect_requested_during_connect_runs_after_connect_operation
 
 def test_stage2_explicit_disconnect_clears_qualified_identity_and_sends_no_frame() -> None:
     async def scenario() -> None:
+        channel = QualifiedActuatorChannel()
         factory = FakeSessionFactory({"hello": _hello()})
-        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+        service = _service(
+            FakeLanDiscoveryService(_descriptor()),
+            factory,
+            qualified_channel=channel,
+        )
 
         await service.connect("ARI-LOAD-001")
         status = await service.disconnect()
@@ -393,6 +428,7 @@ def test_stage2_explicit_disconnect_clears_qualified_identity_and_sends_no_frame
         assert status.selected_node_id == "ARI-LOAD-001"
         assert status.node_id is None
         assert status.boot_id is None
+        assert channel.hello() is None
         assert factory.created[0].sent == []
 
     asyncio.run(scenario())
@@ -400,16 +436,24 @@ def test_stage2_explicit_disconnect_clears_qualified_identity_and_sends_no_frame
 
 def test_stage2_reconnect_requires_new_hello_and_accepts_new_boot_instance() -> None:
     async def scenario() -> None:
+        channel = QualifiedActuatorChannel()
         factory = FakeSessionFactory({"hello": _hello("BOOT-001")}, {"hello": _hello("BOOT-002")})
-        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+        service = _service(
+            FakeLanDiscoveryService(_descriptor()),
+            factory,
+            qualified_channel=channel,
+        )
 
         first = await service.connect("ARI-LOAD-001")
         assert first.boot_id == "BOOT-001"
+        assert channel.hello().boot_id == "BOOT-001"
         await service.disconnect()
+        assert channel.hello() is None
 
         second = await service.connect("ARI-LOAD-001")
         assert second.state is QualificationState.QUALIFIED
         assert second.boot_id == "BOOT-002"
+        assert channel.hello().boot_id == "BOOT-002"
         assert len(factory.created) == 2
         assert all(session.receive_loop_starts == 1 for session in factory.created)
         assert all(session.sent == [] for session in factory.created)
@@ -421,11 +465,17 @@ def test_stage2_reconnect_requires_new_hello_and_accepts_new_boot_instance() -> 
 
 def test_stage2_remote_disconnect_invalidates_qualification() -> None:
     async def scenario() -> None:
+        channel = QualifiedActuatorChannel()
         factory = FakeSessionFactory({"hello": _hello()})
-        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+        service = _service(
+            FakeLanDiscoveryService(_descriptor()),
+            factory,
+            qualified_channel=channel,
+        )
 
         qualified = await service.connect("ARI-LOAD-001")
         assert qualified.state is QualificationState.QUALIFIED
+        assert channel.hello() == _hello()
 
         factory.created[0].trigger_remote_disconnect()
         await asyncio.sleep(0)
@@ -438,6 +488,7 @@ def test_stage2_remote_disconnect_invalidates_qualification() -> None:
         assert status.node_id is None
         assert status.boot_id is None
         assert service.qualified_hello() is None
+        assert channel.hello() is None
         assert factory.created[0].sent == []
 
         await service.close()
@@ -447,13 +498,19 @@ def test_stage2_remote_disconnect_invalidates_qualification() -> None:
 
 def test_stage2_close_sends_no_frame() -> None:
     async def scenario() -> None:
+        channel = QualifiedActuatorChannel()
         factory = FakeSessionFactory({"hello": _hello()})
-        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+        service = _service(
+            FakeLanDiscoveryService(_descriptor()),
+            factory,
+            qualified_channel=channel,
+        )
 
         await service.connect("ARI-LOAD-001")
         await service.close()
 
         assert factory.created[0].sent == []
+        assert channel.hello() is None
         assert service.status().state is QualificationState.DISCONNECTED
 
     asyncio.run(scenario())
