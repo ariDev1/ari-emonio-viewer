@@ -263,12 +263,21 @@ class Stage3ASafeCommandService:
             applied_p_c_w=frame.applied_p.c,
         )
 
+    def _channel_disconnect_event(self) -> asyncio.Event:
+        getter = getattr(self._channel, "disconnect_event", None)
+        if callable(getter):
+            return getter()
+        return asyncio.Event()
+
     def _drain_unsolicited_actuator_frames(self) -> None:
         if self._ack_wait_active or self._channel.hello() is None:
             return
+        receive_nowait = getattr(self._channel, "receive_nowait", None)
+        if not callable(receive_nowait):
+            return
         while True:
             try:
-                frame = self._channel.receive_nowait()
+                frame = receive_nowait()
             except asyncio.QueueEmpty:
                 return
             except (ConnectionError, QualifiedActuatorChannelError, ProtocolError):
@@ -401,7 +410,7 @@ class Stage3ASafeCommandService:
         self._sample_boundary_cycle = boundary_cycle
         self._sample_request_monotonic_ns = request_monotonic_ns
         combined_task = asyncio.create_task(
-            self._sample_or_disconnect(waiter, self._channel.disconnect_event())
+            self._sample_or_disconnect(waiter, self._channel_disconnect_event())
         )
         try:
             return await self._wait_for(
