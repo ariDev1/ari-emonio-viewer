@@ -1,12 +1,30 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 import math
+from typing import Protocol
 
 from .model import ActuatorDescriptor, ThreePhasePower
 
 
 LOAD_CONTROL_MDNS_SERVICE_TYPE = "_ari-emonio-load._tcp.local."
+
+
+@dataclass(frozen=True, slots=True)
+class MdnsResolvedService:
+    address: str
+    port: int
+    properties: Mapping[bytes, bytes]
+
+
+class MdnsDiscoveryBackend(Protocol):
+    async def scan(
+        self,
+        *,
+        service_type: str,
+        discovery_window_s: float,
+    ) -> tuple[MdnsResolvedService, ...]: ...
 
 
 def _property_text(properties: Mapping[bytes, bytes], name: str) -> str:
@@ -69,6 +87,43 @@ def parse_mdns_descriptor(
             _positive_power(properties, "p_max_c_w"),
         ),
     )
+
+
+class MdnsActuatorDiscovery:
+    """Convert resolved mDNS records into visible actuator descriptors.
+
+    Discovery locates nodes only. It does not bind a node and does not grant
+    external-control authority.
+    """
+
+    def __init__(
+        self,
+        *,
+        discovery_window_s: float,
+        backend: MdnsDiscoveryBackend,
+    ) -> None:
+        if isinstance(discovery_window_s, bool) or not isinstance(discovery_window_s, (int, float)):
+            raise ValueError("discovery_window_s must be numeric")
+        window = float(discovery_window_s)
+        if not math.isfinite(window) or window <= 0.0:
+            raise ValueError("discovery_window_s must be finite and > 0")
+        self._discovery_window_s = window
+        self._backend = backend
+
+    async def discover(self) -> tuple[ActuatorDescriptor, ...]:
+        records = await self._backend.scan(
+            service_type=LOAD_CONTROL_MDNS_SERVICE_TYPE,
+            discovery_window_s=self._discovery_window_s,
+        )
+        descriptors = tuple(
+            parse_mdns_descriptor(
+                address=record.address,
+                port=record.port,
+                properties=record.properties,
+            )
+            for record in records
+        )
+        return tuple(sorted(descriptors, key=lambda item: item.node_id))
 
 
 class MockActuatorDiscovery:
