@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-def test_current_service_keeps_real_actuator_command_transport_disabled() -> None:
+def test_viewer_load_control_contains_no_physical_output_implementation() -> None:
     root = Path("src/emonio_viewer/load_control")
     source = "\n".join(
         path.read_text(encoding="utf-8")
@@ -9,7 +9,6 @@ def test_current_service_keeps_real_actuator_command_transport_disabled() -> Non
     )
 
     forbidden = (
-        "WebSocketActuatorSession",
         "websockets.connect",
         "serial.Serial",
         "machine.PWM",
@@ -25,3 +24,5 @@ def test_active_service_remains_mock_only_until_transport_is_explicitly_promoted
     assert "MockActuatorDiscovery" in service
     assert "MockActuatorSession" in service
     assert "MdnsActuatorDiscovery" not in service
+    assert "ZeroconfMdnsBackend" not in service
+    assert "WebSocketActuatorSession" not in service
