@@ -1,7 +1,9 @@
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 
+from emonio_viewer.load_control.diagnostic_log import LoadControlDiagnosticLog
 from emonio_viewer.load_control.model import ActuatorDescriptor, ThreePhasePower
 from emonio_viewer.load_control.protocol import HelloFrame, ProtocolError
 from emonio_viewer.load_control.qualification import (
@@ -113,11 +115,16 @@ def _hello(boot_id: str = "BOOT-001") -> HelloFrame:
     )
 
 
-def _service(discovery, factory):
-    service = LoadControlQualificationService(
-        discovery,
-        session_factory=factory,
-    )
+def _diagnostic_log() -> LoadControlDiagnosticLog:
+    fixed = datetime(2026, 9, 1, 16, 32, 1, 524000, tzinfo=timezone.utc)
+    return LoadControlDiagnosticLog(max_events=50, utc_now=lambda: fixed)
+
+
+def _service(discovery, factory, *, diagnostic_log=None):
+    kwargs = {"session_factory": factory}
+    if diagnostic_log is not None:
+        kwargs["diagnostic_log"] = diagnostic_log
+    service = LoadControlQualificationService(discovery, **kwargs)
     factory.state_getter = service.status
     return service
 
@@ -354,5 +361,60 @@ def test_stage2_close_sends_no_frame() -> None:
 
         assert factory.created[0].sent == []
         assert service.status().state is QualificationState.DISCONNECTED
+
+    asyncio.run(scenario())
+
+
+def test_stage2_service_logs_real_qualification_and_operator_disconnect() -> None:
+    async def scenario() -> None:
+        diagnostic_log = _diagnostic_log()
+        factory = FakeSessionFactory({"hello": _hello()})
+        service = _service(
+            FakeLanDiscoveryService(_descriptor()),
+            factory,
+            diagnostic_log=diagnostic_log,
+        )
+
+        await service.connect("ARI-LOAD-001")
+        assert tuple(event.event for event in diagnostic_log.recent()) == (
+            "ACTUATOR_SELECTED",
+            "WS_CONNECTING",
+            "WS_CONNECTED",
+            "HELLO_RECEIVED",
+            "HELLO_QUALIFIED",
+            "CONTROL_AUTHORITY_DISABLED",
+        )
+        assert all("COMMAND" not in event.line for event in diagnostic_log.recent())
+        assert all("MOCK" not in event.line for event in diagnostic_log.recent())
+
+        await service.disconnect()
+        assert diagnostic_log.recent()[-1].event == "WS_DISCONNECTED"
+        assert 'reason="operator"' in diagnostic_log.recent()[-1].line
+
+    asyncio.run(scenario())
+
+
+def test_stage2_service_logs_hello_rejection_without_control_event() -> None:
+    async def scenario() -> None:
+        diagnostic_log = _diagnostic_log()
+        factory = FakeSessionFactory({"receive_error": ProtocolError("invalid HELLO")})
+        service = _service(
+            FakeLanDiscoveryService(_descriptor()),
+            factory,
+            diagnostic_log=diagnostic_log,
+        )
+
+        status = await service.connect("ARI-LOAD-001")
+        assert status.state is QualificationState.REJECTED
+        assert tuple(event.event for event in diagnostic_log.recent()) == (
+            "ACTUATOR_SELECTED",
+            "WS_CONNECTING",
+            "WS_CONNECTED",
+            "HELLO_REJECTED",
+        )
+        assert 'reason="invalid HELLO"' in diagnostic_log.recent()[-1].line
+        assert all(event.event != "CONTROL_AUTHORITY_DISABLED" for event in diagnostic_log.recent())
+
+        await service.close()
 
     asyncio.run(scenario())
