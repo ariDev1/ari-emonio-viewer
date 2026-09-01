@@ -5,6 +5,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 
+from .diagnostic_log import LoadControlDiagnosticLog
 from .lan_discovery import LanActuatorDiscoveryService
 from .model import ActuatorDescriptor, ThreePhasePower
 from .protocol import HelloFrame, LOAD_CONTROL_PROTOCOL_VERSION
@@ -84,12 +85,14 @@ class LoadControlQualificationService:
         receive_timeout_s: float = 2.0,
         session_factory=WebSocketActuatorSession,
         create_task=asyncio.create_task,
+        diagnostic_log: LoadControlDiagnosticLog | None = None,
     ) -> None:
         self._lan_discovery_service = lan_discovery_service
         self._connect_timeout_s = connect_timeout_s
         self._receive_timeout_s = receive_timeout_s
         self._session_factory = session_factory
         self._create_task = create_task
+        self.diagnostic_log = diagnostic_log or LoadControlDiagnosticLog()
         self._state = QualificationState.IDLE
         self._selected_descriptor: ActuatorDescriptor | None = None
         self._hello: HelloFrame | None = None
@@ -153,6 +156,11 @@ class LoadControlQualificationService:
             self._hello = None
             self._last_error = None
             self._state = QualificationState.DISCOVERED
+            self.diagnostic_log.append(
+                "ACTUATOR_SELECTED",
+                node_id=descriptor.node_id,
+                location=descriptor.location,
+            )
 
             session = self._session_factory(
                 descriptor,
@@ -160,13 +168,44 @@ class LoadControlQualificationService:
                 receive_timeout_s=self._receive_timeout_s,
             )
             self._session = session
+            websocket_opened = False
 
             try:
                 self._state = QualificationState.CONNECTING
+                self.diagnostic_log.append(
+                    "WS_CONNECTING",
+                    node_id=descriptor.node_id,
+                    location=descriptor.location,
+                )
                 await session.open()
+                websocket_opened = True
+                self.diagnostic_log.append(
+                    "WS_CONNECTED",
+                    node_id=descriptor.node_id,
+                )
+
                 self._state = QualificationState.HELLO_WAIT
                 hello = await session.receive_hello()
+                self.diagnostic_log.append(
+                    "HELLO_RECEIVED",
+                    node_id=hello.node_id,
+                    boot_id=hello.boot_id,
+                )
                 qualify_hello(descriptor, hello)
+                self.diagnostic_log.append(
+                    "HELLO_QUALIFIED",
+                    protocol=hello.protocol_version,
+                    device_class=hello.device_class,
+                    capability=REQUIRED_CAPABILITY,
+                    p_max_a_w=hello.p_max.a,
+                    p_max_b_w=hello.p_max.b,
+                    p_max_c_w=hello.p_max.c,
+                )
+                self.diagnostic_log.append(
+                    "CONTROL_AUTHORITY_DISABLED",
+                    node_id=hello.node_id,
+                    boot_id=hello.boot_id,
+                )
                 self._hello = hello
                 self._state = QualificationState.QUALIFIED
                 self._watch_task = self._create_task(self._watch_disconnect(session))
@@ -175,6 +214,10 @@ class LoadControlQualificationService:
                 self._hello = None
                 self._last_error = _error_text(exc)
                 self._state = QualificationState.REJECTED
+                self.diagnostic_log.append(
+                    "HELLO_REJECTED" if websocket_opened else "WS_CONNECT_FAILED",
+                    reason=self._last_error,
+                )
                 try:
                     await session.disconnect()
                 finally:
@@ -182,30 +225,45 @@ class LoadControlQualificationService:
                 return self.status()
 
     async def _watch_disconnect(self, session) -> None:
+        watch_error: str | None = None
         try:
             await session.wait_for_disconnect()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            watch_error = _error_text(exc)
             if session is self._session:
-                self._last_error = _error_text(exc)
+                self._last_error = watch_error
         finally:
             if session is self._session:
+                hello = self._hello
+                descriptor = self._selected_descriptor
                 self._session = None
                 self._hello = None
                 self._watch_task = None
                 self._state = QualificationState.DISCONNECTED
+                fields = {
+                    "reason": "remote",
+                    "node_id": hello.node_id if hello is not None else (descriptor.node_id if descriptor else None),
+                    "boot_id": hello.boot_id if hello is not None else None,
+                }
+                if watch_error is not None:
+                    fields["error"] = watch_error
+                self.diagnostic_log.append("WS_DISCONNECTED", **fields)
                 try:
                     await session.disconnect()
                 except Exception as exc:
                     if self._last_error is None:
                         self._last_error = _error_text(exc)
 
-    async def disconnect(self) -> QualificationStatus:
+    async def _disconnect(self, *, reason: str) -> QualificationStatus:
         async with self._operation_lock:
             had_selection = self._selected_descriptor is not None
             session = self._session
             watch_task = self._watch_task
+            hello = self._hello
+            descriptor = self._selected_descriptor
+            had_connection = session is not None
 
             self._session = None
             self._watch_task = None
@@ -219,6 +277,14 @@ class LoadControlQualificationService:
             if session is not None:
                 await session.disconnect()
 
+            if had_connection:
+                self.diagnostic_log.append(
+                    "WS_DISCONNECTED",
+                    reason=reason,
+                    node_id=hello.node_id if hello is not None else (descriptor.node_id if descriptor else None),
+                    boot_id=hello.boot_id if hello is not None else None,
+                )
+
             self._state = (
                 QualificationState.DISCONNECTED
                 if had_selection
@@ -226,5 +292,8 @@ class LoadControlQualificationService:
             )
             return self.status()
 
+    async def disconnect(self) -> QualificationStatus:
+        return await self._disconnect(reason="operator")
+
     async def close(self) -> None:
-        await self.disconnect()
+        await self._disconnect(reason="viewer_shutdown")
