@@ -76,3 +76,27 @@ class PersistentLoadControlConfig:
                 raise ValueError(f"{name} must be numeric or None")
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and > 0")
+
+
+@dataclass(frozen=True, slots=True)
+class ActuatorDescriptor:
+    node_id: str
+    location: str
+    device_class: str
+    capabilities: tuple[str, ...]
+    p_max: ThreePhasePower
+
+    def __post_init__(self) -> None:
+        for name in ("node_id", "location", "device_class"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{name} must be non-empty text")
+        if not isinstance(self.capabilities, tuple) or not self.capabilities:
+            raise ValueError("capabilities must be a non-empty tuple")
+        if any(not isinstance(item, str) or not item for item in self.capabilities):
+            raise ValueError("capabilities must contain non-empty text values")
+        for name, value in (("a", self.p_max.a), ("b", self.p_max.b), ("c", self.p_max.c)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"p_max.{name} must be numeric")
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"p_max.{name} must be finite and > 0")
