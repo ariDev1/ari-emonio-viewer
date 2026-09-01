@@ -25,10 +25,10 @@ def register_load_control_routes(app: web.Application) -> None:
     app.router.add_get("/api/v1/load-control/lan-qualification/status", get_lan_qualification_status)
     app.router.add_post("/api/v1/load-control/lan-qualification/disconnect", disconnect_lan_actuator)
     app.router.add_get("/api/v1/load-control/lan-diagnostics/log", get_lan_diagnostic_log)
-    app.router.add_get("/api/v1/load-control/safe-test/sources", get_safe_test_sources)
-    app.router.add_get("/api/v1/load-control/safe-test/status", get_safe_test_status)
-    app.router.add_post("/api/v1/load-control/safe-test/source", select_safe_test_source)
-    app.router.add_post("/api/v1/load-control/safe-test/run", run_safe_test)
+    app.router.add_get("/api/v1/load-control/lan-safe-test/sources", get_safe_test_sources)
+    app.router.add_get("/api/v1/load-control/lan-safe-test/status", get_safe_test_status)
+    app.router.add_post("/api/v1/load-control/lan-safe-test/source", select_safe_test_source)
+    app.router.add_post("/api/v1/load-control/lan-safe-test/send", run_safe_test)
     app.router.add_get("/api/v1/load-control/evidence/recent", get_recent_evidence)
     app.router.add_post("/api/v1/load-control/binding", configure_binding)
     app.router.add_post("/api/v1/load-control/config", configure_limits)
@@ -80,6 +80,13 @@ async def _body(request: web.Request) -> dict:
     if not isinstance(body, dict):
         raise web.HTTPBadRequest(text="request body must be a JSON object")
     return body
+
+
+def _require_exact_fields(body: dict, expected: set[str]) -> None:
+    actual = set(body)
+    if actual != expected:
+        expected_text = ", ".join(sorted(expected)) if expected else "no fields"
+        raise web.HTTPBadRequest(text=f"request body must contain exactly {expected_text}")
 
 
 def _required_text(body: dict, name: str) -> str:
@@ -289,6 +296,7 @@ async def get_safe_test_status(request: web.Request) -> web.Response:
 
 async def select_safe_test_source(request: web.Request) -> web.Response:
     body = await _body(request)
+    _require_exact_fields(body, {"emonio_device_id"})
     device_id = _required_text(body, "emonio_device_id")
     try:
         status = await _stage3a_service(request).select_source(device_id)
@@ -298,6 +306,8 @@ async def select_safe_test_source(request: web.Request) -> web.Response:
 
 
 async def run_safe_test(request: web.Request) -> web.Response:
+    body = await _body(request)
+    _require_exact_fields(body, set())
     try:
         status = await _stage3a_service(request).run_safe_test()
     except Stage3AError as exc:
