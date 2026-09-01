@@ -22,6 +22,7 @@ def register_load_control_routes(app: web.Application) -> None:
     app.router.add_post("/api/v1/load-control/lan-qualification/connect", connect_lan_actuator)
     app.router.add_get("/api/v1/load-control/lan-qualification/status", get_lan_qualification_status)
     app.router.add_post("/api/v1/load-control/lan-qualification/disconnect", disconnect_lan_actuator)
+    app.router.add_get("/api/v1/load-control/lan-diagnostics/log", get_lan_diagnostic_log)
     app.router.add_get("/api/v1/load-control/evidence/recent", get_recent_evidence)
     app.router.add_post("/api/v1/load-control/binding", configure_binding)
     app.router.add_post("/api/v1/load-control/config", configure_limits)
@@ -75,6 +76,26 @@ def _required_number(body: dict, name: str) -> float:
     return float(value)
 
 
+def _query_integer(
+    request: web.Request,
+    name: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    raw = request.query.get(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=f"{name} must be an integer") from exc
+    if value < minimum or (maximum is not None and value > maximum):
+        if maximum is None:
+            raise web.HTTPBadRequest(text=f"{name} must be >= {minimum}")
+        raise web.HTTPBadRequest(text=f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
 def _command_error(exc: LoadControlCommandError) -> web.HTTPConflict:
     return web.HTTPConflict(
         text=str(exc),
@@ -114,6 +135,15 @@ def _qualification_json(status: QualificationStatus) -> dict:
     }
 
 
+def _diagnostic_event_json(item) -> dict:
+    return {
+        "sequence": item.sequence,
+        "utc": item.utc,
+        "event": item.event,
+        "line": item.line,
+    }
+
+
 async def get_load_control_status(request: web.Request) -> web.Response:
     return web.json_response(_service(request).status())
 
@@ -126,13 +156,35 @@ async def get_discovered_actuators(request: web.Request) -> web.Response:
 
 async def scan_lan_actuators(request: web.Request) -> web.Response:
     body = await _body(request)
+    discovery_window_s = _required_number(body, "discovery_window_s")
+    resolve_timeout_s = _required_number(body, "resolve_timeout_s")
+    diagnostic_log = _qualification_service(request).diagnostic_log
+    diagnostic_log.append(
+        "LAN_SCAN_STARTED",
+        discovery_window_s=discovery_window_s,
+        resolve_timeout_s=resolve_timeout_s,
+    )
     try:
         visible = await _lan_discovery_service(request).scan(
-            discovery_window_s=_required_number(body, "discovery_window_s"),
-            resolve_timeout_s=_required_number(body, "resolve_timeout_s"),
+            discovery_window_s=discovery_window_s,
+            resolve_timeout_s=resolve_timeout_s,
         )
     except ValueError as exc:
+        diagnostic_log.append("LAN_SCAN_FAILED", reason=str(exc))
         raise web.HTTPBadRequest(text=str(exc)) from exc
+
+    for item in visible:
+        diagnostic_log.append(
+            "ACTUATOR_DISCOVERED",
+            node_id=item.node_id,
+            location=item.location,
+            device_class=item.device_class,
+            capabilities=",".join(item.capabilities),
+            p_max_a_w=item.p_max.a,
+            p_max_b_w=item.p_max.b,
+            p_max_c_w=item.p_max.c,
+        )
+    diagnostic_log.append("LAN_SCAN_COMPLETE", count=len(visible))
     return web.json_response([_descriptor_json(item) for item in visible])
 
 
@@ -153,6 +205,33 @@ async def get_lan_qualification_status(request: web.Request) -> web.Response:
 async def disconnect_lan_actuator(request: web.Request) -> web.Response:
     status = await _qualification_service(request).disconnect()
     return web.json_response(_qualification_json(status))
+
+
+async def get_lan_diagnostic_log(request: web.Request) -> web.Response:
+    after_sequence = _query_integer(
+        request,
+        "after",
+        default=0,
+        minimum=0,
+    )
+    limit = _query_integer(
+        request,
+        "limit",
+        default=200,
+        minimum=1,
+        maximum=200,
+    )
+    diagnostic_log = _qualification_service(request).diagnostic_log
+    events = diagnostic_log.recent(
+        after_sequence=after_sequence,
+        limit=limit,
+    )
+    return web.json_response(
+        {
+            "latest_sequence": diagnostic_log.latest_sequence,
+            "events": [_diagnostic_event_json(item) for item in events],
+        }
+    )
 
 
 async def get_recent_evidence(request: web.Request) -> web.Response:
