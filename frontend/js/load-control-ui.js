@@ -80,7 +80,7 @@ function createUi() {
         <h2>External Load Control</h2>
       </div>
       <div class="load-control-header-actions">
-        <strong class="load-control-real-disabled">REAL CONTROL DISABLED</strong>
+        <strong class="load-control-real-disabled">NONZERO REAL CONTROL DISABLED</strong>
         <button id="load-control-close" type="button">CLOSE</button>
       </div>
     </div>
@@ -156,7 +156,7 @@ function createUi() {
         <div><span>Rejection</span><strong id="lc-safe-rejection">—</strong></div>
       </div>
       <div class="load-control-actions">
-        <button id="lc-safe-run" type="button" disabled>RUN SAFE 0 W TEST</button>
+        <button id="lc-safe-run" type="button" disabled>SEND SAFE TEST COMMAND</button>
       </div>
       <div id="lc-safe-message" class="load-control-status-text" aria-live="polite">
         Select an Emonio source explicitly. The SAFE test remains disabled until the actuator HELLO is qualified.
