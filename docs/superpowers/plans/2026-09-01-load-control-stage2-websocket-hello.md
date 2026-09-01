@@ -4,7 +4,7 @@
 
 **Goal:** Add operator-selected real WebSocket connection and strict HELLO qualification for a discovered ARI load actuator, while keeping external control disabled and sending no COMMAND frame.
 
-**Architecture:** Preserve the existing Stage-1 mock-control service and the existing read-only LAN discovery service. Extend the existing WebSocket transport with a backward-compatible two-step connection interface, then add one independent qualification service that resolves an operator-selected `node_id` from the latest LAN discovery evidence, opens the stored WebSocket locator, validates the first HELLO frame, and owns only qualification state. Wire that service through the active `app_v0416.py` compatibility application and expose a separate UI section for explicit qualification.
+**Architecture:** Keep the Stage-1 mock-control service and read-only LAN discovery service unchanged. Extend the existing WebSocket transport with a backward-compatible two-step connection interface. Add one independent qualification service that resolves an operator-selected `node_id` from the latest LAN discovery evidence, opens the stored WebSocket locator, validates the first HELLO frame, and owns qualification state only. Wire that service through the active `app_v0416.py` compatibility application and expose a separate Stage-2 UI section.
 
 **Tech Stack:** Python 3.11+, `aiohttp`, `asyncio`, existing ARI load-control protocol V1 models, vanilla JavaScript, structured CSS, `pytest`.
 
@@ -14,35 +14,28 @@
 
 - Target branch: `testing`.
 - Viewer baseline: ARI Emonio Viewer v0.4.19.
-- Do not modify canonical P signs.
-- Do not modify canonical Q signs.
-- Do not modify quadrant semantics.
-- Do not modify power-factor semantics.
-- Do not modify measurement validation.
-- Do not modify fixed-deadline acquisition.
+- Do not modify canonical P signs or Q signs.
+- Do not modify quadrant or power-factor semantics.
+- Do not modify measurement validation or fixed-deadline acquisition.
 - Do not modify Emonio polling.
-- Do not modify Modbus transport or read-only behavior.
-- Do not modify register maps or decoder logic.
+- Do not modify Modbus transport, read-only behavior, register maps, or decoder logic.
 - Do not modify recording semantics or CSV precision.
 - Do not modify SCOPE measurement semantics.
 - Protected production directories are `src/emonio_viewer/acquisition/**`, `src/emonio_viewer/measurement/**`, `src/emonio_viewer/modbus/**`, `src/emonio_viewer/recording/**`, and `src/emonio_viewer/scope/**`.
 - Preserve the Stage-1 mock-control path in `src/emonio_viewer/load_control/service.py`.
 - Preserve operator-triggered read-only mDNS discovery.
-- The browser must submit only `node_id` for Stage-2 selection. It must not submit an IP address, port, path, or replacement WebSocket URL.
-- The backend must resolve the selected node against `LanActuatorDiscoveryService.last_result`.
-- The qualified actuator instance identity is `node_id + current boot_id`. IP address is only a transport locator.
+- The browser submits only `node_id` for Stage-2 selection. It does not submit IP address, port, path, or replacement WebSocket URL.
+- The backend resolves the selected node against `LanActuatorDiscoveryService.last_result`.
+- Qualified actuator instance identity is `node_id + current boot_id`. IP address is only a locator.
 - WebSocket connect timeout is `3.0 s`.
 - First HELLO receive timeout is `2.0 s`.
-- `p_max` discovery-to-HELLO comparison uses exact numeric equality after strict finite positive validation.
-- No tolerance, clamp, repair, replacement, or default is permitted for HELLO qualification.
-- No automatic actuator selection.
-- No automatic binding.
-- No automatic external-control enable.
-- No automatic reconnect.
-- Stage 2 must not send COMMAND under any condition.
-- Stage 2 must not expose a command-send method.
-- External control must remain `DISABLED` after successful HELLO qualification.
-- Do not change the project version in this plan. Version promotion is a separate release decision.
+- Discovery-to-HELLO `p_max` comparison uses exact numeric equality after strict finite positive validation.
+- No tolerance, clamp, repair, substitution, or default is permitted.
+- No automatic selection, binding, external-control enable, or reconnect.
+- Stage 2 sends no COMMAND under any condition.
+- Stage 2 exposes no command-send method.
+- External control remains `DISABLED` after successful qualification.
+- Do not change the project version in this plan. Version promotion is a separate decision.
 
 ---
 
@@ -52,79 +45,123 @@
 
 `src/emonio_viewer/load_control/qualification.py`
 
-One responsibility: own real actuator connection qualification only. It shall contain the Stage-2 qualification state, qualification error type, immutable status snapshot, strict discovery-to-HELLO comparison, connection lifecycle, and read-only disconnect watcher. It shall not import measurement, Modbus, recording, SCOPE, controller, supervisor, COMMAND, or ACK code.
+Responsibility: own real actuator HELLO qualification only. This file contains the Stage-2 state enum, qualification error, immutable status snapshot, discovery-to-HELLO cross-check, connection lifecycle, and read-only disconnect watcher. It does not import measurement, Modbus, recording, SCOPE, controller, supervisor, COMMAND, or ACK code.
 
 ### Existing production files with small changes
 
-`src/emonio_viewer/load_control/session_websocket.py`
+- `src/emonio_viewer/load_control/session_websocket.py`: add `open()`, `receive_hello()`, and `wait_for_disconnect()` while preserving existing `connect()` behavior.
+- `src/emonio_viewer/server/keys.py`: add one typed AppKey for the qualification service.
+- `src/emonio_viewer/server/load_control_api.py`: add qualification service lookup, serializer, and three Stage-2 routes.
+- `src/emonio_viewer/server/app_v0416.py`: construct or accept the qualification service and close it during application cleanup.
+- `frontend/js/load-control-api.js`: add qualification connect/status/disconnect helpers.
+- `frontend/js/load-control-ui.js`: add explicit `SELECT / QUALIFY`, qualification evidence, and `DISCONNECT`; keep mock binding separate; correct `Physical max` wording.
+- `frontend/css/load-control/load-control.css`: add only Stage-2 qualification styles under the existing load-control namespace.
 
-Keep the current generic transport responsibility. Add `open()`, `receive_hello()`, and `wait_for_disconnect()` while preserving the current `connect()` behavior as a compatibility wrapper.
+### Test files
 
-`src/emonio_viewer/server/keys.py`
-
-Add one typed `web.AppKey` for the qualification service.
-
-`src/emonio_viewer/server/load_control_api.py`
-
-Add qualification service lookup and three Stage-2 routes. Keep all existing Stage-1 routes unchanged.
-
-`src/emonio_viewer/server/app_v0416.py`
-
-Construct or accept the qualification service, store it under the new AppKey, and close it during application cleanup. Do not change `main.py` or `main_v0416.py`.
-
-`frontend/js/load-control-api.js`
-
-Add three API helpers for qualification connect, status, and disconnect.
-
-`frontend/js/load-control-ui.js`
-
-Add explicit `SELECT / QUALIFY`, qualification evidence rendering, and `DISCONNECT`. Keep existing mock binding controls separate. Correct `Physical max` to `Advertised test limit`.
-
-`frontend/css/load-control/load-control.css`
-
-Add only Stage-2 qualification layout/state styles. Keep load-control styles in this structured CSS file.
-
-### New and updated tests
-
-`tests/unit/test_load_control_websocket_session.py`
-
-Extend transport tests for two-step connection, first-frame HELLO, disconnect watching, and compatibility of `connect()`.
-
-`tests/unit/test_load_control_hello_qualification.py`
-
-Test the pure discovery-to-HELLO rules.
-
-`tests/unit/test_load_control_stage2_service.py`
-
-Test operator selection, lifecycle states, no automatic selection, reconnect rules, boot changes, disconnect invalidation, and zero sent frames.
-
-`tests/unit/test_load_control_stage2_contract.py`
-
-Test the architectural no-control/no-scientific-import boundary.
-
-`tests/integration/test_load_control_stage2_api.py`
-
-Test the new HTTP routes and application service boundary.
-
-`tests/browser/test_load_control_contract.py`
-
-Update the browser contract from Stage 1 wording to Stage 2 wording while preserving the existing mock-control and no-command assertions.
+- Modify `tests/unit/test_load_control_protocol.py` for the complete invalid raw HELLO matrix.
+- Modify `tests/unit/test_load_control_websocket_session.py` for staged connect, first-frame enforcement, binary/malformed first frame, and disconnect watcher.
+- Create `tests/unit/test_load_control_hello_qualification.py` for valid but mismatched discovery/HELLO evidence.
+- Create `tests/unit/test_load_control_stage2_service.py` for lifecycle and no-frame behavior.
+- Create `tests/unit/test_load_control_stage2_contract.py` for the no-control/no-scientific-import boundary.
+- Create `tests/integration/test_load_control_stage2_api.py` for HTTP/API separation.
+- Modify `tests/unit/test_load_control_lan_discovery_app_wiring.py` for active app wiring.
+- Modify `tests/browser/test_load_control_contract.py` for Stage-2 UI/API contract.
 
 ---
 
-### Task 1: Extend the WebSocket Transport Without Breaking Stage 1
+### Task 1: Complete the Raw HELLO Protocol Rejection Matrix
+
+**Files:**
+- Modify: `tests/unit/test_load_control_protocol.py`
+- Production files: none
+
+**Interfaces:**
+- Consumes: existing `decode_frame()` and strict protocol V1 decoder.
+- Produces: direct evidence that invalid raw HELLO frames are rejected before Stage-2 discovery comparison.
+
+- [ ] **Step 1: Add a valid raw HELLO payload helper.**
+
+```python
+def _hello_payload():
+    return {
+        "message_type": "HELLO",
+        "protocol_version": 1,
+        "node_id": "ARI-LOAD-001",
+        "boot_id": "BOOT-001",
+        "device_class": "ARI_LOAD_ACTUATOR",
+        "capabilities": ["ACTIVE_LOAD_CONTROL"],
+        "p_max": {"a": 1000.0, "b": 1000.0, "c": 1000.0},
+    }
+```
+
+- [ ] **Step 2: Add explicit decoder rejection tests.**
+
+Add separate tests or one parameterized test for all of these raw HELLO failures:
+
+```text
+unknown message_type
+protocol_version = 2
+empty boot_id
+missing p_max
+p_max missing phase c
+p_max with extra phase d
+p_max.a = NaN
+p_max.b = Infinity
+p_max.c = 0.0
+p_max.a = -1.0
+extra top-level HELLO field
+```
+
+Use `json.dumps(payload)` for normal cases. For non-finite cases, Python JSON encoding may emit `NaN` or `Infinity`; pass the resulting text to `decode_frame()` and assert `ProtocolError` or the existing protocol validation exception type used by the decoder.
+
+Example:
+
+```python
+def test_hello_decoder_rejects_wrong_protocol_version() -> None:
+    payload = _hello_payload()
+    payload["protocol_version"] = 2
+    with pytest.raises(ProtocolError):
+        decode_frame(json.dumps(payload))
+
+
+def test_hello_decoder_rejects_missing_p_max() -> None:
+    payload = _hello_payload()
+    payload.pop("p_max")
+    with pytest.raises(ProtocolError):
+        decode_frame(json.dumps(payload))
+```
+
+- [ ] **Step 3: Run the protocol test file.**
+
+Run:
+
+```bash
+python3 -m pytest tests/unit/test_load_control_protocol.py -q
+```
+
+Expected: PASS with the current strict decoder. If one required invalid frame is accepted, stop and treat that as evidence that `protocol.py` needs an explicitly reviewed boundary expansion before modifying it.
+
+- [ ] **Step 4: Commit test evidence only.**
+
+```bash
+git add tests/unit/test_load_control_protocol.py
+git commit -m "test: complete Stage 2 HELLO rejection matrix"
+```
+
+---
+
+### Task 2: Extend WebSocket Transport Without Breaking Existing Behavior
 
 **Files:**
 - Modify: `src/emonio_viewer/load_control/session_websocket.py`
 - Modify: `tests/unit/test_load_control_websocket_session.py`
 
 **Interfaces:**
-- Consumes: existing `ActuatorDescriptor`, `HelloFrame`, `decode_frame()`, `ClientSession`, and explicit connect/receive timeout values.
-- Produces: `async WebSocketActuatorSession.open() -> None`, `async WebSocketActuatorSession.receive_hello() -> HelloFrame`, `async WebSocketActuatorSession.wait_for_disconnect() -> None`, and the existing `async connect() -> HelloFrame` preserved as a compatibility wrapper.
+- Consumes: existing `ActuatorDescriptor`, `HelloFrame`, `decode_frame()`, `ClientSession`, explicit connect and receive timeouts.
+- Produces: `async open() -> None`, `async receive_hello() -> HelloFrame`, `async wait_for_disconnect() -> None`; existing `async connect() -> HelloFrame` remains a compatibility wrapper.
 
-- [ ] **Step 1: Add failing tests for the two-step transport interface.**
-
-Add tests that prove the socket is open before HELLO is consumed and that `receive_hello()` still requires HELLO as the first application frame.
+- [ ] **Step 1: Write failing tests for staged connection.**
 
 ```python
 def test_websocket_session_supports_open_then_receive_hello() -> None:
@@ -140,7 +177,7 @@ def test_websocket_session_supports_open_then_receive_hello() -> None:
 
         await session.open()
         assert session.connected is True
-        assert websocket.messages
+        assert len(websocket.messages) == 1
 
         hello = await session.receive_hello()
         assert hello == _hello()
@@ -151,21 +188,27 @@ def test_websocket_session_supports_open_then_receive_hello() -> None:
     asyncio.run(scenario())
 ```
 
-Add a first-frame rejection test with an encoded ACK or COMMAND frame and assert `ProtocolError` with `first actuator frame must be HELLO`.
+Add tests that `receive_hello()` rejects:
 
-- [ ] **Step 2: Run the new transport tests and verify RED.**
+```text
+ACK as first application frame
+malformed JSON text as first frame
+binary first frame
+```
 
-Run:
+For the binary case, broaden `FakeMessage.data` to `object` so the fake can represent bytes.
+
+- [ ] **Step 2: Run the transport test file and verify RED.**
 
 ```bash
 python3 -m pytest tests/unit/test_load_control_websocket_session.py -q
 ```
 
-Expected result: FAIL because `open()`, `receive_hello()`, and `wait_for_disconnect()` do not exist yet.
+Expected: FAIL because the staged methods do not exist.
 
-- [ ] **Step 3: Implement the minimal two-step transport.**
+- [ ] **Step 3: Implement the minimal two-step interface.**
 
-Refactor the current `connect()` body into these methods without changing timeout validation or cleanup behavior:
+Refactor the current `connect()` body into these methods:
 
 ```python
 async def open(self) -> None:
@@ -201,7 +244,11 @@ async def connect(self) -> HelloFrame:
     return await self.receive_hello()
 ```
 
-Add a transport-only disconnect watcher that sends no frame. It may consume inbound post-HELLO frames because Stage 2 has no post-HELLO application-frame responsibility. It returns only when the transport reports close, closed, or error:
+Do not change constructor validation or existing timeout values supplied by callers.
+
+- [ ] **Step 4: Add a transport-only disconnect watcher.**
+
+The watcher sends no application frame. Stage 2 has no post-HELLO application-frame consumer, so the watcher may consume post-HELLO inbound frames while waiting for transport close.
 
 ```python
 async def wait_for_disconnect(self) -> None:
@@ -213,33 +260,19 @@ async def wait_for_disconnect(self) -> None:
             return
 ```
 
-Do not call `send_str()` from this method.
+- [ ] **Step 5: Add watcher and compatibility tests.**
 
-- [ ] **Step 4: Add a disconnect-watcher test.**
+Use HELLO followed by `WSMsgType.CLOSE`. Assert `wait_for_disconnect()` returns and `websocket.sent == []`. Keep the existing `connect()` COMMAND/ACK test unchanged and passing to prove compatibility.
 
-Extend `FakeWebSocket.receive()` data with a close message after HELLO. Prove that `wait_for_disconnect()` returns and `websocket.sent == []`.
-
-```python
-websocket = FakeWebSocket([
-    FakeMessage(WSMsgType.TEXT, encode_frame(_hello())),
-    FakeMessage(WSMsgType.CLOSE, ""),
-])
-await session.connect()
-await session.wait_for_disconnect()
-assert websocket.sent == []
-```
-
-- [ ] **Step 5: Run transport tests and verify GREEN.**
-
-Run:
+- [ ] **Step 6: Run the transport tests and verify GREEN.**
 
 ```bash
 python3 -m pytest tests/unit/test_load_control_websocket_session.py -q
 ```
 
-Expected result: PASS, including the existing command/ACK compatibility test and wrong-boot command rejection test.
+Expected: PASS.
 
-- [ ] **Step 6: Commit the transport change.**
+- [ ] **Step 7: Commit.**
 
 ```bash
 git add src/emonio_viewer/load_control/session_websocket.py tests/unit/test_load_control_websocket_session.py
@@ -248,28 +281,27 @@ git commit -m "feat: expose staged actuator WebSocket connection"
 
 ---
 
-### Task 2: Implement Pure HELLO Qualification Rules
+### Task 3: Add Pure Discovery-to-HELLO Qualification
 
 **Files:**
 - Create: `src/emonio_viewer/load_control/qualification.py`
 - Create: `tests/unit/test_load_control_hello_qualification.py`
 
 **Interfaces:**
-- Consumes: `ActuatorDescriptor`, `ThreePhasePower`, `HelloFrame`.
-- Produces: `QualificationState`, `LoadControlQualificationError`, `QualificationStatus`, and `qualify_hello(descriptor: ActuatorDescriptor, hello: HelloFrame) -> None`.
+- Consumes: structurally valid `ActuatorDescriptor` and `HelloFrame` instances.
+- Produces: `QualificationState`, `LoadControlQualificationError`, `QualificationStatus`, and `qualify_hello(descriptor, hello) -> None`.
 
-- [ ] **Step 1: Write failing tests for all discovery-to-HELLO comparisons.**
+- [ ] **Step 1: Write failing cross-check tests.**
 
-Create helpers that build one valid descriptor and one valid HELLO. Add parameterized tests for node mismatch, empty boot ID, wrong class, missing capability, and A/B/C `p_max` mismatch. Protocol structural invalidity remains covered by `test_load_control_protocol.py`; these tests cover the Stage-2 cross-check only.
+Invalid protocol version, empty boot ID, non-finite `p_max`, missing `p_max`, and non-positive `p_max` belong to Task 1 because the strict `HelloFrame` model can reject them before a `HelloFrame` exists. This task tests valid objects that disagree with discovery evidence.
 
 ```python
 @pytest.mark.parametrize(
     "hello, expected",
     [
         (replace(_hello(), node_id="ARI-LOAD-OTHER"), "node_id"),
-        (replace(_hello(), boot_id=""), "boot_id"),
-        (replace(_hello(), device_class="OTHER"), "device_class"),
-        (replace(_hello(), capabilities=()), "ACTIVE_LOAD_CONTROL"),
+        (replace(_hello(), device_class="OTHER_CLASS"), "device_class"),
+        (replace(_hello(), capabilities=("OTHER_CAPABILITY",)), "ACTIVE_LOAD_CONTROL"),
         (replace(_hello(), p_max=ThreePhasePower(999.0, 1000.0, 1000.0)), "p_max.a"),
         (replace(_hello(), p_max=ThreePhasePower(1000.0, 999.0, 1000.0)), "p_max.b"),
         (replace(_hello(), p_max=ThreePhasePower(1000.0, 1000.0, 999.0)), "p_max.c"),
@@ -280,21 +312,17 @@ def test_hello_qualification_rejects_discovery_mismatch(hello, expected) -> None
         qualify_hello(_descriptor(), hello)
 ```
 
-Add one valid test that returns `None` and changes no input object.
+Add one valid exact-match test.
 
-- [ ] **Step 2: Run the new qualification tests and verify RED.**
-
-Run:
+- [ ] **Step 2: Run and verify RED.**
 
 ```bash
 python3 -m pytest tests/unit/test_load_control_hello_qualification.py -q
 ```
 
-Expected result: FAIL because `qualification.py` does not exist.
+Expected: FAIL because `qualification.py` does not exist.
 
-- [ ] **Step 3: Add the Stage-2 types and exact qualification function.**
-
-Use a separate state model. Do not reuse `SessionState` from the Stage-1 supervisor.
+- [ ] **Step 3: Add the dedicated state and status types.**
 
 ```python
 from dataclasses import dataclass
@@ -311,11 +339,7 @@ class QualificationState(str, Enum):
 
 class LoadControlQualificationError(RuntimeError):
     pass
-```
 
-Use an immutable snapshot so API serialization cannot mutate service state:
-
-```python
 @dataclass(frozen=True)
 class QualificationStatus:
     state: QualificationState
@@ -332,7 +356,7 @@ class QualificationStatus:
     last_error: str | None
 ```
 
-Implement exact cross-checks:
+- [ ] **Step 4: Implement exact cross-checks.**
 
 ```python
 def qualify_hello(descriptor: ActuatorDescriptor, hello: HelloFrame) -> None:
@@ -354,19 +378,17 @@ def qualify_hello(descriptor: ActuatorDescriptor, hello: HelloFrame) -> None:
         raise LoadControlQualificationError("p_max.c mismatch")
 ```
 
-Do not add tolerance logic. Do not copy descriptor values into HELLO.
+Do not add tolerance or repair logic.
 
-- [ ] **Step 4: Run the pure qualification tests and protocol tests.**
-
-Run:
+- [ ] **Step 5: Run the HELLO rule layers together.**
 
 ```bash
-python3 -m pytest tests/unit/test_load_control_hello_qualification.py tests/unit/test_load_control_protocol.py -q
+python3 -m pytest tests/unit/test_load_control_protocol.py tests/unit/test_load_control_hello_qualification.py -q
 ```
 
-Expected result: PASS.
+Expected: PASS.
 
-- [ ] **Step 5: Commit the qualification rule layer.**
+- [ ] **Step 6: Commit.**
 
 ```bash
 git add src/emonio_viewer/load_control/qualification.py tests/unit/test_load_control_hello_qualification.py
@@ -375,7 +397,7 @@ git commit -m "feat: add strict actuator HELLO qualification"
 
 ---
 
-### Task 3: Add the Independent Stage-2 Qualification Service
+### Task 4: Add the Independent Qualification Service
 
 **Files:**
 - Modify: `src/emonio_viewer/load_control/qualification.py`
@@ -384,44 +406,42 @@ git commit -m "feat: add strict actuator HELLO qualification"
 
 **Interfaces:**
 - Consumes: `LanActuatorDiscoveryService.last_result`, `WebSocketActuatorSession`, `qualify_hello()`.
-- Produces: `LoadControlQualificationService.connect(node_id: str) -> QualificationStatus`, `status() -> QualificationStatus`, `disconnect() -> QualificationStatus`, and `close() -> None`.
+- Produces: `LoadControlQualificationService.connect(node_id: str) -> QualificationStatus`, `status() -> QualificationStatus`, `disconnect() -> QualificationStatus`, `close() -> None`.
 
-- [ ] **Step 1: Write the service lifecycle tests before service code.**
+- [ ] **Step 1: Write service lifecycle tests before service code.**
 
-Use a fake discovery service with a mutable `last_result` tuple and a fake session factory. The fake session must record state transitions and sent frames. Cover these cases as separate tests:
+Use a fake discovery service with mutable `last_result` and a fake session factory. Test each case separately:
 
 ```text
-IDLE before operator selection
-no automatic selection from one discovered descriptor
-selected node missing -> conflict error
-duplicate selected node_id -> conflict error
-successful state order DISCOVERED -> CONNECTING -> HELLO_WAIT -> QUALIFIED
-valid HELLO stores node_id + boot_id
-second connect while open -> conflict error
-disconnect -> DISCONNECTED and qualified identity cleared
-reconnect requires receive_hello again
-same node_id with new boot_id -> new qualified boot instance
-remote disconnect watcher -> DISCONNECTED
+initial state IDLE
+one discovered node is not selected automatically
+missing selected node_id raises LoadControlQualificationError
+duplicate selected node_id raises LoadControlQualificationError
+state order is DISCOVERED -> CONNECTING -> HELLO_WAIT -> QUALIFIED
+protocol/transport receive exception becomes REJECTED
+valid HELLO stores node_id and boot_id
+second connect while socket is open raises LoadControlQualificationError
+disconnect clears qualified HELLO identity and produces DISCONNECTED
+reconnect calls receive_hello again
+same node_id with a new boot_id becomes a new qualified boot instance
+remote close invalidates QUALIFIED and produces DISCONNECTED
 successful qualification sends zero frames
 rejected qualification sends zero frames
+explicit disconnect sends zero frames
 close sends zero frames
 ```
 
-For state-order evidence, let the fake session callbacks inspect `service.status().state` when `open()` and `receive_hello()` are entered.
+For parser/transport rejection, configure the fake session `receive_hello()` to raise `ProtocolError("invalid HELLO")` and `asyncio.TimeoutError()` in separate tests.
 
-- [ ] **Step 2: Run the service tests and verify RED.**
-
-Run:
+- [ ] **Step 2: Run and verify RED.**
 
 ```bash
 python3 -m pytest tests/unit/test_load_control_stage2_service.py -q
 ```
 
-Expected result: FAIL because `LoadControlQualificationService` does not exist.
+Expected: FAIL because the service does not exist.
 
-- [ ] **Step 3: Implement the service constructor and descriptor resolver.**
-
-Use explicit defaults and dependency injection:
+- [ ] **Step 3: Implement constructor and exact descriptor resolution.**
 
 ```python
 class LoadControlQualificationService:
@@ -447,7 +467,7 @@ class LoadControlQualificationService:
         self._last_error = None
 ```
 
-Resolve exactly one descriptor:
+Resolve selection only from latest discovery evidence:
 
 ```python
 def _resolve_descriptor(self, node_id: str) -> ActuatorDescriptor:
@@ -464,11 +484,9 @@ def _resolve_descriptor(self, node_id: str) -> ActuatorDescriptor:
     return matches[0]
 ```
 
-Do not accept a location parameter from the caller.
+No URL argument exists on `connect()`.
 
-- [ ] **Step 4: Implement the deterministic connect state sequence.**
-
-The order must be observable and fixed:
+- [ ] **Step 4: Implement deterministic connection qualification.**
 
 ```python
 async def connect(self, node_id: str) -> QualificationStatus:
@@ -507,11 +525,9 @@ async def connect(self, node_id: str) -> QualificationStatus:
         return self.status()
 ```
 
-Transport/protocol/HELLO failures return a `REJECTED` status. Operator precondition conflicts from `_resolve_descriptor()` or an already open session raise `LoadControlQualificationError` before a transport attempt.
+This path does not call `send_command()`.
 
-- [ ] **Step 5: Implement status serialization and qualified identity clearing.**
-
-`status()` must never present rejected HELLO identity as qualified data. Keep selection evidence separate:
+- [ ] **Step 5: Implement status with selection evidence separate from qualified identity.**
 
 ```python
 def status(self) -> QualificationStatus:
@@ -532,9 +548,9 @@ def status(self) -> QualificationStatus:
     )
 ```
 
-- [ ] **Step 6: Implement disconnect and remote-disconnect invalidation.**
+Rejected HELLO content is never returned as qualified identity.
 
-The watcher must not reconnect and must not send a frame:
+- [ ] **Step 6: Implement remote and explicit disconnect handling.**
 
 ```python
 async def _watch_disconnect(self, session) -> None:
@@ -550,45 +566,15 @@ async def _watch_disconnect(self, session) -> None:
             await session.disconnect()
             self._session = None
             self._hello = None
+            self._watch_task = None
             self._state = QualificationState.DISCONNECTED
 ```
 
-Operator disconnect must cancel the watcher before closing the same session so the watcher cannot race the explicit state update:
+For explicit disconnect, cancel the watcher first, close the current session, clear HELLO, and use `DISCONNECTED` if a selection/connection existed. Keep the selected descriptor only as non-qualified selection evidence. `close()` calls the same cleanup path. Do not reconnect.
+
+- [ ] **Step 7: Add architecture boundary tests.**
 
 ```python
-async def disconnect(self) -> QualificationStatus:
-    watch_task = self._watch_task
-    self._watch_task = None
-    if watch_task is not None and watch_task is not asyncio.current_task():
-        watch_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await watch_task
-
-    session = self._session
-    self._session = None
-    self._hello = None
-    self._last_error = None
-    if session is not None:
-        await session.disconnect()
-        self._state = QualificationState.DISCONNECTED
-    elif self._state is not QualificationState.IDLE:
-        self._state = QualificationState.DISCONNECTED
-    return self.status()
-
-async def close(self) -> None:
-    await self.disconnect()
-```
-
-Keep the selected descriptor as selection evidence after disconnect, but keep qualified HELLO identity cleared.
-
-- [ ] **Step 7: Add the architecture contract test.**
-
-Create a source contract that proves `qualification.py` has no control/scientific dependency and no command-send API:
-
-```python
-from pathlib import Path
-
-
 def test_stage2_qualification_has_no_measurement_or_command_authority() -> None:
     source = Path("src/emonio_viewer/load_control/qualification.py").read_text(encoding="utf-8")
     for forbidden in (
@@ -603,26 +589,29 @@ def test_stage2_qualification_has_no_measurement_or_command_authority() -> None:
         "send_command(",
     ):
         assert forbidden not in source
+
+
+def test_stage2_service_exposes_no_control_method() -> None:
+    assert not hasattr(LoadControlQualificationService, "send_command")
+    assert not hasattr(LoadControlQualificationService, "enable")
+    assert not hasattr(LoadControlQualificationService, "configure_binding")
 ```
 
-Also assert the existing `tests/unit/test_load_control_stage1_contract.py` still passes unchanged.
-
-- [ ] **Step 8: Run Stage-2 unit tests and Stage-1 control contracts.**
-
-Run:
+- [ ] **Step 8: Run Stage-2 service and Stage-1 preservation tests.**
 
 ```bash
 python3 -m pytest \
+  tests/unit/test_load_control_protocol.py \
+  tests/unit/test_load_control_websocket_session.py \
   tests/unit/test_load_control_hello_qualification.py \
   tests/unit/test_load_control_stage2_service.py \
   tests/unit/test_load_control_stage2_contract.py \
-  tests/unit/test_load_control_stage1_contract.py \
-  tests/unit/test_load_control_websocket_session.py -q
+  tests/unit/test_load_control_stage1_contract.py -q
 ```
 
-Expected result: PASS.
+Expected: PASS.
 
-- [ ] **Step 9: Commit the Stage-2 service.**
+- [ ] **Step 9: Commit.**
 
 ```bash
 git add src/emonio_viewer/load_control/qualification.py \
@@ -633,7 +622,7 @@ git commit -m "feat: add isolated actuator qualification service"
 
 ---
 
-### Task 4: Add Stage-2 HTTP API and Active Application Wiring
+### Task 5: Add Stage-2 API and Active Application Wiring
 
 **Files:**
 - Modify: `src/emonio_viewer/server/keys.py`
@@ -643,54 +632,34 @@ git commit -m "feat: add isolated actuator qualification service"
 - Modify: `tests/unit/test_load_control_lan_discovery_app_wiring.py`
 
 **Interfaces:**
-- Consumes: `LoadControlQualificationService`, existing `LanActuatorDiscoveryService`, `register_load_control_routes()`.
-- Produces: `LOAD_CONTROL_QUALIFICATION_SERVICE_KEY` and three HTTP routes.
+- Consumes: `LoadControlQualificationService` and existing `LanActuatorDiscoveryService`.
+- Produces: `LOAD_CONTROL_QUALIFICATION_SERVICE_KEY` plus connect/status/disconnect routes.
 
 - [ ] **Step 1: Write failing API tests.**
 
-Create a fake qualification service with `connect`, `status`, and `disconnect`. Add these tests:
+Use a fake qualification service and test:
 
 ```text
-GET /api/v1/load-control/lan-qualification/status -> current snapshot
-POST /api/v1/load-control/lan-qualification/connect with node_id -> service.connect(node_id)
+GET /api/v1/load-control/lan-qualification/status
+POST /api/v1/load-control/lan-qualification/connect with node_id
 POST connect without node_id -> 400
-POST connect with unknown/ambiguous/already-open service conflict -> 409
-POST /api/v1/load-control/lan-qualification/disconnect -> service.disconnect()
-existing /lan-discovery/scan route remains present and unchanged
+POST connect with service precondition conflict -> 409
+POST /api/v1/load-control/lan-qualification/disconnect
+existing /lan-discovery/scan still works
+qualification routes never call Stage-1 configure_binding(), enable(), or disable()
 ```
 
-Use an exact JSON serializer helper for `QualificationStatus` in the server module. Expected qualified JSON:
+Use a fake Stage-1 service whose `configure_binding()`, `enable()`, and `disable()` raise `AssertionError` if a Stage-2 route calls them.
 
-```python
-{
-    "state": "QUALIFIED",
-    "connected": True,
-    "hello_qualified": True,
-    "selected_node_id": "ARI-LOAD-001",
-    "node_id": "ARI-LOAD-001",
-    "boot_id": "BOOT-001",
-    "protocol_version": 1,
-    "device_class": "ARI_LOAD_ACTUATOR",
-    "capabilities": ["ACTIVE_LOAD_CONTROL"],
-    "p_max": {"a": 1000.0, "b": 1000.0, "c": 1000.0},
-    "location": "ws://192.168.1.141:8080/load-control",
-    "last_error": None,
-}
-```
-
-- [ ] **Step 2: Run API tests and verify RED.**
-
-Run:
+- [ ] **Step 2: Run and verify RED.**
 
 ```bash
 python3 -m pytest tests/integration/test_load_control_stage2_api.py -q
 ```
 
-Expected result: FAIL because the key and routes do not exist.
+Expected: FAIL because the key/routes do not exist.
 
 - [ ] **Step 3: Add the typed AppKey.**
-
-In `server/keys.py`, import `LoadControlQualificationService` and add:
 
 ```python
 LOAD_CONTROL_QUALIFICATION_SERVICE_KEY = web.AppKey(
@@ -699,11 +668,9 @@ LOAD_CONTROL_QUALIFICATION_SERVICE_KEY = web.AppKey(
 )
 ```
 
-Do not change existing keys.
+- [ ] **Step 4: Add exact JSON serialization and routes.**
 
-- [ ] **Step 4: Add API lookup, serialization, and routes.**
-
-Register exactly:
+Register:
 
 ```python
 app.router.add_post("/api/v1/load-control/lan-qualification/connect", connect_lan_actuator)
@@ -711,9 +678,7 @@ app.router.add_get("/api/v1/load-control/lan-qualification/status", get_lan_qual
 app.router.add_post("/api/v1/load-control/lan-qualification/disconnect", disconnect_lan_actuator)
 ```
 
-Add `_qualification_service(request)` parallel to `_lan_discovery_service(request)`.
-
-Serialize `QualificationStatus` explicitly. Do not return `dataclasses.asdict()` because enum and nested model representation must remain an API decision:
+Serialize explicitly:
 
 ```python
 def _qualification_json(status: QualificationStatus) -> dict:
@@ -734,7 +699,7 @@ def _qualification_json(status: QualificationStatus) -> dict:
     }
 ```
 
-Connect handler:
+Connect handler accepts only `node_id`:
 
 ```python
 async def connect_lan_actuator(request: web.Request) -> web.Response:
@@ -747,17 +712,17 @@ async def connect_lan_actuator(request: web.Request) -> web.Response:
     return web.json_response(_qualification_json(status))
 ```
 
-Status and disconnect handlers call only the qualification service. They must not call `_service(request).configure_binding()`, `enable()`, or any command function.
+Do not call binding, enable, or command code.
 
-- [ ] **Step 5: Wire the qualification service into `app_v0416.py`.**
+- [ ] **Step 5: Wire the service through `app_v0416.py`.**
 
-Extend `create_app()` with an injectable optional parameter:
+Add optional injection:
 
 ```python
 qualification_service: LoadControlQualificationService | None = None,
 ```
 
-After `lan_discovery_service` is constructed, create the qualification service from that same instance:
+After the LAN discovery service exists:
 
 ```python
 if qualification_service is None:
@@ -774,15 +739,13 @@ async def stop_load_control_qualification(_app: web.Application) -> None:
 app.on_cleanup.append(stop_load_control_qualification)
 ```
 
-Do not add a qualification startup action. It must remain idle until an operator POSTs connect.
+Do not add a qualification startup action. Do not change `main.py` or `main_v0416.py`.
 
-- [ ] **Step 6: Extend the active-app wiring contract.**
+- [ ] **Step 6: Update app wiring contract.**
 
-Update `test_load_control_lan_discovery_app_wiring.py` to assert the active app contains both the LAN discovery service and the new qualification service key, and that `main.py` / `main_v0416.py` remain unchanged by this task.
+Assert the active app contains the existing LAN discovery key and the new qualification key. Preserve the existing Stage-1 service key and routes.
 
 - [ ] **Step 7: Run API and existing load-control integration tests.**
-
-Run:
 
 ```bash
 python3 -m pytest \
@@ -792,9 +755,9 @@ python3 -m pytest \
   tests/unit/test_load_control_lan_discovery_app_wiring.py -q
 ```
 
-Expected result: PASS.
+Expected: PASS.
 
-- [ ] **Step 8: Commit API and application wiring.**
+- [ ] **Step 8: Commit.**
 
 ```bash
 git add src/emonio_viewer/server/keys.py \
@@ -807,7 +770,7 @@ git commit -m "feat: expose actuator HELLO qualification API"
 
 ---
 
-### Task 5: Add Explicit Stage-2 Operator UI Without Touching Mock Binding
+### Task 6: Add Explicit Stage-2 UI Without Reusing Mock Binding
 
 **Files:**
 - Modify: `frontend/js/load-control-api.js`
@@ -816,14 +779,12 @@ git commit -m "feat: expose actuator HELLO qualification API"
 - Modify: `tests/browser/test_load_control_contract.py`
 
 **Interfaces:**
-- Consumes: the three Stage-2 HTTP endpoints and the existing LAN scan result cards.
-- Produces: explicit per-node qualification action, qualification status evidence, and disconnect action.
+- Consumes: Stage-2 connect/status/disconnect endpoints and existing LAN result cards.
+- Produces: explicit per-node `SELECT / QUALIFY`, read-only qualification evidence, and `DISCONNECT`.
 
-- [ ] **Step 1: Change the browser contract first.**
+- [ ] **Step 1: Update browser contract first and verify RED.**
 
-Replace the Stage-1-only wording assertions with exact Stage-2 expectations while preserving the existing mock-control assertions.
-
-Require these strings and IDs:
+Require:
 
 ```python
 assert "STAGE 2 · REAL WEBSOCKET HELLO QUALIFICATION · CONTROL DISABLED" in ui
@@ -844,12 +805,12 @@ assert "/api/v1/load-control/lan-qualification/connect" in api
 assert "/api/v1/load-control/lan-qualification/status" in api
 assert "/api/v1/load-control/lan-qualification/disconnect" in api
 assert "/api/v1/load-control/command" not in api
-assert "sendCommand" not in api
+assert 'id="lc-command-a"' not in ui
+assert 'id="lc-command-b"' not in ui
+assert 'id="lc-command-c"' not in ui
 ```
 
-Keep assertions for the existing mock binding, enable, disable, LAN scan, and no manual command inputs.
-
-- [ ] **Step 2: Run the browser contract and verify RED.**
+Keep existing assertions that the mock binding, existing enable/disable paths, and LAN scan still exist.
 
 Run:
 
@@ -857,11 +818,9 @@ Run:
 python3 -m pytest tests/browser/test_load_control_contract.py -q
 ```
 
-Expected result: FAIL on Stage-2 strings and API paths.
+Expected: FAIL before frontend implementation.
 
-- [ ] **Step 3: Add three frontend API helpers.**
-
-In `load-control-api.js` add:
+- [ ] **Step 2: Add frontend API helpers.**
 
 ```javascript
 export function connectLanQualification(nodeId) {
@@ -883,45 +842,23 @@ export function disconnectLanQualification() {
 }
 ```
 
-Do not add a generic arbitrary WebSocket URL helper.
+No arbitrary WebSocket URL helper is permitted.
 
-- [ ] **Step 4: Add a separate qualification section to the UI.**
+- [ ] **Step 3: Change Stage-2 wording and add a separate qualification section.**
 
-Change the header to:
+Header:
 
 ```text
 STAGE 2 · REAL WEBSOCKET HELLO QUALIFICATION · CONTROL DISABLED
 ```
 
-Change the stage note so it states that LAN discovery and HELLO qualification are real, but COMMAND transport remains unavailable for the real actuator and external control remains disabled.
+The note states that LAN discovery and HELLO qualification are real, while real COMMAND transport remains unavailable and external control remains disabled.
 
-Add a separate section after LAN discovery with these evidence fields:
+Add fields for state, node, boot, protocol, device class, capability, advertised test limit, locator, error, and a `DISCONNECT` button. Use IDs from Step 1.
 
-```html
-<section class="load-control-section" aria-label="LAN actuator qualification">
-  <div class="load-control-section-header"><h3>LAN actuator qualification</h3><span>control disabled</span></div>
-  <div class="load-control-value-grid">
-    <div><span>State</span><strong id="lc-qualification-state">IDLE</strong></div>
-    <div><span>Node</span><strong id="lc-qualification-node">—</strong></div>
-    <div><span>Boot</span><strong id="lc-qualification-boot">—</strong></div>
-    <div><span>Protocol</span><strong id="lc-qualification-protocol">—</strong></div>
-    <div><span>Device class</span><strong id="lc-qualification-class">—</strong></div>
-    <div><span>Capability</span><strong id="lc-qualification-capability">—</strong></div>
-    <div><span>Advertised test limit</span><strong id="lc-qualification-limits">—</strong></div>
-    <div><span>Locator</span><strong id="lc-qualification-location">—</strong></div>
-  </div>
-  <div id="lc-qualification-error" class="load-control-status-text" aria-live="polite"></div>
-  <div class="load-control-actions">
-    <button id="lc-qualification-disconnect" type="button">DISCONNECT</button>
-  </div>
-</section>
-```
+- [ ] **Step 4: Add explicit per-card qualification action.**
 
-Do not reuse `lc-actuator`, `lc-save-binding`, or `saveBinding()` for the real LAN selection.
-
-- [ ] **Step 5: Add explicit `SELECT / QUALIFY` to each LAN result card.**
-
-In `renderLanResults()`, change only the wording and action content:
+In `renderLanResults()`:
 
 ```javascript
 limits.textContent = `Advertised test limit: ${powerTriplet(item.p_max)}`;
@@ -934,13 +871,11 @@ qualify.addEventListener("click", () => runLanQualification(item.node_id));
 card.append(identity, location, details, limits, qualify);
 ```
 
-No item is selected or qualified during `renderLanResults()` itself.
+Rendering a LAN result must not connect it.
 
-- [ ] **Step 6: Add deterministic qualification rendering and actions.**
+- [ ] **Step 5: Add qualification render and actions.**
 
-Extend frontend state with `qualification: null`.
-
-Implement rendering with qualified identity fields only when the API provides them:
+Extend state with `qualification: null`.
 
 ```javascript
 function renderLanQualification(status) {
@@ -959,14 +894,9 @@ function renderLanQualification(status) {
   error.textContent = status?.last_error || "";
   error.dataset.error = status?.last_error ? "true" : "false";
 }
-```
 
-Implement explicit actions:
-
-```javascript
 async function runLanQualification(nodeId) {
-  const status = await connectLanQualification(nodeId);
-  renderLanQualification(status);
+  renderLanQualification(await connectLanQualification(nodeId));
 }
 
 async function refreshLanQualification() {
@@ -978,30 +908,26 @@ async function runLanQualificationDisconnect() {
 }
 ```
 
-Call `refreshLanQualification()` when the panel opens as part of `refreshAll()`. Do not call `connectLanQualification()` from refresh, scan, rendering, or startup.
+Call only `refreshLanQualification()` from panel refresh. Do not call `connectLanQualification()` from startup, refresh, LAN scan, or result rendering.
 
-- [ ] **Step 7: Keep external control disabled for the real qualification path.**
+- [ ] **Step 6: Keep mock controls separate.**
 
-Do not change the existing mock `ENABLE EXTERNAL CONTROL` implementation in this task. The Stage-2 qualification action must not call `enableLoadControl()`, `setLoadControlBinding()`, or any command API.
+The Stage-2 action does not call `setLoadControlBinding()`, `enableLoadControl()`, `disableLoadControl()`, or a command function. Do not populate `lc-actuator` from Stage-2 selection.
 
-The qualification section must explicitly display `control disabled` in its header.
+- [ ] **Step 7: Add structured CSS only in `load-control.css`.**
 
-- [ ] **Step 8: Add structured CSS only in the existing load-control CSS file.**
+Add small `.load-control-*` selectors for qualification evidence and result-card action spacing. Do not add inline styles and do not modify global CSS files.
 
-Add small selectors for qualification state and LAN result buttons under the existing `.load-control-*` namespace. Do not add inline styles and do not modify global CSS files.
-
-- [ ] **Step 9: Run browser contracts.**
-
-Run:
+- [ ] **Step 8: Run frontend contracts.**
 
 ```bash
 python3 -m pytest tests/browser/test_load_control_contract.py -q
 python3 -m pytest tests/browser -q
 ```
 
-Expected result: PASS.
+Expected: PASS.
 
-- [ ] **Step 10: Commit the Stage-2 UI.**
+- [ ] **Step 9: Commit.**
 
 ```bash
 git add frontend/js/load-control-api.js \
@@ -1013,85 +939,18 @@ git commit -m "feat: add explicit actuator HELLO qualification UI"
 
 ---
 
-### Task 6: Prove No Automatic Binding, Enable, or COMMAND Path Exists
+### Task 7: Run Protected-File and Complete Regression Gates
 
 **Files:**
-- Modify: `tests/unit/test_load_control_stage2_contract.py`
-- Modify: `tests/integration/test_load_control_stage2_api.py`
-- Modify: `tests/browser/test_load_control_contract.py`
-
-**Interfaces:**
-- Consumes: completed Stage-2 service, API, and UI.
-- Produces: regression evidence that the Stage-2 path cannot silently acquire control authority.
-
-- [ ] **Step 1: Add service-level no-control assertions.**
-
-Inspect the qualification service source and public object surface:
-
-```python
-def test_stage2_service_exposes_no_command_method() -> None:
-    assert not hasattr(LoadControlQualificationService, "send_command")
-    assert not hasattr(LoadControlQualificationService, "enable")
-    assert not hasattr(LoadControlQualificationService, "configure_binding")
-```
-
-Keep the source-token contract from Task 3.
-
-- [ ] **Step 2: Add API-level separation assertions.**
-
-In the Stage-2 API tests, use a fake Stage-1 load-control service whose `configure_binding()`, `enable()`, and `disable()` methods raise `AssertionError` if called. Execute qualification connect/status/disconnect. The test passes only if none of those Stage-1 methods is called.
-
-- [ ] **Step 3: Add browser-level no-automatic-action assertions.**
-
-Keep these exact source contracts:
-
-```python
-assert "connectLanQualification(item.node_id)" not in ui
-assert "runLanQualification(item.node_id)" in ui
-assert "setLoadControlBinding" in ui
-assert "enableLoadControl" in ui
-assert "/api/v1/load-control/command" not in api
-```
-
-The first assertion prevents direct connection during rendering; the second permits only the explicit click-handler path.
-
-- [ ] **Step 4: Run the control-authority boundary tests.**
-
-Run:
-
-```bash
-python3 -m pytest \
-  tests/unit/test_load_control_stage2_contract.py \
-  tests/integration/test_load_control_stage2_api.py \
-  tests/browser/test_load_control_contract.py -q
-```
-
-Expected result: PASS.
-
-- [ ] **Step 5: Commit the boundary evidence.**
-
-```bash
-git add tests/unit/test_load_control_stage2_contract.py \
-  tests/integration/test_load_control_stage2_api.py \
-  tests/browser/test_load_control_contract.py
-git commit -m "test: prove Stage 2 has no control authority"
-```
-
----
-
-### Task 7: Run Protected-File and Full Regression Gates
-
-**Files:**
-- No production file changes are expected in this task.
-- Verification only.
+- No production changes.
 
 **Interfaces:**
 - Consumes: all Stage-2 implementation commits.
-- Produces: deterministic source-diff and full repository acceptance evidence for a Stage-2 software candidate.
+- Produces: deterministic software-candidate evidence only.
 
-- [ ] **Step 1: Verify the protected scientific production directories are unchanged from the audited v0.4.19 code baseline.**
+- [ ] **Step 1: Prove protected scientific directories are unchanged from the audited v0.4.19 code baseline.**
 
-The audited production baseline before the design-document commits is:
+Baseline:
 
 ```text
 4e66d549b813ac3a1bdcacf413d6c41721b2bf1e
@@ -1108,19 +967,17 @@ git diff --name-only 4e66d549b813ac3a1bdcacf413d6c41721b2bf1e...HEAD -- \
   src/emonio_viewer/scope
 ```
 
-Expected output: no paths.
+Expected output: empty. If any path appears, stop and require explicit review.
 
-If any path is printed, stop. Do not accept the Stage-2 candidate until the unexpected protected-file change is explained and explicitly reviewed.
+- [ ] **Step 2: Prove the production change boundary.**
 
-- [ ] **Step 2: Verify the production change boundary.**
-
-Run:
+Implementation-plan baseline commit is the commit that contains the approved spec before implementation-plan execution. Run:
 
 ```bash
 git diff --name-only 975671816984697f0dc09b81de26c3a79bc87e62...HEAD -- src frontend
 ```
 
-Expected production paths are only:
+Expected production paths only:
 
 ```text
 frontend/css/load-control/load-control.css
@@ -1133,14 +990,13 @@ src/emonio_viewer/server/keys.py
 src/emonio_viewer/server/load_control_api.py
 ```
 
-Any additional production path requires explicit review before field testing.
+Any additional production path requires explicit review.
 
-- [ ] **Step 3: Run the focused Stage-2 suite.**
-
-Run:
+- [ ] **Step 3: Run the focused Stage-2 matrix.**
 
 ```bash
 python3 -m pytest \
+  tests/unit/test_load_control_protocol.py \
   tests/unit/test_load_control_websocket_session.py \
   tests/unit/test_load_control_hello_qualification.py \
   tests/unit/test_load_control_stage2_service.py \
@@ -1151,17 +1007,15 @@ python3 -m pytest \
   tests/browser/test_load_control_contract.py -q
 ```
 
-Expected result: PASS.
+Expected: PASS.
 
-- [ ] **Step 4: Run the complete existing repository acceptance script.**
-
-Run:
+- [ ] **Step 4: Run the existing complete repository acceptance script.**
 
 ```bash
 bash tools/ari-emonio-acceptance.sh
 ```
 
-The script must complete all six existing gates:
+It must complete:
 
 ```text
 [1/6] Unit tests
@@ -1178,45 +1032,32 @@ Expected final line:
 ARI Emonio Viewer Acceptance: PASS
 ```
 
-Do not invent pass counts. Record the counts actually printed by the workstation run.
+Record only counts printed by the actual run. Do not invent counts.
 
-- [ ] **Step 5: Verify no uncommitted production changes remain.**
-
-Run:
+- [ ] **Step 5: Check repository cleanliness.**
 
 ```bash
 git status -sb
 git diff --check
-```
-
-Expected: clean working tree for the committed implementation and no whitespace errors.
-
-- [ ] **Step 6: Record the candidate commit but do not claim field PASS.**
-
-Run:
-
-```bash
 git rev-parse HEAD
 ```
 
-Record that SHA as the Stage-2 software candidate only after all automated gates pass.
-
-Do not merge to `main`. Do not claim real ESP32 WebSocket field PASS yet.
+Record the HEAD SHA as the Stage-2 software candidate only after all automated gates pass. Do not merge to `main` and do not claim field PASS.
 
 ---
 
-### Task 8: Execute the Real ESP32 Stage-2 Field Acceptance
+### Task 8: Real ESP32 Stage-2 Field Acceptance
 
 **Files:**
-- No source changes during the acceptance run.
+- No source changes during acceptance.
 
 **Interfaces:**
 - Consumes: Stage-2 software candidate on `testing`, ESP32 ARI Load Test Actuator v0.1.1, existing WLAN/mDNS environment.
-- Produces: operator field evidence for real WebSocket connection and HELLO qualification only.
+- Produces: field evidence for real WebSocket connection and HELLO qualification only.
 
-- [ ] **Step 1: Start the existing ESP32 actuator and confirm its existing discovery evidence.**
+- [ ] **Step 1: Confirm existing actuator discovery preconditions.**
 
-Required precondition evidence remains:
+Required evidence:
 
 ```text
 WiFi joined
@@ -1226,28 +1067,28 @@ WebSocket server listening on port 8080
 path /load-control
 ```
 
-Do not treat the DHCP address as identity.
+DHCP address remains a locator, not identity.
 
-- [ ] **Step 2: Start the Stage-2 Viewer candidate and run `SCAN LAN`.**
+- [ ] **Step 2: Run `SCAN LAN`.**
 
-Confirm the Viewer lists `ARI-LOAD-001` and displays:
+Confirm `ARI-LOAD-001` appears with:
 
 ```text
 Advertised test limit: A 1000.0 W · B 1000.0 W · C 1000.0 W
 ```
 
-Confirm no LAN item is already selected or connected before operator action.
+Confirm no actuator is selected or connected automatically.
 
 - [ ] **Step 3: Press `SELECT / QUALIFY` for `ARI-LOAD-001`.**
 
-Expected ESP32 serial evidence:
+Expected ESP32 evidence:
 
 ```text
 [WS] Viewer connected
 [WS] HELLO sent
 ```
 
-Expected Viewer evidence after qualification:
+Expected Viewer evidence:
 
 ```text
 State: QUALIFIED
@@ -1259,25 +1100,23 @@ Capability: ACTIVE_LOAD_CONTROL
 Advertised test limit: 1000 / 1000 / 1000 W
 ```
 
-The external control path must still show `DISABLED`.
+External control remains `DISABLED`.
 
-- [ ] **Step 4: Confirm Stage 2 sent no COMMAND.**
+- [ ] **Step 4: Confirm no COMMAND was received.**
 
-Inspect ESP32 serial output for the full qualification interval. There must be no actuator evidence of a received COMMAND.
+Inspect ESP32 serial output over the complete qualification interval. There must be no evidence of a received COMMAND. Do not infer this from Viewer UI alone.
 
-Do not infer this from the Viewer UI alone.
+- [ ] **Step 5: Confirm disconnect invalidates qualification.**
 
-- [ ] **Step 5: Test disconnect invalidation.**
+Use Viewer `DISCONNECT` or reboot the ESP32. Confirm Viewer state leaves `QUALIFIED` and becomes `DISCONNECTED`. The old boot ID must no longer appear as qualified identity.
 
-Disconnect the Stage-2 WebSocket using the Viewer action or reboot the ESP32. Confirm the Viewer leaves `QUALIFIED` and reports `DISCONNECTED`. Confirm the old boot ID is no longer presented as qualified identity.
+- [ ] **Step 6: Confirm reboot requires a new HELLO.**
 
-- [ ] **Step 6: Test new boot qualification.**
+After ESP32 reboot, run discovery if needed and explicitly qualify `ARI-LOAD-001` again. Confirm a new `boot_id` and confirm `QUALIFIED` appears only after the new HELLO is received.
 
-After ESP32 reboot, run LAN discovery if needed and explicitly qualify `ARI-LOAD-001` again. Confirm the new `boot_id` differs from the old one and that the Viewer reaches `QUALIFIED` only after the new HELLO is received.
+- [ ] **Step 7: Stop at Stage 2.**
 
-- [ ] **Step 7: Stop at the Stage-2 gate.**
-
-If all field checks pass, record Stage-2 field acceptance evidence. Do not add COMMAND, ACK, binding, sequence handling, automatic reconnect, or physical output in this implementation plan.
+If all field checks pass, record Stage-2 field acceptance. Do not add COMMAND, ACK, binding, sequence logic, automatic reconnect, or physical output.
 
 Stage 3 requires a separate architecture review for:
 
