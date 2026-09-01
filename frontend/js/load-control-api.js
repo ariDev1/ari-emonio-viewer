@@ -58,6 +58,28 @@ export function getLanDiagnosticLog(afterSequence = 0, limit = 200) {
   );
 }
 
+export function getSafeTestSources() {
+  return requestJson("/api/v1/load-control/safe-test/sources");
+}
+
+export function getSafeTestStatus() {
+  return requestJson("/api/v1/load-control/safe-test/status");
+}
+
+export function selectSafeTestSource(emonioDeviceId) {
+  return requestJson("/api/v1/load-control/safe-test/source", {
+    method: "POST",
+    body: JSON.stringify({ emonio_device_id: emonioDeviceId }),
+  });
+}
+
+export function runSafeCommandTest() {
+  return requestJson("/api/v1/load-control/safe-test/run", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
 export function getRecentLoadControlEvidence(limit = 20) {
   return requestJson(`/api/v1/load-control/evidence/recent?limit=${encodeURIComponent(limit)}`);
 }
