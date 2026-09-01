@@ -64,7 +64,7 @@ class WebSocketActuatorSession:
             raise ProtocolError("actuator WebSocket frame must be text")
         return message.data
 
-    async def connect(self) -> HelloFrame:
+    async def open(self) -> None:
         if self.connected:
             raise RuntimeError("actuator WebSocket is already connected")
         self._client = self._client_session_factory()
@@ -73,6 +73,16 @@ class WebSocketActuatorSession:
                 self._client.ws_connect(self.descriptor.location),
                 self._connect_timeout_s,
             )
+        except Exception:
+            await self.disconnect()
+            raise
+
+    async def receive_hello(self) -> HelloFrame:
+        if not self.connected:
+            raise ConnectionError("actuator WebSocket is not connected")
+        if self._hello is not None:
+            raise RuntimeError("actuator HELLO was already received")
+        try:
             frame = decode_frame(await self._receive_text())
             if not isinstance(frame, HelloFrame):
                 raise ProtocolError("first actuator frame must be HELLO")
@@ -81,6 +91,18 @@ class WebSocketActuatorSession:
         except Exception:
             await self.disconnect()
             raise
+
+    async def connect(self) -> HelloFrame:
+        await self.open()
+        return await self.receive_hello()
+
+    async def wait_for_disconnect(self) -> None:
+        if not self.connected:
+            raise ConnectionError("actuator WebSocket is not connected")
+        while self.connected:
+            message = await self._websocket.receive()
+            if message.type in {WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR}:
+                return
 
     async def send_command(self, command: CommandFrame) -> None:
         if not isinstance(command, CommandFrame):
