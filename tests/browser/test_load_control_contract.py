@@ -6,7 +6,7 @@ def test_load_control_ui_prioritizes_real_stage2_connection_and_copyable_diagnos
     api = Path("frontend/js/load-control-api.js").read_text(encoding="utf-8")
 
     assert "STAGE 3A · SAFE COMMAND QUALIFICATION" in ui
-    assert "REAL CONTROL DISABLED" in ui
+    assert "NONZERO REAL CONTROL DISABLED" in ui
     assert "Actuator connection" in ui
     assert "Qualification" in ui
     assert "SAFE command qualification" in ui
@@ -45,7 +45,7 @@ def test_load_control_ui_prioritizes_real_stage2_connection_and_copyable_diagnos
     assert 'id="lc-safe-select-source"' in ui
     assert "SELECT SOURCE" in ui
     assert 'id="lc-safe-run"' in ui
-    assert "RUN SAFE 0 W TEST" in ui
+    assert "SEND SAFE TEST COMMAND" in ui
     assert 'id="lc-safe-state"' in ui
     assert 'id="lc-safe-source-state"' in ui
     assert 'id="lc-safe-cycle"' in ui
@@ -77,10 +77,11 @@ def test_load_control_ui_prioritizes_real_stage2_connection_and_copyable_diagnos
     assert "/api/v1/load-control/lan-qualification/status" in api
     assert "/api/v1/load-control/lan-qualification/disconnect" in api
     assert "/api/v1/load-control/lan-diagnostics/log" in api
-    assert "/api/v1/load-control/safe-test/sources" in api
-    assert "/api/v1/load-control/safe-test/status" in api
-    assert "/api/v1/load-control/safe-test/source" in api
-    assert "/api/v1/load-control/safe-test/run" in api
+    assert "/api/v1/load-control/lan-safe-test/sources" in api
+    assert "/api/v1/load-control/lan-safe-test/status" in api
+    assert "/api/v1/load-control/lan-safe-test/source" in api
+    assert "/api/v1/load-control/lan-safe-test/send" in api
+    assert "/api/v1/load-control/safe-test/" not in api
     assert "/api/v1/load-control/lan-diagnostics/clear" not in api
     assert "/api/v1/load-control/command" not in api
     assert 'id="lc-command-a"' not in ui
@@ -127,10 +128,11 @@ def test_active_v0416_app_injects_load_control_assets_and_routes() -> None:
     assert '"/api/v1/load-control/lan-qualification/status"' in api
     assert '"/api/v1/load-control/lan-qualification/disconnect"' in api
     assert '"/api/v1/load-control/lan-diagnostics/log"' in api
-    assert '"/api/v1/load-control/safe-test/sources"' in api
-    assert '"/api/v1/load-control/safe-test/status"' in api
-    assert '"/api/v1/load-control/safe-test/source"' in api
-    assert '"/api/v1/load-control/safe-test/run"' in api
+    assert '"/api/v1/load-control/lan-safe-test/sources"' in api
+    assert '"/api/v1/load-control/lan-safe-test/status"' in api
+    assert '"/api/v1/load-control/lan-safe-test/source"' in api
+    assert '"/api/v1/load-control/lan-safe-test/send"' in api
+    assert '"/api/v1/load-control/safe-test/' not in api
     assert '"/api/v1/load-control/binding"' in api
     assert '"/api/v1/load-control/config"' in api
     assert '"/api/v1/load-control/timing"' in api
