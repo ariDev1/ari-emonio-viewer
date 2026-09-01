@@ -39,7 +39,6 @@ def test_lifecycle_frontend_keeps_structured_css_file_set() -> None:
         "modbus-evidence.css",
         "density.css",
         "recording-monitor.css",
-        "load-control.css",
     }
 
 
@@ -58,3 +57,12 @@ def test_lifecycle_state_mapping_and_disconnected_selector_are_explicit() -> Non
         "· DISCONNECTED",
     ):
         assert token in app
+
+
+def test_measurement_renderer_accepts_additive_acquisition_state_without_changing_values() -> None:
+    source = Path("frontend/js/measurements.js").read_text(encoding="utf-8")
+
+    assert 'document.getElementById("acquisition-state")' in source
+    assert "payload.acquisition_state" in source
+    assert "device.acquisition_state" in source
+    assert "const MEASUREMENT_DECIMALS = 4" in source

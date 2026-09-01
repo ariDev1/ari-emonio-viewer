@@ -85,7 +85,7 @@ def create_app(
         )
         source = source.replace('"/static/', f'"{static_prefix}')
         monitor_css = f'<link rel="stylesheet" href="{static_prefix}css/recording-monitor.css">'
-        load_control_css = f'<link rel="stylesheet" href="{static_prefix}css/load-control.css">'
+        load_control_css = f'<link rel="stylesheet" href="{static_prefix}css/load-control/load-control.css">'
         monitor_script = f'<script type="module" src="{static_prefix}js/recording-monitor-ui.js"></script>'
         load_control_script = f'<script type="module" src="{static_prefix}js/load-control-ui.js"></script>'
         source = source.replace(
