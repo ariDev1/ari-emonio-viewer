@@ -4,7 +4,7 @@
 
 **Goal:** Add one operator-initiated real Protocol V1 SAFE command and strict ACK qualification while keeping every nonzero real-control path disabled.
 
-**Architecture:** Keep Stage 2 as the owner of the qualified real WebSocket. Refactor only the post-HELLO receive path so one task owns `websocket.receive()`, then expose narrow send/receive methods from the qualification service. Add a separate Stage-3A service that observes canonical runtime samples, constructs one fixed zero-output command, validates one ACK, and never calls the Stage-1 mock supervisor.
+**Architecture:** Keep Stage 2 as the owner of the qualified real WebSocket. Refactor only the post-HELLO receive path so one task owns `websocket.receive()`, then expose narrow qualified send/receive methods from the Stage-2 service. Add a separate Stage-3A service that observes canonical runtime samples, constructs one fixed zero-output command, validates one ACK, and never calls the Stage-1 mock supervisor.
 
 **Tech Stack:** Python 3.12, `asyncio`, `aiohttp`, existing `RuntimeEventBus`, Protocol V1 dataclasses, vanilla JavaScript, structured CSS, `pytest`.
 
@@ -27,6 +27,7 @@
 - A passing SAFE ACK must report `result="APPLIED"` and `applied_p=0/0/0 W` exactly.
 - Use the existing bounded `LoadControlDiagnosticLog`; do not persist Stage-3A state or source selection.
 - Preserve the existing `DEVELOPMENT / MOCK CONTROL` path and keep it isolated from the real path.
+- Protocol V1 schema remains unchanged. A small protocol-decoder change may preserve the specific `unsupported protocol_version` error text; it must not accept Protocol V2.
 
 ---
 
@@ -36,14 +37,16 @@
 
 - `src/emonio_viewer/load_control/stage3a.py` — owns volatile source selection, canonical-sample boundary, one SAFE exchange, sequence allocation, ACK validation, and Stage-3A state.
 - `tests/unit/test_load_control_stage3a_service.py` — deterministic service tests for source/sample/command/ACK/concurrency behavior.
-- `tests/integration/test_load_control_stage3a_api.py` — API boundary tests proving the browser cannot submit command authority fields.
+- `tests/integration/test_load_control_stage3a_api.py` — API boundary tests proving the browser cannot submit command-authority fields.
 
 ### Modified files
 
 - `src/emonio_viewer/load_control/session_websocket.py` — one post-HELLO receive owner and inbound protocol queue.
 - `src/emonio_viewer/load_control/qualification.py` — starts the receive owner and exposes narrow qualified transport methods; no control calculation.
+- `src/emonio_viewer/load_control/protocol.py` — preserve unsupported-protocol error classification without changing the Protocol V1 schema.
 - `tests/unit/test_load_control_websocket_session.py` — single-reader, STATUS, ACK, malformed-frame, disconnect, and heartbeat-preservation tests.
 - `tests/unit/test_load_control_stage2_service.py` — prove Stage-2 HELLO and remote-disconnect behavior remains intact after the receive refactor.
+- `tests/unit/test_load_control_protocol.py` — prove unsupported ACK protocol version remains identifiable as such.
 - `src/emonio_viewer/server/keys.py` — typed AppKey for the Stage-3A service.
 - `src/emonio_viewer/server/app_v0416.py` — construct/start/close the Stage-3A service without changing the active launcher.
 - `src/emonio_viewer/server/load_control_api.py` — Stage-3A status/source/SAFE-test endpoints.
@@ -62,15 +65,15 @@
 - Modify: `tests/unit/test_load_control_websocket_session.py`
 
 **Interfaces:**
-- Consumes: existing `HelloFrame`, `AckFrame`, `StatusFrame`, `decode_frame()`, heartbeat-enabled `aiohttp` WebSocket.
-- Produces: `start_receive_loop() -> None`, `receive_frame(timeout_s: float) -> AckFrame | StatusFrame`, and `wait_for_disconnect() -> None` where no caller except the receive loop calls `websocket.receive()` after HELLO.
+- Consumes: existing `HelloFrame`, `AckFrame`, `StatusFrame`, `decode_frame()`, and heartbeat-enabled `aiohttp` WebSocket.
+- Produces: `start_receive_loop() -> None`, `receive_frame(timeout_s: float) -> AckFrame | StatusFrame`, and `wait_for_disconnect() -> None`. No caller except the receive loop may call `websocket.receive()` after HELLO.
 
 - [ ] **Step 1: Write failing single-owner tests**
 
-Add tests that prove the post-HELLO receiver consumes ACK/STATUS frames, `wait_for_disconnect()` does not call `receive()` itself, and malformed or non-application post-HELLO frames fail closed.
+Update `FakeWebSocket.receive()` to increment `receive_calls`. Add a test that HELLO is read once, the receive owner reads ACK and CLOSE, and `wait_for_disconnect()` only waits on state:
 
 ```python
-async def scenario():
+async def scenario() -> None:
     websocket = FakeWebSocket([
         FakeMessage(WSMsgType.TEXT, encode_frame(_hello())),
         FakeMessage(WSMsgType.TEXT, encode_frame(_ack())),
@@ -84,11 +87,9 @@ async def scenario():
     assert websocket.receive_calls == 3
 ```
 
-Also add a STATUS case and a malformed JSON case. Update `FakeWebSocket.receive()` to increment `receive_calls`.
+Add a STATUS case. Add malformed JSON, binary application data, post-HELLO HELLO, and post-HELLO COMMAND cases. Each must fail closed without sending an application frame.
 
 - [ ] **Step 2: Run the focused tests and confirm RED**
-
-Run:
 
 ```bash
 pytest -q tests/unit/test_load_control_websocket_session.py
@@ -98,35 +99,25 @@ Expected: FAIL because `start_receive_loop()` and `receive_frame()` do not exist
 
 - [ ] **Step 3: Implement the minimal receive owner**
 
-Use one background task after HELLO. Keep transport-only responsibility inside `WebSocketActuatorSession`.
+Add transport-only state:
 
 ```python
 PostHelloFrame = AckFrame | StatusFrame
-
-self._inbound: asyncio.Queue[PostHelloFrame | Exception] = asyncio.Queue()
-self._disconnect_event = asyncio.Event()
-self._receiver_task: asyncio.Task[None] | None = None
-
-
-def start_receive_loop(self) -> None:
-    if self._hello is None or not self.connected:
-        raise ConnectionError("actuator HELLO is not qualified for receive loop")
-    if self._receiver_task is not None:
-        raise RuntimeError("actuator receive loop is already running")
-    self._receiver_task = asyncio.create_task(self._receive_loop())
 ```
 
-The `_receive_loop()` must be the only post-HELLO caller of `self._websocket.receive()`. For TEXT frames, decode the frame and accept only `AckFrame` or `StatusFrame`. Put accepted frames into `_inbound`. For CLOSE/CLOSED/ERROR, set the disconnect event. For malformed JSON, binary application data, HELLO, or COMMAND after HELLO, put the `ProtocolError` into `_inbound`, set the disconnect event, and terminate the loop.
+In `__init__`, create an inbound `asyncio.Queue`, an `asyncio.Event` for disconnect, and a receiver-task reference.
 
-Implement `receive_frame(timeout_s)` with the existing positive-seconds validation and `asyncio.wait_for(self._inbound.get(), timeout_s)`. If the queue item is an exception, raise it unchanged.
+`start_receive_loop()` must require a connected WebSocket and an already received HELLO. It must reject a second receiver start.
 
-Change `wait_for_disconnect()` to wait only on `_disconnect_event`.
+The private receive loop must be the only post-HELLO caller of `self._websocket.receive()`. For TEXT frames, call `decode_frame()`. Accept only `AckFrame` or `StatusFrame` into the inbound queue. For CLOSE/CLOSED/ERROR, set the disconnect event and end the loop. For malformed JSON, binary application data, HELLO, or COMMAND after HELLO, put a `ProtocolError` into the inbound queue, set the disconnect event, and end the loop.
 
-Change `disconnect()` to cancel/await the receiver task before closing the WebSocket and client, then clear queue/event/session state. Do not send any application frame during cleanup.
+`receive_frame(timeout_s)` must validate positive finite seconds and use `asyncio.wait_for(self._inbound.get(), timeout_s)`. If the queue item is an exception, raise it unchanged.
+
+`wait_for_disconnect()` must wait only on the disconnect event.
+
+`disconnect()` must cancel and await the receiver task before closing the WebSocket and client. It must clear receiver/inbound/disconnect state. It must send no application frame.
 
 - [ ] **Step 4: Run focused tests and confirm GREEN**
-
-Run:
 
 ```bash
 pytest -q tests/unit/test_load_control_websocket_session.py
@@ -150,15 +141,12 @@ git commit -m "refactor: give actuator websocket one receive owner"
 - Modify: `tests/unit/test_load_control_stage2_service.py`
 
 **Interfaces:**
-- Consumes: Task 1 `WebSocketActuatorSession.start_receive_loop()` and `receive_frame(timeout_s)`.
-- Produces:
-  - `qualified_hello() -> HelloFrame | None`
-  - `async send_qualified_command(command: CommandFrame) -> None`
-  - `async receive_qualified_frame(timeout_s: float) -> AckFrame | StatusFrame`
+- Consumes: Task 1 `start_receive_loop()` and `receive_frame(timeout_s)`.
+- Produces: `qualified_hello() -> HelloFrame | None`, `send_qualified_command(command: CommandFrame) -> None`, and `receive_qualified_frame(timeout_s: float) -> AckFrame | StatusFrame` as async transport methods where applicable.
 
 - [ ] **Step 1: Write failing Stage-2 preservation and boundary tests**
 
-Extend `FakeSession` with `start_receive_loop()`, `send_command()`, and `receive_frame()` counters. Require Stage 2 to start the receiver only after `HELLO_QUALIFIED` and to send nothing during qualification.
+Extend `FakeSession` with `start_receive_loop()`, `send_command()`, and `receive_frame()` counters. Require Stage 2 to start the receiver only after HELLO qualification and to send nothing during Stage-2 qualification:
 
 ```python
 status = await service.connect("ARI-LOAD-001")
@@ -168,7 +156,7 @@ assert factory.created[0].sent == []
 assert service.qualified_hello() == _hello()
 ```
 
-Add tests that `send_qualified_command()` and `receive_qualified_frame()` reject when the service is not `QUALIFIED`, and that remote disconnect still clears `hello_qualified` and produces `WS_DISCONNECTED reason="remote"`.
+Add tests that qualified send/receive methods reject when the service is not `QUALIFIED`. Preserve the current remote-disconnect assertion: qualification is cleared and diagnostic log includes `WS_DISCONNECTED reason="remote"`.
 
 - [ ] **Step 2: Run the focused tests and confirm RED**
 
@@ -180,26 +168,18 @@ Expected: FAIL because the narrow transport methods and receiver start are not i
 
 - [ ] **Step 3: Implement the Stage-2 boundary**
 
-After `qualify_hello(descriptor, hello)` succeeds and `_hello` is assigned, call `session.start_receive_loop()` before creating `_watch_disconnect(session)`.
+After `qualify_hello(descriptor, hello)` succeeds, assign `_hello`, set `QUALIFIED`, start the session receive loop, and create the disconnect watcher. Preserve existing diagnostic ordering through `CONTROL_AUTHORITY_DISABLED`.
 
-Expose only the qualified identity and transport operations:
+Add:
 
 ```python
 def qualified_hello(self) -> HelloFrame | None:
     return self._hello if self._state is QualificationState.QUALIFIED else None
-
-async def send_qualified_command(self, command: CommandFrame) -> None:
-    if self._state is not QualificationState.QUALIFIED or self._session is None:
-        raise LoadControlQualificationError("actuator is not HELLO-qualified")
-    await self._session.send_command(command)
-
-async def receive_qualified_frame(self, timeout_s: float) -> AckFrame | StatusFrame:
-    if self._state is not QualificationState.QUALIFIED or self._session is None:
-        raise LoadControlQualificationError("actuator is not HELLO-qualified")
-    return await self._session.receive_frame(timeout_s)
 ```
 
-Do not expose the raw WebSocket object or raw session object.
+Add `async send_qualified_command(command)` and `async receive_qualified_frame(timeout_s)`. Both must require `QUALIFIED` and a live session, otherwise raise `LoadControlQualificationError("actuator is not HELLO-qualified")`.
+
+Do not expose the raw WebSocket or raw session object.
 
 - [ ] **Step 4: Run Stage-2 and WebSocket tests**
 
@@ -207,7 +187,7 @@ Do not expose the raw WebSocket object or raw session object.
 pytest -q tests/unit/test_load_control_stage2_service.py tests/unit/test_load_control_websocket_session.py
 ```
 
-Expected: PASS. Stage-2 qualification must still send zero application frames.
+Expected: PASS. Stage-2 qualification must still send zero application COMMAND frames.
 
 - [ ] **Step 5: Commit**
 
@@ -225,45 +205,16 @@ git commit -m "refactor: expose qualified actuator transport boundary"
 - Create: `tests/unit/test_load_control_stage3a_service.py`
 
 **Interfaces:**
-- Consumes: `RuntimeEventBus`, `RuntimeConfig.devices`, `LoadControlQualificationService`, `MeasurementSample`, `DiagnosticEvent`, `LoadControlDiagnosticLog`.
+- Consumes: `RuntimeEventBus`, `RuntimeConfig.devices`, `LoadControlQualificationService`, `MeasurementSample`, `DiagnosticEvent`, and `LoadControlDiagnosticLog`.
 - Produces:
-
-```python
-class Stage3AState(str, Enum):
-    IDLE = "IDLE"
-    SOURCE_SELECTED = "SOURCE_SELECTED"
-    READY = "READY"
-    WAITING_FOR_SAMPLE = "WAITING_FOR_SAMPLE"
-    COMMAND_SENT = "COMMAND_SENT"
-    WAITING_FOR_ACK = "WAITING_FOR_ACK"
-    PASSED = "PASSED"
-    REJECTED = "REJECTED"
-
-@dataclass(frozen=True, slots=True)
-class Stage3AStatus:
-    state: Stage3AState
-    selected_source_id: str | None
-    sample_cycle_id: int | None
-    command_sequence: int | None
-    ack_result: str | None
-    rejection_reason: str | None
-    admissible: bool
-
-class Stage3AError(RuntimeError):
-    pass
-
-class Stage3ASafeCommandService:
-    async def start(self) -> None: ...
-    async def close(self) -> None: ...
-    def sources(self) -> tuple[DeviceConfig, ...]: ...
-    def status(self) -> Stage3AStatus: ...
-    async def select_source(self, device_id: str) -> Stage3AStatus: ...
-    async def run_safe_test(self) -> Stage3AStatus: ...
-```
+  - `Stage3AState` with `IDLE`, `SOURCE_SELECTED`, `READY`, `WAITING_FOR_SAMPLE`, `COMMAND_SENT`, `WAITING_FOR_ACK`, `PASSED`, `REJECTED`.
+  - immutable `Stage3AStatus` fields: `state`, `selected_source_id`, `sample_cycle_id`, `command_sequence`, `ack_result`, `rejection_reason`, `admissible`.
+  - `Stage3AError(RuntimeError)`.
+  - `Stage3ASafeCommandService` methods: `async start()`, `async close()`, `sources()`, `status()`, `async select_source(device_id)`, and `async run_safe_test()`.
 
 - [ ] **Step 1: Write failing source and sample-boundary tests**
 
-Use `real_sample` from `tests/conftest.py` and `dataclasses.replace()` to advance cycle IDs. Test:
+Use `real_sample` from `tests/conftest.py` and `dataclasses.replace()` to advance cycle IDs:
 
 ```python
 await service.start()
@@ -274,7 +225,17 @@ await asyncio.sleep(0)
 bus.publish(replace(real_sample, identity=replace(real_sample.identity, cycle_id=41)))
 ```
 
-Require cycle 41, never 40, to become provenance. Add tests for no source, unknown source, invalid `poll_interval_s`, invalid sample ignored, acquisition diagnostic rejection, source change while active rejected, and timeout equal to `2 * poll_interval_s`.
+Require cycle 41, never 40, to become provenance.
+
+Add tests for:
+- no source selected;
+- unknown or disabled source;
+- selected source with no observed sample boundary;
+- non-finite or non-positive `poll_interval_s` rejected;
+- invalid sample ignored;
+- selected-source acquisition diagnostic rejects active sample wait;
+- source change while a SAFE exchange is active rejected;
+- sample timeout exactly `2 * poll_interval_s`.
 
 - [ ] **Step 2: Run the new service tests and confirm RED**
 
@@ -284,23 +245,39 @@ pytest -q tests/unit/test_load_control_stage3a_service.py
 
 Expected: FAIL because `stage3a.py` does not exist.
 
-- [ ] **Step 3: Implement source tracking and request arming only**
+- [ ] **Step 3: Implement source tracking, readiness, and request arming**
 
-At `start()`, subscribe to the existing bus. Keep the most recent observed cycle per configured source. Never publish measurement events.
+At `start()`, subscribe to the existing RuntimeEventBus. Maintain `last_cycle_by_source` only from real `MeasurementSample` events. Do not synthesize or publish measurement events.
 
-At `select_source()`, accept only an enabled device in `RuntimeConfig.devices`; store only the device ID in memory. Do not write any file.
+At `select_source()`, accept only an enabled `DeviceConfig` in current `RuntimeConfig.devices`; store only its device ID in memory. Do not write configuration files.
 
-At `run_safe_test()`, require a selected source, a previously observed cycle boundary for that source, and a currently qualified HELLO. Capture the HELLO `node_id` and `boot_id`, set `WAITING_FOR_SAMPLE`, and wait for the first later VALID sample from that source. Use:
+Define idle state deterministically:
+- no source selected -> `IDLE`;
+- source selected, but no observed source cycle or no current qualified HELLO -> `SOURCE_SELECTED`;
+- source selected, at least one observed source cycle, and current qualified HELLO -> `READY`.
+
+Define `admissible=true` only when:
+- one source is selected;
+- that source exists and has at least one observed cycle boundary;
+- Stage 2 currently has a qualified HELLO;
+- no SAFE exchange is active;
+- no ACK is outstanding.
+
+`PASSED` or `REJECTED` may report `admissible=true` only if a new explicit button action could immediately start a new exchange under the same gate. The new action must still record a new cycle boundary and allocate the next sequence.
+
+At `run_safe_test()`, reject with `SOURCE_NOT_AVAILABLE` if no sample from the selected source has yet been observed. Capture the currently observed cycle as the request boundary, capture qualified HELLO node/boot, set `WAITING_FOR_SAMPLE`, and wait for the first later VALID sample from the selected source.
+
+Use exactly:
 
 ```python
 sample_wait_timeout_s = 2.0 * source_config.poll_interval_s
 ```
 
-If no later VALID sample arrives, set terminal `REJECTED` with `NO_NEW_VALID_SAMPLE` and return without calling `send_qualified_command()`.
+If no qualifying sample arrives, set `REJECTED` with `NO_NEW_VALID_SAMPLE` and send no command.
 
 - [ ] **Step 4: Add failing exact SAFE command tests**
 
-Require the built `CommandFrame` to copy canonical sample evidence without transformation:
+Require the built `CommandFrame` to contain:
 
 ```python
 assert command.control_enabled is False
@@ -319,15 +296,17 @@ assert command.measured_q == ThreePhasePower(
 )
 ```
 
-Require `measurement_cycle_id` and `measurement_utc` from the accepted sample, and node/boot from the captured qualified HELLO.
+Require `measurement_cycle_id` and `measurement_utc` from the accepted sample, `emonio_device_id` from explicit source selection, and node/boot from the captured qualified HELLO.
 
 - [ ] **Step 5: Implement command construction and monotonic sequence allocation**
 
-Allocate the sequence before the send attempt and increment the next sequence immediately so a failed send never reuses the number. Start at 1 for each new Viewer process.
+Create one volatile `viewer_session_id` for the Stage-3A service process. Sequence starts at 1.
 
-Before sending, re-read `qualification_service.qualified_hello()`. If it is absent or its node/boot differs from the captured identity, reject with `ACTUATOR_NOT_QUALIFIED` or `ACTUATOR_DISCONNECTED` and send nothing.
+Allocate the sequence before the send attempt and increment `next_sequence` immediately so a failed send attempt cannot reuse that sequence.
 
-Append deterministic diagnostic events through the shared diagnostic log:
+Before sending, re-read `qualification_service.qualified_hello()`. If absent, reject without transmission. If node or boot differs from the identity captured when the test was armed, reject without transmission.
+
+Append deterministic shared diagnostic events:
 
 ```text
 SAFE_SOURCE_SELECTED
@@ -337,15 +316,15 @@ SAFE_SAMPLE_ACCEPTED
 SAFE_COMMAND_SENT
 ```
 
-Include exact source ID, sample cycle, node, boot, sequence, measured P/Q, and fixed request values as specified.
+Include exact source ID, sample cycle, measurement UTC, measured P/Q, viewer session ID, node, boot, sequence, and fixed zero request where applicable.
 
 - [ ] **Step 6: Run source/command tests and confirm GREEN**
 
 ```bash
-pytest -q tests/unit/test_load_control_stage3a_service.py
+pytest -q tests/unit/test_load_control_stage3a_service.py -k 'source or sample or command or sequence or admissible'
 ```
 
-Expected: source, sample-boundary, timeout, provenance, zero-command, and sequence tests PASS. ACK tests may still be RED until Task 4.
+Expected: PASS for source, sample-boundary, readiness, timeout, provenance, zero-command, and sequence tests.
 
 - [ ] **Step 7: Commit**
 
@@ -356,22 +335,72 @@ git commit -m "feat: add Stage 3A safe command service"
 
 ---
 
-### Task 4: Add strict ACK qualification and terminal failure behavior
+### Task 4: Preserve protocol-version evidence and add strict ACK qualification
 
 **Files:**
+- Modify: `src/emonio_viewer/load_control/protocol.py`
 - Modify: `src/emonio_viewer/load_control/stage3a.py`
+- Modify: `tests/unit/test_load_control_protocol.py`
 - Modify: `tests/unit/test_load_control_stage3a_service.py`
 
 **Interfaces:**
 - Consumes: Task 2 `receive_qualified_frame(timeout_s)` and Task 3 outstanding `CommandFrame`.
-- Produces: strict ACK acceptance with deterministic rejection categories and no retry.
+- Produces: deterministic Protocol V1 rejection classification plus strict SAFE ACK acceptance with no retry.
 
-- [ ] **Step 1: Write the failing ACK matrix**
+- [ ] **Step 1: Write a failing decoder test for unsupported ACK protocol version**
 
-Create one passing ACK and mutate one field at a time. Require these exact rejection categories:
+Build raw ACK JSON directly because `AckFrame(protocol_version=2)` correctly rejects construction:
+
+```python
+raw = {
+    "message_type": "ACK",
+    "protocol_version": 2,
+    "viewer_session_id": "VIEWER-001",
+    "node_id": "ARI-LOAD-001",
+    "boot_id": "BOOT-001",
+    "sequence": 1,
+    "ack_utc": "2026-09-01T12:00:00+00:00",
+    "applied_p": {"a": 0.0, "b": 0.0, "c": 0.0},
+    "result": "APPLIED",
+}
+with pytest.raises(ProtocolError, match="unsupported protocol_version"):
+    decode_frame(json.dumps(raw))
+```
+
+- [ ] **Step 2: Run the decoder test and confirm RED**
+
+```bash
+pytest -q tests/unit/test_load_control_protocol.py -k unsupported
+```
+
+Expected: FAIL because current `decode_frame()` collapses the constructor `ValueError` into generic `protocol frame is invalid`.
+
+- [ ] **Step 3: Preserve only the unsupported-version error classification**
+
+Keep Protocol V1 acceptance unchanged. In the existing `decode_frame()` exception boundary, preserve only this known error text:
+
+```python
+except (TypeError, ValueError, KeyError) as exc:
+    if str(exc) == "unsupported protocol_version":
+        raise ProtocolError("unsupported protocol_version") from exc
+    raise ProtocolError("protocol frame is invalid") from exc
+```
+
+Do not accept Protocol V2. Do not change any frame fields or validation rule.
+
+- [ ] **Step 4: Run protocol tests and confirm GREEN**
+
+```bash
+pytest -q tests/unit/test_load_control_protocol.py
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Write the failing Stage-3A ACK matrix**
+
+Create one valid ACK and mutate one accepted-frame field at a time. Require these rejection categories:
 
 ```text
-ACK_PROTOCOL_MISMATCH
 ACK_SESSION_MISMATCH
 ACK_NODE_MISMATCH
 ACK_BOOT_MISMATCH
@@ -380,62 +409,69 @@ ACK_RESULT_MISMATCH
 ACK_APPLIED_P_MISMATCH
 ```
 
-Also test `ACK_TIMEOUT`, `ACTUATOR_DISCONNECTED`, `UNEXPECTED_ACTUATOR_FRAME`, nonzero applied P, STATUS-before-ACK, late ACK after timeout, and no automatic retry.
+For unsupported protocol version, feed raw protocol text through the WebSocket/session decode path and require Stage 3A to map `ProtocolError("unsupported protocol_version")` to `ACK_PROTOCOL_MISMATCH`.
 
-- [ ] **Step 2: Run the ACK tests and confirm RED**
+Also test:
+- `ACK_TIMEOUT`;
+- `ACTUATOR_DISCONNECTED`;
+- `UNEXPECTED_ACTUATOR_FRAME` for malformed or semantically unexpected post-HELLO frames;
+- nonzero `applied_p` rejected;
+- STATUS before ACK does not satisfy the waiter;
+- STATUS does not extend the original 2.0 s deadline;
+- late ACK after timeout cannot change terminal `REJECTED`;
+- no automatic retry.
 
-```bash
-pytest -q tests/unit/test_load_control_stage3a_service.py -k 'ack or status or disconnect or retry'
-```
-
-Expected: FAIL until ACK validation is implemented.
-
-- [ ] **Step 3: Implement the 2.0 s ACK deadline and exact validator**
+- [ ] **Step 6: Implement the 2.0 s ACK deadline and exact validator**
 
 After `send_qualified_command()` returns successfully, append `SAFE_COMMAND_SENT`, set `WAITING_FOR_ACK`, and start a monotonic 2.0 s deadline.
 
-Loop on `receive_qualified_frame(remaining_s)`. If a `StatusFrame` arrives, log it and continue without extending the original deadline. If an `AckFrame` arrives, append `SAFE_ACK_RECEIVED` and validate exact fields.
-
-Use a deterministic validator in this order:
+Loop on `receive_qualified_frame(remaining_s)`. If `StatusFrame` arrives, log it and continue without extending the original deadline. If `AckFrame` arrives, append `SAFE_ACK_RECEIVED` and validate in this order:
 
 ```python
-if ack.protocol_version != 1: return "ACK_PROTOCOL_MISMATCH"
-if ack.viewer_session_id != command.viewer_session_id: return "ACK_SESSION_MISMATCH"
-if ack.node_id != command.node_id: return "ACK_NODE_MISMATCH"
-if ack.boot_id != command.boot_id: return "ACK_BOOT_MISMATCH"
-if ack.sequence != command.sequence: return "ACK_SEQUENCE_MISMATCH"
-if ack.result != "APPLIED": return "ACK_RESULT_MISMATCH"
-if ack.applied_p != ThreePhasePower(0.0, 0.0, 0.0): return "ACK_APPLIED_P_MISMATCH"
+if ack.viewer_session_id != command.viewer_session_id:
+    return "ACK_SESSION_MISMATCH"
+if ack.node_id != command.node_id:
+    return "ACK_NODE_MISMATCH"
+if ack.boot_id != command.boot_id:
+    return "ACK_BOOT_MISMATCH"
+if ack.sequence != command.sequence:
+    return "ACK_SEQUENCE_MISMATCH"
+if ack.result != "APPLIED":
+    return "ACK_RESULT_MISMATCH"
+if ack.applied_p != ThreePhasePower(0.0, 0.0, 0.0):
+    return "ACK_APPLIED_P_MISMATCH"
 return None
 ```
 
-On exact match, append `SAFE_ACK_QUALIFIED` then `SAFE_TEST_PASSED` and set `PASSED`.
+`AckFrame` already proves Protocol V1 at construction. Map only `ProtocolError("unsupported protocol_version")` to `ACK_PROTOCOL_MISMATCH`; map other post-HELLO protocol parse errors to `UNEXPECTED_ACTUATOR_FRAME`.
 
-On any mismatch, timeout, send failure, disconnect, or protocol error, append one `SAFE_TEST_REJECTED reason="..."` and set `REJECTED`. Never call `send_qualified_command()` again for the same operator request.
+On exact match, append `SAFE_ACK_QUALIFIED`, then `SAFE_TEST_PASSED`, and set `PASSED`.
 
-A later explicit `run_safe_test()` may start a new exchange only after normal admissibility checks. It must record a new cycle boundary and use the next unused sequence.
+On mismatch, timeout, send failure, disconnect, or protocol error, append exactly one `SAFE_TEST_REJECTED reason="..."` and set `REJECTED`. Never send another command for that operator request.
 
-- [ ] **Step 4: Run all Stage-3A service tests**
+A later explicit `run_safe_test()` may create a new exchange only after the normal admissibility gate. It must capture a new cycle boundary and use the next unused sequence.
 
-```bash
-pytest -q tests/unit/test_load_control_stage3a_service.py
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Re-run Stage-2 and WebSocket regression tests**
+- [ ] **Step 7: Run ACK and regression tests**
 
 ```bash
-pytest -q tests/unit/test_load_control_websocket_session.py tests/unit/test_load_control_stage2_service.py tests/unit/test_load_control_stage3a_service.py
+pytest -q \
+  tests/unit/test_load_control_protocol.py \
+  tests/unit/test_load_control_websocket_session.py \
+  tests/unit/test_load_control_stage2_service.py \
+  tests/unit/test_load_control_stage3a_service.py
 ```
 
 Expected: PASS with no automatic reconnect and no Stage-2 application COMMAND.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/emonio_viewer/load_control/stage3a.py tests/unit/test_load_control_stage3a_service.py
-git commit -m "feat: qualify Stage 3A safe command acknowledgements"
+git add \
+  src/emonio_viewer/load_control/protocol.py \
+  src/emonio_viewer/load_control/stage3a.py \
+  tests/unit/test_load_control_protocol.py \
+  tests/unit/test_load_control_stage3a_service.py
+git commit -m "feat: qualify Stage 3A safe acknowledgements"
 ```
 
 ---
@@ -449,16 +485,32 @@ git commit -m "feat: qualify Stage 3A safe command acknowledgements"
 - Create: `tests/integration/test_load_control_stage3a_api.py`
 
 **Interfaces:**
-- Consumes: `Stage3ASafeCommandService` from Task 3/4.
+- Consumes: `Stage3ASafeCommandService`.
 - Produces:
   - `GET /api/v1/load-control/stage3a/status`
   - `GET /api/v1/load-control/stage3a/sources`
-  - `POST /api/v1/load-control/stage3a/source` with only `{"emonio_device_id":"..."}`
+  - `POST /api/v1/load-control/stage3a/source` with exactly `{"emonio_device_id":"..."}`
   - `POST /api/v1/load-control/stage3a/safe-test` with exactly `{}`
+
+The source-list response schema is intentionally narrow:
+
+```json
+[
+  {
+    "device_id": "emonio-example",
+    "name": "emonio-example",
+    "poll_interval_s": 2.0
+  }
+]
+```
+
+Do not expose host, port, unit ID, credentials, or Modbus details in this Stage-3A source list.
 
 - [ ] **Step 1: Write failing API tests**
 
-Test that sources are read-only, source selection is explicit, and the SAFE-test endpoint rejects any non-empty body.
+Test source-list schema, explicit source selection, Stage-3A status fields, and zero-authority SAFE-test body.
+
+Require the SAFE-test endpoint to reject each non-empty command field, for example:
 
 ```python
 response = await client.post(
@@ -468,7 +520,9 @@ response = await client.post(
 assert response.status == 400
 ```
 
-Repeat with `control_enabled`, `sequence`, `node_id`, `boot_id`, `measured_p`, `measured_q`, `measurement_cycle_id`, and `measurement_utc` fields. The only accepted SAFE-test body is `{}`.
+Repeat with `control_enabled`, `q_comp_request`, `sequence`, `node_id`, `boot_id`, `viewer_session_id`, `measured_p`, `measured_q`, `measurement_cycle_id`, and `measurement_utc`. The only accepted SAFE-test body is `{}`.
+
+For source selection, require exactly one key `emonio_device_id`; reject extra fields.
 
 - [ ] **Step 2: Run the new API tests and confirm RED**
 
@@ -480,24 +534,17 @@ Expected: FAIL because the routes and app key do not exist.
 
 - [ ] **Step 3: Add the typed service key and app lifecycle**
 
-In `server/keys.py` add:
+In `server/keys.py`, import `Stage3ASafeCommandService` and add `STAGE3A_SAFE_COMMAND_SERVICE_KEY` as a typed `web.AppKey`.
 
-```python
-from emonio_viewer.load_control.stage3a import Stage3ASafeCommandService
+In `app_v0416.create_app()`, add an optional `stage3a_service` parameter for tests. If absent, construct it with the current `bus`, `config`, existing `qualification_service`, and `qualification_service.diagnostic_log`.
 
-STAGE3A_SAFE_COMMAND_SERVICE_KEY = web.AppKey(
-    "stage3a_safe_command_service",
-    Stage3ASafeCommandService,
-)
-```
-
-In `app_v0416.create_app()`, add an optional `stage3a_service` parameter for tests. If absent, construct it with `bus`, `config`, the existing `qualification_service`, and `qualification_service.diagnostic_log`.
-
-Start it on app startup and close it on cleanup before closing the qualification service. Do not change `emonio_viewer.main_v0416:main`.
+Start Stage 3A on app startup. Close Stage 3A on cleanup before closing the qualification service. Do not change `emonio_viewer.main_v0416:main`.
 
 - [ ] **Step 4: Add the four API handlers**
 
-Add a `_stage3a_service(request)` accessor and JSON serializer. The SAFE-test handler must enforce an empty object before calling the service:
+Add `_stage3a_service(request)` and a deterministic status serializer.
+
+The SAFE-test handler must enforce an empty JSON object before calling the service:
 
 ```python
 body = await _body(request)
@@ -506,12 +553,17 @@ if body:
 status = await _stage3a_service(request).run_safe_test()
 ```
 
+The source-selection handler must reject any body whose exact key set is not `{"emonio_device_id"}`.
+
 Map `Stage3AError` to HTTP 409. Keep all protocol identity and command fields backend-owned.
 
 - [ ] **Step 5: Run API and app regression tests**
 
 ```bash
-pytest -q tests/integration/test_load_control_stage3a_api.py tests/integration/test_load_control_stage2_api.py tests/integration/test_load_control_api.py
+pytest -q \
+  tests/integration/test_load_control_stage3a_api.py \
+  tests/integration/test_load_control_stage2_api.py \
+  tests/integration/test_load_control_api.py
 ```
 
 Expected: PASS.
@@ -519,7 +571,11 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/emonio_viewer/server/keys.py src/emonio_viewer/server/app_v0416.py src/emonio_viewer/server/load_control_api.py tests/integration/test_load_control_stage3a_api.py
+git add \
+  src/emonio_viewer/server/keys.py \
+  src/emonio_viewer/server/app_v0416.py \
+  src/emonio_viewer/server/load_control_api.py \
+  tests/integration/test_load_control_stage3a_api.py
 git commit -m "feat: expose Stage 3A safe qualification API"
 ```
 
@@ -548,7 +604,7 @@ NONZERO REAL CONTROL DISABLED
 SEND SAFE TEST COMMAND
 ```
 
-Require that the JavaScript SAFE-test request function sends exactly `{}` and contains no UI input for active-power request, Q request, sequence, node override, boot override, measured P/Q, cycle ID, or measurement timestamp.
+Require the JavaScript SAFE-test request to send exactly `{}`. Require no real-control UI input for active-power request, Q request, sequence, node override, boot override, measured P/Q, cycle ID, or measurement timestamp.
 
 - [ ] **Step 2: Run the frontend contract test and confirm RED**
 
@@ -560,50 +616,25 @@ Expected: FAIL because Stage-3A UI/API functions do not exist.
 
 - [ ] **Step 3: Add small API wrappers**
 
-In `load-control-api.js` add:
-
-```javascript
-export function getStage3AStatus() {
-  return requestJson("/api/v1/load-control/stage3a/status");
-}
-
-export function getStage3ASources() {
-  return requestJson("/api/v1/load-control/stage3a/sources");
-}
-
-export function selectStage3ASource(emonioDeviceId) {
-  return requestJson("/api/v1/load-control/stage3a/source", {
-    method: "POST",
-    body: JSON.stringify({ emonio_device_id: emonioDeviceId }),
-  });
-}
-
-export function runStage3ASafeTest() {
-  return requestJson("/api/v1/load-control/stage3a/safe-test", {
-    method: "POST",
-    body: "{}",
-  });
-}
-```
+Add functions for Stage-3A status, source list, explicit source selection, and SAFE test. `runStage3ASafeTest()` must POST body `"{}"` only.
 
 - [ ] **Step 4: Add the SAFE command qualification section**
 
 Keep the existing LAN/HELLO sections. Change the primary panel eyebrow to `STAGE 3A · SAFE PROTOCOL QUALIFICATION` and the header safety badge to `NONZERO REAL CONTROL DISABLED`.
 
 Add one section after HELLO qualification and before the diagnostic log. It contains:
-
 - Emonio source selector with placeholder `Choose Emonio source`;
 - Stage-3A state;
 - selected source;
 - accepted sample cycle;
-- last/outstanding sequence;
+- last or outstanding sequence;
 - ACK result or rejection reason;
 - fixed request text `0 / 0 / 0 W`;
 - `SEND SAFE TEST COMMAND` button.
 
-Do not auto-select the first source. Disable the button unless backend status reports `admissible=true` and no exchange is active. One click calls `runStage3ASafeTest()` once, disables the button until the response returns, then refreshes Stage-3A status and the diagnostic log.
+Do not auto-select the first source. Disable the button unless backend status reports `admissible=true` and no request is currently pending in the browser. One click calls the SAFE-test API once, disables the button until the response returns, then refreshes Stage-3A status and the diagnostic log.
 
-Do not add any numeric power input.
+Do not add any numeric real-control input.
 
 - [ ] **Step 5: Add structured CSS only in the existing load-control stylesheet**
 
@@ -620,17 +651,21 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add frontend/js/load-control-api.js frontend/js/load-control-ui.js frontend/css/load-control/load-control.css tests/browser/test_load_control_contract.py
+git add \
+  frontend/js/load-control-api.js \
+  frontend/js/load-control-ui.js \
+  frontend/css/load-control/load-control.css \
+  tests/browser/test_load_control_contract.py
 git commit -m "feat: add Stage 3A safe qualification UI"
 ```
 
 ---
 
-### Task 7: Add cross-boundary regression tests for one-command-only behavior
+### Task 7: Lock the one-command safety boundary across service, API, and UI
 
 **Files:**
-- Modify: `tests/integration/test_load_control_stage3a_api.py`
 - Modify: `tests/unit/test_load_control_stage3a_service.py`
+- Modify: `tests/integration/test_load_control_stage3a_api.py`
 - Modify: `tests/browser/test_load_control_contract.py`
 
 **Interfaces:**
@@ -639,17 +674,17 @@ git commit -m "feat: add Stage 3A safe qualification UI"
 
 - [ ] **Step 1: Add one-command-only tests**
 
-Cover all of these cases with a fake qualification transport that records sent frames:
+Use a fake qualification transport that records attempted/sent commands. Cover:
 
 ```text
 valid sample + valid ACK -> exactly 1 COMMAND
 valid sample + ACK timeout -> exactly 1 COMMAND
 valid sample + bad ACK -> exactly 1 COMMAND
-send failure -> exactly 1 attempted sequence, 0 retry
+send failure -> one sequence consumed, no retry
 source timeout -> 0 COMMAND
 source acquisition failure -> 0 COMMAND
 actuator disconnect before send -> 0 COMMAND
-second concurrent browser request -> HTTP 409 and no second COMMAND
+second concurrent API request -> HTTP 409 and no second COMMAND
 ```
 
 - [ ] **Step 2: Add diagnostic-log ordering assertions**
@@ -666,12 +701,17 @@ SAFE_ACK_QUALIFIED
 SAFE_TEST_PASSED
 ```
 
-For failure, require one terminal `SAFE_TEST_REJECTED` and no later `SAFE_TEST_PASSED` for that sequence.
+For any failed exchange, require exactly one terminal `SAFE_TEST_REJECTED` for that exchange and no later `SAFE_TEST_PASSED` for the same sequence.
 
-- [ ] **Step 3: Run the Stage-3A focused suite**
+- [ ] **Step 3: Add terminal-to-new-explicit-test assertions**
+
+After PASS or REJECTED, a new explicit SAFE-test request may start only if `admissible=true`. It must capture the then-current source cycle as a new boundary, wait for a later VALID sample, and use the next unused sequence.
+
+- [ ] **Step 4: Run the Stage-3A focused suite**
 
 ```bash
 pytest -q \
+  tests/unit/test_load_control_protocol.py \
   tests/unit/test_load_control_websocket_session.py \
   tests/unit/test_load_control_stage2_service.py \
   tests/unit/test_load_control_stage3a_service.py \
@@ -681,10 +721,13 @@ pytest -q \
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add tests/unit/test_load_control_stage3a_service.py tests/integration/test_load_control_stage3a_api.py tests/browser/test_load_control_contract.py
+git add \
+  tests/unit/test_load_control_stage3a_service.py \
+  tests/integration/test_load_control_stage3a_api.py \
+  tests/browser/test_load_control_contract.py
 git commit -m "test: lock Stage 3A one-command safety boundary"
 ```
 
@@ -707,8 +750,6 @@ git commit -m "test: lock Stage 3A one-command safety boundary"
 
 Require project/package identity `0.4.22`, README label `v0.4.22 Testing`, and candidate archive `ARI_Emonio_Viewer_v0.4.22_Candidate.zip`.
 
-Run:
-
 ```bash
 pytest -q tests/unit/test_release_identity.py tests/unit/test_release_builder.py
 ```
@@ -717,17 +758,7 @@ Expected: FAIL against current v0.4.21 metadata.
 
 - [ ] **Step 2: Update version metadata**
 
-Set:
-
-```toml
-version = "0.4.22"
-```
-
-and:
-
-```python
-__version__ = "0.4.22"
-```
+Set project version and package `__version__` to `0.4.22`.
 
 Update README so `testing` is identified as `v0.4.22 Testing`. State that v0.4.21 remains the field-qualified Stage-2 baseline until v0.4.22 field acceptance succeeds. Do not claim Stage 3A field qualification.
 
@@ -742,7 +773,12 @@ Expected: PASS.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tests/unit/test_release_identity.py tests/unit/test_release_builder.py pyproject.toml src/emonio_viewer/__init__.py README.md
+git add \
+  tests/unit/test_release_identity.py \
+  tests/unit/test_release_builder.py \
+  pyproject.toml \
+  src/emonio_viewer/__init__.py \
+  README.md
 git commit -m "release: identify v0.4.22 Stage 3A testing candidate"
 ```
 
@@ -751,7 +787,7 @@ git commit -m "release: identify v0.4.22 Stage 3A testing candidate"
 ### Task 9: Run full acceptance and protected-path gates before field use
 
 **Files:**
-- No production file changes unless a test exposes a defect.
+- No production file changes unless a failing test provides evidence for a necessary correction.
 
 **Interfaces:**
 - Consumes: exact v0.4.22 candidate commit.
@@ -787,14 +823,14 @@ grep -q 'emonio_viewer.main_v0416:main' pyproject.toml
 
 Expected: exit status 0.
 
-- [ ] **Step 4: Inspect the implementation diff for scope**
+- [ ] **Step 4: Inspect implementation diff scope**
 
 ```bash
 git diff --stat 253408a3bcf5d7ace83fd7f91b975611d1f49e24..HEAD
 git diff --name-only 253408a3bcf5d7ace83fd7f91b975611d1f49e24..HEAD
 ```
 
-Expected: only Stage-3A load-control, server wiring, frontend load-control, tests, docs, and release metadata files. No protected scientific path may appear.
+Expected: only Stage-3A load-control, Protocol V1 error-classification, server wiring, frontend load-control, tests, docs, and release metadata files. No protected scientific path may appear.
 
 - [ ] **Step 5: Push the exact candidate and require GitHub `Testing Acceptance` success**
 
@@ -802,14 +838,14 @@ Expected: only Stage-3A load-control, server wiring, frontend load-control, test
 git push origin testing
 ```
 
-Record the exact commit SHA and the successful workflow run. Do not call automated acceptance a field PASS.
+Record the exact commit SHA and successful workflow run. Do not call automated acceptance a field PASS.
 
 ---
 
 ### Task 10: Perform the first Stage-3A field qualification without physical output
 
 **Files:**
-- No source changes during the test.
+- No source changes during the field test.
 
 **Interfaces:**
 - Consumes: exact accepted v0.4.22 Testing commit and the software-only ARI Load Test Actuator.
@@ -817,11 +853,11 @@ Record the exact commit SHA and the successful workflow run. Do not call automat
 
 - [ ] **Step 1: Establish normal Stage-2 evidence**
 
-Start Viewer v0.4.22, confirm normal Emonio acquisition, run LAN scan, explicitly select `ARI-LOAD-001`, and `CONNECT / QUALIFY` it. Confirm HELLO remains qualified and control authority is not nonzero-enabled.
+Start Viewer v0.4.22, confirm normal Emonio acquisition, run LAN scan, explicitly select `ARI-LOAD-001`, and `CONNECT / QUALIFY` it. Confirm HELLO remains qualified and nonzero real control remains disabled.
 
 - [ ] **Step 2: Select one Emonio explicitly**
 
-Use the Stage-3A selector. Do not accept any automatic selection.
+Use the Stage-3A source selector. Confirm there is no automatic source selection.
 
 - [ ] **Step 3: Press `SEND SAFE TEST COMMAND` once**
 
@@ -839,7 +875,7 @@ SAFE_TEST_PASSED
 
 The accepted sample cycle must be later than the recorded request boundary.
 
-- [ ] **Step 4: Verify the exact protocol evidence**
+- [ ] **Step 4: Verify exact protocol evidence**
 
 Confirm the one sent COMMAND has:
 
@@ -849,26 +885,26 @@ p_load_request=0/0/0 W
 q_comp_request=0/0/0
 ```
 
-Confirm the ACK arrives within 2.0 s with:
+Confirm ACK arrives within 2.0 s with:
 
 ```text
 result=APPLIED
 applied_p=0/0/0 W
 ```
 
-Confirm node ID, boot ID, viewer session ID, protocol version, and sequence match exactly.
+Confirm node ID, boot ID, viewer session ID, Protocol V1, and sequence match exactly.
 
 - [ ] **Step 5: Verify no second command appears**
 
-Wait longer than the normal Emonio poll interval and ACK timeout. The diagnostic log and actuator serial log must show no automatic second COMMAND.
+Wait longer than the normal Emonio poll interval and ACK timeout. Viewer diagnostic log and actuator serial log must show no automatic second COMMAND.
 
 - [ ] **Step 6: Capture independent ESP32 serial evidence**
 
 Record the received COMMAND and emitted ACK from the actuator side. Viewer log alone is not independent proof of what firmware received.
 
-- [ ] **Step 7: Run the required negative field checks before Stage 3B**
+- [ ] **Step 7: Run required negative field checks before Stage 3B**
 
-At minimum, separately qualify:
+Separately qualify at minimum:
 
 ```text
 ACK timeout -> REJECTED, no retry
