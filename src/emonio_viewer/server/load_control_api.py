@@ -2,15 +2,26 @@ from __future__ import annotations
 
 from aiohttp import web
 
+from emonio_viewer.load_control.qualification import (
+    LoadControlQualificationError,
+    QualificationStatus,
+)
 from emonio_viewer.load_control.service import LoadControlCommandError
 
-from .keys import LAN_ACTUATOR_DISCOVERY_SERVICE_KEY, LOAD_CONTROL_SERVICE_KEY
+from .keys import (
+    LAN_ACTUATOR_DISCOVERY_SERVICE_KEY,
+    LOAD_CONTROL_QUALIFICATION_SERVICE_KEY,
+    LOAD_CONTROL_SERVICE_KEY,
+)
 
 
 def register_load_control_routes(app: web.Application) -> None:
     app.router.add_get("/api/v1/load-control/status", get_load_control_status)
     app.router.add_get("/api/v1/load-control/discovered-actuators", get_discovered_actuators)
     app.router.add_post("/api/v1/load-control/lan-discovery/scan", scan_lan_actuators)
+    app.router.add_post("/api/v1/load-control/lan-qualification/connect", connect_lan_actuator)
+    app.router.add_get("/api/v1/load-control/lan-qualification/status", get_lan_qualification_status)
+    app.router.add_post("/api/v1/load-control/lan-qualification/disconnect", disconnect_lan_actuator)
     app.router.add_get("/api/v1/load-control/evidence/recent", get_recent_evidence)
     app.router.add_post("/api/v1/load-control/binding", configure_binding)
     app.router.add_post("/api/v1/load-control/config", configure_limits)
@@ -30,6 +41,13 @@ def _lan_discovery_service(request: web.Request):
     service = request.app.get(LAN_ACTUATOR_DISCOVERY_SERVICE_KEY)
     if service is None:
         raise web.HTTPServiceUnavailable(text="LAN actuator discovery service is unavailable")
+    return service
+
+
+def _qualification_service(request: web.Request):
+    service = request.app.get(LOAD_CONTROL_QUALIFICATION_SERVICE_KEY)
+    if service is None:
+        raise web.HTTPServiceUnavailable(text="load-control qualification service is unavailable")
     return service
 
 
@@ -74,6 +92,28 @@ def _descriptor_json(item) -> dict:
     }
 
 
+def _qualification_json(status: QualificationStatus) -> dict:
+    p_max = status.p_max
+    return {
+        "state": status.state.value,
+        "connected": status.connected,
+        "hello_qualified": status.hello_qualified,
+        "selected_node_id": status.selected_node_id,
+        "node_id": status.node_id,
+        "boot_id": status.boot_id,
+        "protocol_version": status.protocol_version,
+        "device_class": status.device_class,
+        "capabilities": list(status.capabilities),
+        "p_max": (
+            None
+            if p_max is None
+            else {"a": p_max.a, "b": p_max.b, "c": p_max.c}
+        ),
+        "location": status.location,
+        "last_error": status.last_error,
+    }
+
+
 async def get_load_control_status(request: web.Request) -> web.Response:
     return web.json_response(_service(request).status())
 
@@ -94,6 +134,25 @@ async def scan_lan_actuators(request: web.Request) -> web.Response:
     except ValueError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
     return web.json_response([_descriptor_json(item) for item in visible])
+
+
+async def connect_lan_actuator(request: web.Request) -> web.Response:
+    body = await _body(request)
+    node_id = _required_text(body, "node_id")
+    try:
+        status = await _qualification_service(request).connect(node_id)
+    except LoadControlQualificationError as exc:
+        raise web.HTTPConflict(text=str(exc)) from exc
+    return web.json_response(_qualification_json(status))
+
+
+async def get_lan_qualification_status(request: web.Request) -> web.Response:
+    return web.json_response(_qualification_json(_qualification_service(request).status()))
+
+
+async def disconnect_lan_actuator(request: web.Request) -> web.Response:
+    status = await _qualification_service(request).disconnect()
+    return web.json_response(_qualification_json(status))
 
 
 async def get_recent_evidence(request: web.Request) -> web.Response:
