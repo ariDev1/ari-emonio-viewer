@@ -47,6 +47,7 @@ class WebSocketActuatorSession:
         self._wait_for = wait_for
         self._client = None
         self._websocket = None
+        self._hello: HelloFrame | None = None
 
     @property
     def connected(self) -> bool:
@@ -75,6 +76,7 @@ class WebSocketActuatorSession:
             frame = decode_frame(await self._receive_text())
             if not isinstance(frame, HelloFrame):
                 raise ProtocolError("first actuator frame must be HELLO")
+            self._hello = frame
             return frame
         except Exception:
             await self.disconnect()
@@ -83,8 +85,12 @@ class WebSocketActuatorSession:
     async def send_command(self, command: CommandFrame) -> None:
         if not isinstance(command, CommandFrame):
             raise ValueError("command must be CommandFrame")
-        if not self.connected:
+        if not self.connected or self._hello is None:
             raise ConnectionError("actuator WebSocket is not connected")
+        if command.node_id != self._hello.node_id:
+            raise ValueError("command node_id does not match session HELLO")
+        if command.boot_id != self._hello.boot_id:
+            raise ValueError("command boot_id does not match session HELLO")
         await self._websocket.send_str(encode_frame(command))
 
     async def receive_ack(self) -> AckFrame:
@@ -98,6 +104,7 @@ class WebSocketActuatorSession:
         client = self._client
         self._websocket = None
         self._client = None
+        self._hello = None
         if websocket is not None:
             await websocket.close()
         if client is not None:
