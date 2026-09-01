@@ -38,6 +38,18 @@ def _command(**overrides):
     return CommandFrame(**values)
 
 
+def _hello_payload():
+    return {
+        "message_type": "HELLO",
+        "protocol_version": 1,
+        "node_id": "ARI-LOAD-001",
+        "boot_id": "BOOT-001",
+        "device_class": "ARI_LOAD_ACTUATOR",
+        "capabilities": ["ACTIVE_LOAD_CONTROL"],
+        "p_max": {"a": 1000.0, "b": 1000.0, "c": 1000.0},
+    }
+
+
 def test_command_round_trip_is_deterministic_and_preserves_phase_values():
     frame = _command()
     text = encode_frame(frame)
@@ -110,3 +122,61 @@ def test_decoder_rejects_unknown_fields_and_unknown_message_type():
     raw["unexpected"] = 1
     with pytest.raises(ProtocolError):
         decode_frame(json.dumps(raw))
+
+
+def test_hello_decoder_rejects_wrong_protocol_version():
+    payload = _hello_payload()
+    payload["protocol_version"] = 2
+    with pytest.raises(ProtocolError):
+        decode_frame(json.dumps(payload))
+
+
+def test_hello_decoder_rejects_empty_boot_id():
+    payload = _hello_payload()
+    payload["boot_id"] = ""
+    with pytest.raises(ProtocolError):
+        decode_frame(json.dumps(payload))
+
+
+def test_hello_decoder_rejects_missing_p_max():
+    payload = _hello_payload()
+    payload.pop("p_max")
+    with pytest.raises(ProtocolError):
+        decode_frame(json.dumps(payload))
+
+
+def test_hello_decoder_rejects_missing_p_max_phase():
+    payload = _hello_payload()
+    payload["p_max"].pop("c")
+    with pytest.raises(ProtocolError):
+        decode_frame(json.dumps(payload))
+
+
+def test_hello_decoder_rejects_extra_p_max_phase():
+    payload = _hello_payload()
+    payload["p_max"]["d"] = 1000.0
+    with pytest.raises(ProtocolError):
+        decode_frame(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    ("phase", "value"),
+    [
+        ("a", math.nan),
+        ("b", math.inf),
+        ("c", 0.0),
+        ("a", -1.0),
+    ],
+)
+def test_hello_decoder_rejects_invalid_p_max_value(phase, value):
+    payload = _hello_payload()
+    payload["p_max"][phase] = value
+    with pytest.raises(ProtocolError):
+        decode_frame(json.dumps(payload))
+
+
+def test_hello_decoder_rejects_extra_top_level_field():
+    payload = _hello_payload()
+    payload["unexpected"] = 1
+    with pytest.raises(ProtocolError):
+        decode_frame(json.dumps(payload))
