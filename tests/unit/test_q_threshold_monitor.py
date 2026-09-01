@@ -17,7 +17,7 @@ from emonio_viewer.measurement.model import (
 )
 from emonio_viewer.measurement.quadrant import ActiveFlowState, QuadrantState
 import emonio_viewer.recording.negative_monitor as monitor
-from emonio_viewer.recording.recorder import RecordingManager
+from emonio_viewer.recording.continuous_monitor import NegativeMonitorRecordingManager
 from emonio_viewer.runtime.events import RuntimeEventBus
 
 
@@ -200,7 +200,7 @@ class FakeStore:
 
 def test_q_monitor_status_exposes_threshold_and_direction(tmp_path):
     device = DeviceConfig("emonio-a", "EMONIO A", "192.0.2.1")
-    manager = RecordingManager(
+    manager = NegativeMonitorRecordingManager(
         tmp_path,
         (device,),
         FakeStore(),

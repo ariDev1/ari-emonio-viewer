@@ -9,6 +9,7 @@ from emonio_viewer.runtime.events import DiagnosticEvent, Severity
 from .negative_monitor import (
     ConditionKey,
     MonitorBoundary,
+    NegativeCondition,
     NegativeMonitorEvaluation,
     NegativeMonitorEvent,
     evaluate_monitor_sample,
@@ -50,9 +51,14 @@ class SessionRecorder(BaseSessionRecorder):
             recording_interval_s=recording_interval_s,
         )
         if monitor_evidence is not None:
+            start_source = (
+                "Q_THRESHOLD_MONITOR"
+                if monitor_evidence.get("condition") == NegativeCondition.Q_THRESHOLD.value
+                else "NEGATIVE_CONDITION_MONITOR"
+            )
             metadata["recording"] = {
                 "interval_s": recording_interval_s,
-                "start_source": "NEGATIVE_CONDITION_MONITOR",
+                "start_source": start_source,
                 "monitor": dict(monitor_evidence),
             }
         (session_dir / "session.json").write_text(
@@ -71,7 +77,7 @@ class SessionRecorder(BaseSessionRecorder):
 
 
 class NegativeMonitorRecordingManager(BaseRecordingManager):
-    """Recording manager with continuous negative-condition automation.
+    """Recording manager with continuous condition-monitor automation.
 
     The canonical acquisition and RuntimeEventBus paths are unchanged. This class
     replaces only the automation consumer behavior of the published base manager.
@@ -81,8 +87,18 @@ class NegativeMonitorRecordingManager(BaseRecordingManager):
         super().__init__(*args, **kwargs)
         self._monitor_active_values: dict[str, dict[ConditionKey, float]] = {}
 
+    @staticmethod
+    def _monitor_source(config) -> str:
+        if config.condition is NegativeCondition.Q_THRESHOLD:
+            return "Q_THRESHOLD_MONITOR"
+        return "NEGATIVE_CONDITION_MONITOR"
+
     def _monitor_status(self, device_id: str) -> dict:
         status = super()._monitor_status(device_id)
+        config = self._monitor_configs.get(device_id)
+        if config is not None and config.condition is NegativeCondition.Q_THRESHOLD:
+            status["config"]["threshold_var"] = config.threshold_var
+            status["config"]["q_direction"] = config.q_direction.value
         runtime = self._monitor_runtime.get(device_id)
         values = self._monitor_active_values.get(device_id, {})
         if runtime is not None:
@@ -136,8 +152,14 @@ class NegativeMonitorRecordingManager(BaseRecordingManager):
             )
         return event
 
-    @staticmethod
-    def _monitor_event_detail(event: NegativeMonitorEvent) -> str:
+    def _monitor_event_detail(self, device_id: str, event: NegativeMonitorEvent) -> str:
+        config = self._monitor_configs[device_id]
+        if config.condition is NegativeCondition.Q_THRESHOLD:
+            return (
+                f"phase={event.phase.value};measurement={event.measurement.value};"
+                f"value={repr(event.value)};threshold_var={repr(config.threshold_var)};"
+                f"q_direction={config.q_direction.value};continuity={event.continuity}"
+            )
         return (
             f"phase={event.phase.value};measurement={event.measurement.value};"
             f"value={repr(event.value)};threshold=0.0;continuity={event.continuity}"
@@ -161,6 +183,7 @@ class NegativeMonitorRecordingManager(BaseRecordingManager):
 
     def _write_monitor_events(
         self,
+        device_id: str,
         recorder: BaseSessionRecorder,
         events: tuple[NegativeMonitorEvent, ...],
     ) -> None:
@@ -170,7 +193,7 @@ class NegativeMonitorRecordingManager(BaseRecordingManager):
                 event.name,
                 "INFO",
                 event.cycle_id,
-                self._monitor_event_detail(event),
+                self._monitor_event_detail(device_id, event),
             )
 
     def _start_monitor_recording(
@@ -193,6 +216,9 @@ class NegativeMonitorRecordingManager(BaseRecordingManager):
             "start_utc": primary.occurred_utc.isoformat(),
             "start_value": primary.value,
         }
+        if config.condition is NegativeCondition.Q_THRESHOLD:
+            monitor_evidence["threshold_var"] = config.threshold_var
+            monitor_evidence["q_direction"] = config.q_direction.value
         recorder = SessionRecorder.create(
             self._root,
             sample,
@@ -206,7 +232,7 @@ class NegativeMonitorRecordingManager(BaseRecordingManager):
         self._active[device_id] = recorder
         self._active_owner[device_id] = RecordingOwner.NEGATIVE_CONDITION_MONITOR
         self._monitor_state[device_id] = MonitorOperationalState.RECORDING
-        self._write_monitor_events(recorder, evaluation.events)
+        self._write_monitor_events(device_id, recorder, evaluation.events)
         return recorder
 
     def _monitor_start_failure_event(
@@ -216,11 +242,13 @@ class NegativeMonitorRecordingManager(BaseRecordingManager):
         error: Exception,
     ) -> DiagnosticEvent:
         failed_utc = sample.timing.cycle_finished_utc
+        config = self._monitor_configs[device_id]
+        start_source = self._monitor_source(config)
         self._failed[device_id] = {
             "device_id": device_id,
             "device_name": self._devices[device_id].name,
             "state": "ERROR",
-            "start_source": "NEGATIVE_CONDITION_MONITOR",
+            "start_source": start_source,
             "session_id": "",
             "session_dir": "",
             "failed_utc": failed_utc.isoformat(),
@@ -228,11 +256,16 @@ class NegativeMonitorRecordingManager(BaseRecordingManager):
             "error_type": type(error).__name__,
             "error_detail": str(error) or type(error).__name__,
         }
+        event_name = (
+            "Q_THRESHOLD_MONITOR_RECORDING_START_ERROR"
+            if config.condition is NegativeCondition.Q_THRESHOLD
+            else "NEGATIVE_MONITOR_RECORDING_START_ERROR"
+        )
         return DiagnosticEvent(
             device_id=device_id,
             cycle_id=sample.identity.cycle_id,
             occurred_utc=failed_utc,
-            event="NEGATIVE_MONITOR_RECORDING_START_ERROR",
+            event=event_name,
             severity=Severity.ERROR,
             detail=f"{type(error).__name__}: {str(error) or type(error).__name__}",
         )
@@ -265,7 +298,7 @@ class NegativeMonitorRecordingManager(BaseRecordingManager):
 
             if recorder is not None:
                 try:
-                    self._write_monitor_events(recorder, evaluation.events)
+                    self._write_monitor_events(device_id, recorder, evaluation.events)
                 except Exception as exc:
                     return [
                         self._recording_failure_event(

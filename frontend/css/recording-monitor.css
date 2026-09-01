@@ -54,12 +54,25 @@
 }
 
 .recording-monitor-field select,
+.recording-monitor-field input,
 .recording-monitor-actions button {
   min-height: 30px;
   min-width: 0;
   padding: 4px 7px;
   font-family: var(--mono);
   font-size: 0.62rem;
+}
+
+.recording-monitor-q-options {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr);
+  gap: 7px;
+  padding: 7px;
+  border: 1px solid var(--border);
+}
+
+.recording-monitor-q-options[hidden] {
+  display: none;
 }
 
 .recording-monitor-phases {
@@ -129,23 +142,30 @@
 }
 
 @media (max-width: 900px) {
-  .recording-monitor-grid {
+  .recording-monitor-grid,
+  .recording-monitor-q-options {
     grid-template-columns: 1fr 1fr;
   }
 
   .recording-monitor-field:last-child {
     grid-column: 1 / -1;
   }
+
+  .recording-monitor-q-options .recording-monitor-field:last-child {
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 620px) {
   .recording-monitor-grid,
+  .recording-monitor-q-options,
   .recording-monitor-actions,
   .recording-monitor-phase-status {
     grid-template-columns: 1fr;
   }
 
-  .recording-monitor-field:last-child {
+  .recording-monitor-field:last-child,
+  .recording-monitor-q-options .recording-monitor-field:last-child {
     grid-column: auto;
   }
 

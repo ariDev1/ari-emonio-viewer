@@ -8,6 +8,13 @@ from emonio_viewer.measurement.model import MeasurementSample, SampleQuality
 
 class NegativeCondition(str, Enum):
     P_NEGATIVE = "P_NEGATIVE"
+    Q_THRESHOLD = "Q_THRESHOLD"
+
+
+class QDirection(str, Enum):
+    POSITIVE = "POSITIVE"
+    NEGATIVE = "NEGATIVE"
+    BOTH = "BOTH"
 
 
 class MonitorPhase(str, Enum):
@@ -18,6 +25,7 @@ class MonitorPhase(str, Enum):
 
 class MonitorMeasurement(str, Enum):
     P = "P"
+    Q = "Q"
 
 
 class MonitorBoundary(str, Enum):
@@ -38,6 +46,8 @@ class NegativeMonitorConfig:
     condition: NegativeCondition
     phases: tuple[MonitorPhase, ...]
     recording_interval_s: float
+    threshold_var: float | None = None
+    q_direction: QDirection | None = None
 
     def __post_init__(self) -> None:
         if not self.phases:
@@ -48,6 +58,21 @@ class NegativeMonitorConfig:
             raise ValueError("recording interval must be finite")
         if self.recording_interval_s <= 0:
             raise ValueError("recording interval must be > 0")
+
+        if self.condition is NegativeCondition.Q_THRESHOLD:
+            threshold = self.threshold_var
+            if (
+                threshold is None
+                or isinstance(threshold, bool)
+                or not isinstance(threshold, (int, float))
+            ):
+                raise ValueError("Q threshold must be a finite non-negative magnitude")
+            if not math.isfinite(threshold):
+                raise ValueError("Q threshold must be finite")
+            if threshold < 0:
+                raise ValueError("Q threshold must be >= 0")
+            if not isinstance(self.q_direction, QDirection):
+                raise ValueError("Q direction is required for Q threshold monitoring")
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,13 +107,13 @@ class NegativeMonitorEvaluation:
 
 
 _PHASE_ORDER = {MonitorPhase.A: 0, MonitorPhase.B: 1, MonitorPhase.C: 2}
-_MEASUREMENT_ORDER = {MonitorMeasurement.P: 0}
+_MEASUREMENT_ORDER = {MonitorMeasurement.P: 0, MonitorMeasurement.Q: 1}
 _PHASE_ATTR = {
     MonitorPhase.A: "phase_a",
     MonitorPhase.B: "phase_b",
     MonitorPhase.C: "phase_c",
 }
-_MEASUREMENT_ATTR = {MonitorMeasurement.P: "p"}
+_MEASUREMENT_ATTR = {MonitorMeasurement.P: "p", MonitorMeasurement.Q: "q"}
 
 
 def _key_sort(key: ConditionKey) -> tuple[int, int]:
@@ -96,7 +121,13 @@ def _key_sort(key: ConditionKey) -> tuple[int, int]:
 
 
 def selected_condition_keys(config: NegativeMonitorConfig) -> tuple[ConditionKey, ...]:
-    keys = [ConditionKey(phase, MonitorMeasurement.P) for phase in config.phases]
+    if config.condition is NegativeCondition.P_NEGATIVE:
+        measurement = MonitorMeasurement.P
+    elif config.condition is NegativeCondition.Q_THRESHOLD:
+        measurement = MonitorMeasurement.Q
+    else:
+        raise ValueError(f"unsupported monitor condition: {config.condition}")
+    keys = [ConditionKey(phase, measurement) for phase in config.phases]
     return tuple(sorted(keys, key=_key_sort))
 
 
@@ -117,14 +148,54 @@ def _empty(runtime: NegativeMonitorRuntime) -> NegativeMonitorEvaluation:
     return NegativeMonitorEvaluation((), active, bool(active), None, False)
 
 
-def _event_name(boundary: MonitorBoundary, negative: bool) -> str | None:
-    if boundary is MonitorBoundary.MONITOR_START:
-        return "NEGATIVE_PRESENT_AT_MONITOR_START" if negative else None
-    if boundary is MonitorBoundary.GAP:
-        return "NEGATIVE_PRESENT_AFTER_GAP" if negative else "NEGATIVE_NOT_PRESENT_AFTER_GAP"
-    if boundary is MonitorBoundary.RECONNECT:
-        return "NEGATIVE_PRESENT_AFTER_RECONNECT" if negative else "NEGATIVE_NOT_PRESENT_AFTER_RECONNECT"
+def _condition_active(config: NegativeMonitorConfig, value: float) -> bool:
+    if config.condition is NegativeCondition.P_NEGATIVE:
+        return value < 0
+
+    if config.condition is NegativeCondition.Q_THRESHOLD:
+        threshold = config.threshold_var
+        direction = config.q_direction
+        if threshold is None or direction is None:
+            raise RuntimeError("Q threshold monitor configuration is incomplete")
+        if direction is QDirection.POSITIVE:
+            return value > threshold
+        if direction is QDirection.NEGATIVE:
+            return value < -threshold
+        if direction is QDirection.BOTH:
+            return value > threshold or value < -threshold
+        raise ValueError(f"unsupported Q direction: {direction}")
+
+    raise ValueError(f"unsupported monitor condition: {config.condition}")
+
+
+def _boundary_event_name(
+    config: NegativeMonitorConfig,
+    boundary: MonitorBoundary,
+    active: bool,
+) -> str | None:
+    if config.condition is NegativeCondition.P_NEGATIVE:
+        if boundary is MonitorBoundary.MONITOR_START:
+            return "NEGATIVE_PRESENT_AT_MONITOR_START" if active else None
+        if boundary is MonitorBoundary.GAP:
+            return "NEGATIVE_PRESENT_AFTER_GAP" if active else "NEGATIVE_NOT_PRESENT_AFTER_GAP"
+        if boundary is MonitorBoundary.RECONNECT:
+            return "NEGATIVE_PRESENT_AFTER_RECONNECT" if active else "NEGATIVE_NOT_PRESENT_AFTER_RECONNECT"
+    elif config.condition is NegativeCondition.Q_THRESHOLD:
+        if boundary is MonitorBoundary.MONITOR_START:
+            return "Q_THRESHOLD_PRESENT_AT_MONITOR_START" if active else None
+        if boundary is MonitorBoundary.GAP:
+            return "Q_THRESHOLD_PRESENT_AFTER_GAP" if active else "Q_THRESHOLD_NOT_PRESENT_AFTER_GAP"
+        if boundary is MonitorBoundary.RECONNECT:
+            return "Q_THRESHOLD_PRESENT_AFTER_RECONNECT" if active else "Q_THRESHOLD_NOT_PRESENT_AFTER_RECONNECT"
     raise ValueError(f"unsupported monitor boundary: {boundary}")
+
+
+def _transition_event_name(config: NegativeMonitorConfig, active: bool) -> str:
+    if config.condition is NegativeCondition.P_NEGATIVE:
+        return "NEGATIVE_START" if active else "NEGATIVE_END"
+    if config.condition is NegativeCondition.Q_THRESHOLD:
+        return "Q_THRESHOLD_START" if active else "Q_THRESHOLD_END"
+    raise ValueError(f"unsupported monitor condition: {config.condition}")
 
 
 def _continuity_name(boundary: MonitorBoundary) -> str:
@@ -177,13 +248,13 @@ def evaluate_monitor_sample(
         continuity = _continuity_name(boundary)
         for key in keys:
             was_initialized = key in runtime.initialized_keys
-            was_negative = key in runtime.active_keys
-            is_negative = values[key] < 0
-            name = _event_name(boundary, is_negative)
+            was_active = key in runtime.active_keys
+            is_active = _condition_active(runtime.config, values[key])
+            name = _boundary_event_name(runtime.config, boundary, is_active)
             if boundary is not MonitorBoundary.MONITOR_START:
-                if not is_negative and not (was_initialized and was_negative):
+                if not is_active and not (was_initialized and was_active):
                     name = None
-            if is_negative:
+            if is_active:
                 runtime.active_keys.add(key)
             else:
                 runtime.active_keys.discard(key)
@@ -203,15 +274,19 @@ def evaluate_monitor_sample(
         runtime.pending_boundary = None
     else:
         for key in keys:
-            is_negative = values[key] < 0
-            was_negative = key in runtime.active_keys
+            is_active = _condition_active(runtime.config, values[key])
+            was_active = key in runtime.active_keys
             if key not in runtime.initialized_keys:
                 runtime.initialized_keys.add(key)
-                if is_negative:
+                if is_active:
                     runtime.active_keys.add(key)
                     events.append(
                         NegativeMonitorEvent(
-                            "NEGATIVE_PRESENT_AT_MONITOR_START",
+                            _boundary_event_name(
+                                runtime.config,
+                                MonitorBoundary.MONITOR_START,
+                                True,
+                            ),
                             key.phase,
                             key.measurement,
                             cycle_id,
@@ -221,11 +296,11 @@ def evaluate_monitor_sample(
                         )
                     )
                 continue
-            if not was_negative and is_negative:
+            if not was_active and is_active:
                 runtime.active_keys.add(key)
                 events.append(
                     NegativeMonitorEvent(
-                        "NEGATIVE_START",
+                        _transition_event_name(runtime.config, True),
                         key.phase,
                         key.measurement,
                         cycle_id,
@@ -234,11 +309,11 @@ def evaluate_monitor_sample(
                         "EXACT",
                     )
                 )
-            elif was_negative and not is_negative:
+            elif was_active and not is_active:
                 runtime.active_keys.discard(key)
                 events.append(
                     NegativeMonitorEvent(
-                        "NEGATIVE_END",
+                        _transition_event_name(runtime.config, False),
                         key.phase,
                         key.measurement,
                         cycle_id,
@@ -254,12 +329,8 @@ def evaluate_monitor_sample(
     first_activation = None
     if not before_active and aggregate_active:
         for event in events:
-            if event.name in {
-                "NEGATIVE_START",
-                "NEGATIVE_PRESENT_AT_MONITOR_START",
-                "NEGATIVE_PRESENT_AFTER_GAP",
-                "NEGATIVE_PRESENT_AFTER_RECONNECT",
-            }:
+            key = ConditionKey(event.phase, event.measurement)
+            if key in runtime.active_keys:
                 first_activation = event
                 break
     return NegativeMonitorEvaluation(

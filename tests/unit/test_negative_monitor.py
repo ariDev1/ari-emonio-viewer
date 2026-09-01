@@ -40,9 +40,15 @@ def runtime(config=None, floor=None):
     )
 
 
-def test_negative_monitor_exposes_only_p_condition_and_measurement():
-    assert tuple(NegativeCondition) == (NegativeCondition.P_NEGATIVE,)
-    assert tuple(MonitorMeasurement) == (MonitorMeasurement.P,)
+def test_monitor_condition_and_measurement_enums_include_p_and_q():
+    assert tuple(NegativeCondition) == (
+        NegativeCondition.P_NEGATIVE,
+        NegativeCondition.Q_THRESHOLD,
+    )
+    assert tuple(MonitorMeasurement) == (
+        MonitorMeasurement.P,
+        MonitorMeasurement.Q,
+    )
 
 
 def test_p_negative_selects_p_for_each_selected_phase():

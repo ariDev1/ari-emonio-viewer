@@ -6,7 +6,8 @@ import {
   getRuntimeConfig,
 } from "./recording-monitor-api.js";
 
-const CONDITIONS = new Set(["P_NEGATIVE"]);
+const CONDITIONS = new Set(["P_NEGATIVE", "Q_THRESHOLD"]);
+const Q_DIRECTIONS = new Set(["POSITIVE", "NEGATIVE", "BOTH"]);
 const STATES = new Set(["OFF", "WAITING", "RECORDING", "WAITING_FOR_CLEAR"]);
 const PHASES = ["A", "B", "C"];
 
@@ -16,8 +17,13 @@ function finiteNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-export function conditionLabel(condition) {
-  return condition === "P_NEGATIVE" ? "P < 0" : "—";
+export function conditionLabel(condition, thresholdVar = null, qDirection = null) {
+  if (condition === "P_NEGATIVE") return "P < 0";
+  const threshold = finiteNumber(thresholdVar);
+  if (condition !== "Q_THRESHOLD" || threshold === null || !Q_DIRECTIONS.has(qDirection)) return "—";
+  if (qDirection === "POSITIVE") return `Q > +${threshold} var`;
+  if (qDirection === "NEGATIVE") return `Q < -${threshold} var`;
+  return `|Q| > ${threshold} var`;
 }
 
 export function normalizeMonitorStatus(record) {
@@ -32,11 +38,24 @@ export function normalizeMonitorStatus(record) {
   const interval = finiteNumber(config.recording_interval_s);
   if (interval === null || interval <= 0) return null;
 
+  const normalizedConfig = {
+    condition: config.condition,
+    phases: Object.freeze([...phases]),
+    recording_interval_s: interval,
+  };
+  if (config.condition === "Q_THRESHOLD") {
+    const threshold = finiteNumber(config.threshold_var);
+    if (threshold === null || threshold < 0 || !Q_DIRECTIONS.has(config.q_direction)) return null;
+    normalizedConfig.threshold_var = threshold;
+    normalizedConfig.q_direction = config.q_direction;
+  }
+
+  const expectedMeasurement = config.condition === "Q_THRESHOLD" ? "Q" : "P";
   const active = [];
   for (const item of Array.isArray(record.active_conditions) ? record.active_conditions : []) {
-    if (!item || !PHASES.includes(item.phase) || item.measurement !== "P") continue;
+    if (!item || !PHASES.includes(item.phase) || item.measurement !== expectedMeasurement) continue;
     const value = finiteNumber(item.value);
-    active.push(Object.freeze({phase: item.phase, measurement: "P", value}));
+    active.push(Object.freeze({phase: item.phase, measurement: expectedMeasurement, value}));
   }
 
   const last = record.last_event;
@@ -44,7 +63,7 @@ export function normalizeMonitorStatus(record) {
     ? Object.freeze({
         event: last.event,
         phase: PHASES.includes(last.phase) ? last.phase : "",
-        measurement: last.measurement === "P" ? "P" : "",
+        measurement: last.measurement === expectedMeasurement ? expectedMeasurement : "",
         cycle_id: Number.isInteger(Number(last.cycle_id)) ? Number(last.cycle_id) : null,
         utc: typeof last.utc === "string" ? last.utc : "",
         value: finiteNumber(last.value),
@@ -55,17 +74,16 @@ export function normalizeMonitorStatus(record) {
   return Object.freeze({
     device_id: record.device_id,
     state: record.state,
-    config: Object.freeze({condition: config.condition, phases: Object.freeze([...phases]), recording_interval_s: interval}),
+    config: Object.freeze(normalizedConfig),
     active_conditions: Object.freeze(active),
     last_event: lastEvent,
   });
 }
 
 export function phaseStatusText(status, phase) {
-  const negative = status?.active_conditions?.some(
-    (item) => item.phase === phase && item.measurement === "P"
-  ) ?? false;
-  return negative ? `${phase}  NEGATIVE P` : `${phase}  NORMAL`;
+  const active = status?.active_conditions?.find((item) => item.phase === phase) ?? null;
+  if (!active) return `${phase}  NORMAL`;
+  return active.measurement === "Q" ? `${phase}  Q THRESHOLD` : `${phase}  NEGATIVE P`;
 }
 
 export function validateMonitorDraft(draft) {
@@ -74,13 +92,18 @@ export function validateMonitorDraft(draft) {
   if (draft.phases.some((phase) => !PHASES.includes(phase))) return "Select only Phase A, B, or C.";
   const interval = finiteNumber(draft.recording_interval_s);
   if (interval === null || interval <= 0) return "Select a valid recording interval.";
+  if (draft.condition === "Q_THRESHOLD") {
+    const threshold = finiteNumber(draft.threshold_var);
+    if (threshold === null || threshold < 0) return "Enter a finite Q threshold magnitude of 0 var or greater.";
+    if (!Q_DIRECTIONS.has(draft.q_direction)) return "Select POSITIVE, NEGATIVE, or BOTH for Q direction.";
+  }
   return null;
 }
 
 function panelMarkup() {
   return `
     <div class="recording-monitor-header">
-      <span class="recording-monitor-title">NEGATIVE-CONDITION MONITOR</span>
+      <span class="recording-monitor-title">RECORDING CONDITION MONITOR</span>
       <strong id="recording-monitor-state" class="recording-monitor-state">OFF</strong>
     </div>
     <div class="recording-monitor-grid">
@@ -88,6 +111,7 @@ function panelMarkup() {
         <span class="recording-monitor-label">CONDITION</span>
         <select id="recording-monitor-condition">
           <option value="P_NEGATIVE">P &lt; 0</option>
+          <option value="Q_THRESHOLD">Q THRESHOLD</option>
         </select>
       </label>
       <fieldset class="recording-monitor-phases">
@@ -99,6 +123,20 @@ function panelMarkup() {
       <label class="recording-monitor-field">
         <span class="recording-monitor-label">RECORDING INTERVAL</span>
         <select id="recording-monitor-interval"></select>
+      </label>
+    </div>
+    <div id="recording-monitor-q-options" class="recording-monitor-q-options" hidden>
+      <label class="recording-monitor-field">
+        <span class="recording-monitor-label">THRESHOLD [var]</span>
+        <input id="recording-monitor-q-threshold" type="number" min="0" step="any" value="0" inputmode="decimal">
+      </label>
+      <label class="recording-monitor-field">
+        <span class="recording-monitor-label">Q DIRECTION</span>
+        <select id="recording-monitor-q-direction">
+          <option value="POSITIVE">POSITIVE</option>
+          <option value="NEGATIVE">NEGATIVE</option>
+          <option value="BOTH" selected>BOTH</option>
+        </select>
       </label>
     </div>
     <div class="recording-monitor-actions">
@@ -120,11 +158,17 @@ function selectedPhases() {
 }
 
 function currentDraft() {
-  return {
-    condition: document.getElementById("recording-monitor-condition")?.value ?? "",
+  const condition = document.getElementById("recording-monitor-condition")?.value ?? "";
+  const draft = {
+    condition,
     phases: selectedPhases(),
     recording_interval_s: finiteNumber(document.getElementById("recording-monitor-interval")?.value),
   };
+  if (condition === "Q_THRESHOLD") {
+    draft.threshold_var = finiteNumber(document.getElementById("recording-monitor-q-threshold")?.value);
+    draft.q_direction = document.getElementById("recording-monitor-q-direction")?.value ?? "";
+  }
+  return draft;
 }
 
 function setMessage(text, isError = false) {
@@ -147,6 +191,11 @@ function setIntervals(values, selected) {
   if (unique.includes(selected)) select.value = String(selected);
 }
 
+function setQOptionsVisible(condition) {
+  const options = document.getElementById("recording-monitor-q-options");
+  if (options) options.hidden = condition !== "Q_THRESHOLD";
+}
+
 function syncControls(status, runtimeConfig) {
   const deviceId = selectedDeviceId();
   const device = runtimeConfig?.devices?.find((item) => item.id === deviceId);
@@ -157,7 +206,13 @@ function syncControls(status, runtimeConfig) {
   const candidates = [poll, fallback, configuredInterval, 1, 2, 5, 10, 30, 60].filter((value) => value !== null && value >= poll);
   setIntervals(candidates, interval);
 
-  document.getElementById("recording-monitor-condition").value = status?.config?.condition ?? "P_NEGATIVE";
+  const condition = status?.config?.condition ?? "P_NEGATIVE";
+  document.getElementById("recording-monitor-condition").value = condition;
+  setQOptionsVisible(condition);
+  const threshold = finiteNumber(status?.config?.threshold_var) ?? 0;
+  document.getElementById("recording-monitor-q-threshold").value = String(threshold);
+  document.getElementById("recording-monitor-q-direction").value = status?.config?.q_direction ?? "BOTH";
+
   const phases = status?.config?.phases ?? PHASES;
   for (const phase of PHASES) {
     document.getElementById(`recording-monitor-phase-${phase.toLowerCase()}`).checked = phases.includes(phase);
@@ -198,7 +253,7 @@ function installRecordingMonitorUi() {
   if (!recordingBody) return false;
   const panel = document.createElement("section");
   panel.className = "recording-monitor-panel";
-  panel.setAttribute("aria-label", "Continuous negative-condition recording monitor");
+  panel.setAttribute("aria-label", "Continuous recording condition monitor");
   panel.innerHTML = panelMarkup();
   if (oldPanel) oldPanel.replaceWith(panel);
   else recordingBody.prepend(panel);
@@ -229,12 +284,19 @@ async function runController() {
     setMessage("UNAPPLIED CHANGES · press APPLY before ENABLE MONITOR");
     renderStatus(currentStatus, dirty);
   };
+
+  const conditionControl = document.getElementById("recording-monitor-condition");
+  conditionControl?.addEventListener("change", () => {
+    setQOptionsVisible(conditionControl.value);
+    markDirty();
+  });
   for (const id of [
-    "recording-monitor-condition",
     "recording-monitor-phase-a",
     "recording-monitor-phase-b",
     "recording-monitor-phase-c",
     "recording-monitor-interval",
+    "recording-monitor-q-threshold",
+    "recording-monitor-q-direction",
   ]) {
     document.getElementById(id)?.addEventListener("change", markDirty);
   }
@@ -255,7 +317,14 @@ async function runController() {
       renderStatus(status, dirty);
       if (!deviceId) setMessage("Select an Emonio device.");
       else if (!status) setMessage("Monitor not configured. Select parameters and press APPLY.");
-      else if (!dirty) setMessage(`MONITOR ${status.state.replaceAll("_", " ")} · ${conditionLabel(status.config.condition)} · ${status.config.phases.join("/")}`);
+      else if (!dirty) {
+        const label = conditionLabel(
+          status.config.condition,
+          status.config.threshold_var,
+          status.config.q_direction,
+        );
+        setMessage(`MONITOR ${status.state.replaceAll("_", " ")} · ${label} · ${status.config.phases.join("/")}`);
+      }
     } catch (error) {
       setMessage(`MONITOR STATUS ERROR: ${error.message}`, true);
     }
@@ -287,7 +356,7 @@ async function runController() {
     actionPending = true;
     try {
       await enableRecordingMonitor(deviceId);
-      setMessage("MONITOR ENABLED · waiting for exact canonical P < 0 evidence.");
+      setMessage("MONITOR ENABLED · waiting for exact canonical condition evidence.");
     } catch (cause) {
       setMessage(`ENABLE FAILED: ${cause.message}`, true);
     } finally {

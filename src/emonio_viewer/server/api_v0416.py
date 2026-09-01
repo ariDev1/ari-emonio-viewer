@@ -8,6 +8,7 @@ from emonio_viewer.recording.negative_monitor import (
     MonitorPhase,
     NegativeCondition,
     NegativeMonitorConfig,
+    QDirection,
 )
 
 from .api import (
@@ -93,12 +94,30 @@ def _monitor_config(request, body: dict) -> NegativeMonitorConfig:
         raise web.HTTPBadRequest(text="recording_interval_s must be > 0")
     _validate_recording_interval_for_device(request, device_id, interval)
 
+    threshold_var = None
+    q_direction = None
+    if condition is NegativeCondition.Q_THRESHOLD:
+        try:
+            threshold_var = float(body["threshold_var"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise web.HTTPBadRequest(text="threshold_var must be numeric") from exc
+        if not math.isfinite(threshold_var):
+            raise web.HTTPBadRequest(text="threshold_var must be finite")
+        if threshold_var < 0:
+            raise web.HTTPBadRequest(text="threshold_var must be >= 0")
+        try:
+            q_direction = QDirection(body.get("q_direction"))
+        except (TypeError, ValueError) as exc:
+            raise web.HTTPBadRequest(text="invalid q_direction") from exc
+
     try:
         return NegativeMonitorConfig(
             device_id=device_id,
             condition=condition,
             phases=phases,
             recording_interval_s=interval,
+            threshold_var=threshold_var,
+            q_direction=q_direction,
         )
     except ValueError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
