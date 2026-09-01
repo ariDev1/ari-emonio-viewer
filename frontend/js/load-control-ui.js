@@ -8,7 +8,11 @@ import {
   getLanQualificationStatus,
   getLoadControlStatus,
   getRecentLoadControlEvidence,
+  getSafeTestSources,
+  getSafeTestStatus,
+  runSafeCommandTest,
   scanLanActuators,
+  selectSafeTestSource,
   setLoadControlBinding,
   setLoadControlLimits,
   setLoadControlTiming,
@@ -17,12 +21,20 @@ import {
 const state = {
   status: null,
   qualification: null,
+  safeStatus: null,
+  safeSources: [],
   visible: false,
   lanResults: [],
   selectedNodeId: "",
   diagnosticAfterSequence: 0,
   diagnosticLines: [],
 };
+
+const SAFE_ACTIVE_STATES = new Set([
+  "WAITING_FOR_SAMPLE",
+  "COMMAND_SENT",
+  "WAITING_FOR_ACK",
+]);
 
 function element(id) {
   return document.getElementById(id);
@@ -64,7 +76,7 @@ function createUi() {
   panel.innerHTML = `
     <div class="load-control-panel-header">
       <div>
-        <span class="eyebrow">STAGE 2 · NETWORK QUALIFICATION</span>
+        <span class="eyebrow">STAGE 3A · SAFE COMMAND QUALIFICATION</span>
         <h2>External Load Control</h2>
       </div>
       <div class="load-control-header-actions">
@@ -73,7 +85,7 @@ function createUi() {
       </div>
     </div>
     <p class="load-control-stage-note">
-      Discover one actuator, select it explicitly, and qualify its WebSocket HELLO. Stage 2 does not send a real actuator COMMAND.
+      Stage 2 qualifies the real actuator connection. Stage 3A can then send one explicit SAFE zero-output protocol COMMAND and qualify its ACK. Real load control remains disabled.
     </p>
 
     <section class="load-control-section load-control-primary-section">
@@ -122,10 +134,39 @@ function createUi() {
       </div>
     </section>
 
+    <section class="load-control-section load-control-primary-section load-control-safe-test-section">
+      <div class="load-control-section-header"><h3>SAFE command qualification</h3><span>one real COMMAND</span></div>
+      <p class="load-control-section-note load-control-safe-warning">
+        This test sends exactly one real protocol COMMAND only after explicit operator action: control_enabled=false · P request A/B/C = 0 W · Q request A/B/C = 0 var · No retry · No nonzero control.
+      </p>
+      <label class="load-control-safe-source-label">Emonio measurement source
+        <select id="lc-safe-source">
+          <option value="">Choose Emonio source</option>
+        </select>
+      </label>
+      <div class="load-control-actions">
+        <button id="lc-safe-select-source" type="button" disabled>SELECT SOURCE</button>
+      </div>
+      <div class="load-control-safe-status" aria-label="SAFE command qualification state">
+        <div><span>SAFE test</span><strong id="lc-safe-state">IDLE</strong></div>
+        <div><span>Selected source</span><strong id="lc-safe-source-state">—</strong></div>
+        <div><span>Sample cycle</span><strong id="lc-safe-cycle">—</strong></div>
+        <div><span>COMMAND sequence</span><strong id="lc-safe-sequence">—</strong></div>
+        <div><span>ACK result</span><strong id="lc-safe-ack">—</strong></div>
+        <div><span>Rejection</span><strong id="lc-safe-rejection">—</strong></div>
+      </div>
+      <div class="load-control-actions">
+        <button id="lc-safe-run" type="button" disabled>RUN SAFE 0 W TEST</button>
+      </div>
+      <div id="lc-safe-message" class="load-control-status-text" aria-live="polite">
+        Select an Emonio source explicitly. The SAFE test remains disabled until the actuator HELLO is qualified.
+      </div>
+    </section>
+
     <section class="load-control-section load-control-primary-section load-control-diagnostic-section">
       <div class="load-control-section-header"><h3>Diagnostic log</h3><span>real actuator only</span></div>
       <p class="load-control-section-note">
-        This backend-owned log contains real LAN discovery and WebSocket/HELLO qualification events only. CLEAR VIEW does not delete the backend log.
+        This backend-owned log contains real LAN discovery, WebSocket/HELLO, and SAFE command qualification events. CLEAR VIEW does not delete the backend log.
       </p>
       <pre id="lc-diagnostic-log" class="load-control-diagnostic-log">No real actuator diagnostic events yet.</pre>
       <div class="load-control-actions">
@@ -221,6 +262,8 @@ function createUi() {
   element("lc-real-actuator").addEventListener("change", onRealActuatorSelection);
   element("lc-select-qualify").addEventListener("click", runSelectedLanQualification);
   element("lc-qualification-disconnect").addEventListener("click", runLanQualificationDisconnect);
+  element("lc-safe-select-source").addEventListener("click", selectSafeSource);
+  element("lc-safe-run").addEventListener("click", runSafeTest);
   element("lc-copy-diagnostic-log").addEventListener("click", copyDiagnosticLog);
   element("lc-clear-diagnostic-view").addEventListener("click", clearDiagnosticView);
   element("lc-development-tools").addEventListener("toggle", onDevelopmentToolsToggle);
@@ -250,6 +293,13 @@ function setMessage(message, isError = false) {
 
 function setLanMessage(message, isError = false) {
   const target = element("lc-lan-scan-status");
+  if (!target) return;
+  target.textContent = message || "";
+  target.dataset.error = isError ? "true" : "false";
+}
+
+function setSafeMessage(message, isError = false) {
+  const target = element("lc-safe-message");
   if (!target) return;
   target.textContent = message || "";
   target.dataset.error = isError ? "true" : "false";
@@ -374,6 +424,115 @@ function renderLanQualification(status) {
   element("load-control-summary-session").textContent = status?.state || "IDLE";
   element("load-control-summary-safe").textContent = qualified ? "HELLO QUALIFIED" : "HELLO NOT QUALIFIED";
   updateQualifyButton();
+  updateSafeButtons();
+}
+
+function renderSafeSources(values) {
+  state.safeSources = Array.isArray(values) ? values : [];
+  const select = element("lc-safe-source");
+  if (!select) return;
+
+  const previous = select.value;
+  select.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Choose Emonio source";
+  select.append(placeholder);
+
+  for (const item of state.safeSources) {
+    const option = document.createElement("option");
+    option.value = item.device_id;
+    const interval = Number.isFinite(Number(item.poll_interval_s))
+      ? ` · ${Number(item.poll_interval_s).toFixed(3)} s`
+      : "";
+    option.textContent = `${item.name || item.device_id} · ${item.device_id}${interval}`;
+    select.append(option);
+  }
+
+  if (previous && state.safeSources.some((item) => item.device_id === previous)) {
+    select.value = previous;
+  } else {
+    select.value = "";
+  }
+  updateSafeButtons();
+}
+
+function renderSafeStatus(status) {
+  state.safeStatus = status || null;
+  const safeState = status?.state || "IDLE";
+  element("lc-safe-state").textContent = safeState;
+  element("lc-safe-source-state").textContent = status?.selected_source_id || "—";
+  element("lc-safe-cycle").textContent = status?.sample_cycle_id ?? "—";
+  element("lc-safe-sequence").textContent = status?.command_sequence ?? "—";
+  element("lc-safe-ack").textContent = status?.ack_result || "—";
+  element("lc-safe-rejection").textContent = status?.rejection_reason || "—";
+  updateSafeButtons();
+}
+
+function updateSafeButtons() {
+  const select = element("lc-safe-source");
+  const selectButton = element("lc-safe-select-source");
+  const runButton = element("lc-safe-run");
+  if (!selectButton || !runButton) return;
+
+  const active = SAFE_ACTIVE_STATES.has(state.safeStatus?.state);
+  selectButton.disabled = !select?.value || active;
+  runButton.disabled = !Boolean(state.safeStatus?.admissible)
+    || !Boolean(state.qualification?.hello_qualified)
+    || active;
+}
+
+async function refreshSafeSources() {
+  renderSafeSources(await getSafeTestSources());
+}
+
+async function refreshSafeTestStatus() {
+  const status = await getSafeTestStatus();
+  renderSafeStatus(status);
+  return status;
+}
+
+async function selectSafeSource() {
+  const deviceId = element("lc-safe-source")?.value || "";
+  if (!deviceId) {
+    setSafeMessage("Choose one Emonio source first.", true);
+    return;
+  }
+
+  const button = element("lc-safe-select-source");
+  try {
+    if (button) button.disabled = true;
+    setSafeMessage("Selecting volatile Emonio source. No COMMAND is sent.");
+    renderSafeStatus(await selectSafeTestSource(deviceId));
+    setSafeMessage("Emonio source selected for this Viewer session. No COMMAND was sent.");
+  } catch (error) {
+    setSafeMessage(error.message, true);
+    await refreshSafeTestStatus().catch(() => {});
+  } finally {
+    updateSafeButtons();
+    await refreshDiagnosticLog().catch(() => {});
+  }
+}
+
+async function runSafeTest() {
+  const button = element("lc-safe-run");
+  try {
+    if (button) button.disabled = true;
+    setSafeMessage("Waiting for the first valid post-request Emonio sample, then sending one SAFE 0 W COMMAND...");
+    const status = await runSafeCommandTest();
+    renderSafeStatus(status);
+    if (status?.state === "PASSED") {
+      setSafeMessage(`SAFE test PASSED. ACK ${status.ack_result || "—"}; sequence ${status.command_sequence ?? "—"}.`);
+    } else {
+      setSafeMessage(`SAFE test ${status?.state || "REJECTED"}: ${status?.rejection_reason || "unknown reason"}.`, true);
+    }
+  } catch (error) {
+    setSafeMessage(error.message, true);
+    await refreshSafeTestStatus().catch(() => {});
+  } finally {
+    updateSafeButtons();
+    await refreshDiagnosticLog().catch(() => {});
+  }
 }
 
 function renderDiagnosticLog() {
@@ -522,6 +681,8 @@ async function refreshEvidence() {
 
 async function refreshPrimary() {
   await refreshLanQualification();
+  await refreshSafeSources();
+  await refreshSafeTestStatus();
   await refreshDiagnosticLog();
 }
 
@@ -586,9 +747,11 @@ async function runLanQualification(nodeId) {
     errorTarget.textContent = "Opening WebSocket and waiting for HELLO...";
     errorTarget.dataset.error = "false";
     renderLanQualification(await connectLanQualification(nodeId));
+    await refreshSafeTestStatus().catch(() => {});
   } catch (error) {
     try {
       await refreshLanQualification();
+      await refreshSafeTestStatus();
     } catch (_refreshError) {
       // Keep the connection error as operator evidence.
     }
@@ -597,6 +760,7 @@ async function runLanQualification(nodeId) {
   } finally {
     await refreshDiagnosticLog().catch(() => {});
     updateQualifyButton();
+    updateSafeButtons();
   }
 }
 
@@ -605,12 +769,14 @@ async function runLanQualificationDisconnect() {
   try {
     if (button) button.disabled = true;
     renderLanQualification(await disconnectLanQualification());
+    await refreshSafeTestStatus().catch(() => {});
   } catch (error) {
     const target = element("lc-qualification-error");
     target.textContent = error.message;
     target.dataset.error = "true";
   } finally {
     await refreshDiagnosticLog().catch(() => {});
+    updateSafeButtons();
   }
 }
 
@@ -684,6 +850,7 @@ setInterval(() => {
   refreshStatus().catch(() => {});
   if (state.visible) {
     refreshLanQualification().catch(() => {});
+    refreshSafeTestStatus().catch(() => {});
     refreshDiagnosticLog().catch(() => {});
   }
 }, 1000);
