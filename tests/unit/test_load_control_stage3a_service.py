@@ -170,6 +170,15 @@ async def _settle() -> None:
         await asyncio.sleep(0)
 
 
+async def _wait_for_command(channel: FakeQualifiedChannel, *, count: int = 1) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 0.5
+    while len(channel.sent) < count:
+        if loop.time() >= deadline:
+            raise AssertionError(f"expected {count} command(s), observed {len(channel.sent)}")
+        await asyncio.sleep(0.001)
+
+
 def test_stage3a_starts_idle_and_lists_only_enabled_sources() -> None:
     async def scenario() -> None:
         bus = RuntimeEventBus()
@@ -264,7 +273,7 @@ def test_stage3a_waits_for_first_valid_post_request_sample(real_sample) -> None:
         assert channel.sent == []
 
         bus.publish(_sample(real_sample, cycle_id=43, started_ns=10_200_000_000))
-        await _settle()
+        await _wait_for_command(channel)
         assert len(channel.sent) == 1
         command = channel.sent[0]
         channel.push(_ack(command))
@@ -354,7 +363,7 @@ def test_stage3a_builds_exact_zero_command_from_canonical_sample(real_sample) ->
         await _settle()
         accepted = _sample(real_sample, cycle_id=12, started_ns=10_100_000_000)
         bus.publish(accepted)
-        await _settle()
+        await _wait_for_command(channel)
         assert len(channel.sent) == 1
         command = channel.sent[0]
 
@@ -415,7 +424,7 @@ def test_stage3a_status_before_ack_does_not_extend_original_two_second_deadline(
         request = asyncio.create_task(service.run_safe_test())
         await _settle()
         bus.publish(_sample(real_sample, cycle_id=2, started_ns=10_100_000_000))
-        await _settle()
+        await _wait_for_command(channel)
         command = channel.sent[0]
         channel.push(_status(command))
         channel.push(_ack(command))
@@ -442,7 +451,7 @@ def test_stage3a_ack_timeout_rejects_without_retry(real_sample) -> None:
         request = asyncio.create_task(service.run_safe_test())
         await _settle()
         bus.publish(_sample(real_sample, cycle_id=3, started_ns=10_100_000_000))
-        await _settle()
+        await _wait_for_command(channel)
         assert len(channel.sent) == 1
 
         status = await request
@@ -478,7 +487,7 @@ def test_stage3a_rejects_each_ack_mismatch_without_retry(real_sample, changes, r
         request = asyncio.create_task(service.run_safe_test())
         await _settle()
         bus.publish(_sample(real_sample, cycle_id=4, started_ns=10_100_000_000))
-        await _settle()
+        await _wait_for_command(channel)
         command = channel.sent[0]
         channel.push(_ack(command, **changes))
 
@@ -504,7 +513,7 @@ def test_stage3a_maps_unsupported_ack_protocol_to_protocol_mismatch(real_sample)
         request = asyncio.create_task(service.run_safe_test())
         await _settle()
         bus.publish(_sample(real_sample, cycle_id=5, started_ns=10_100_000_000))
-        await _settle()
+        await _wait_for_command(channel)
         channel.push(ProtocolError("unsupported protocol_version"))
 
         status = await request
@@ -529,7 +538,7 @@ def test_stage3a_disconnect_during_ack_wait_rejects_without_retry(real_sample) -
         request = asyncio.create_task(service.run_safe_test())
         await _settle()
         bus.publish(_sample(real_sample, cycle_id=6, started_ns=10_100_000_000))
-        await _settle()
+        await _wait_for_command(channel)
         channel.current_hello = None
         channel.push(ConnectionError("actuator WebSocket disconnected"))
 
@@ -595,7 +604,7 @@ def test_stage3a_rejects_source_change_and_second_test_while_exchange_active(rea
         assert channel.sent == []
 
         bus.publish(_sample(real_sample, cycle_id=20, started_ns=10_100_000_000))
-        await _settle()
+        await _wait_for_command(channel)
         command = channel.sent[0]
         channel.push(_ack(command))
         assert (await request).state is Stage3AState.PASSED
