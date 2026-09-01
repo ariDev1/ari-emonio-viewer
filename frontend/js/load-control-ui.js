@@ -1,7 +1,10 @@
 import {
+  connectLanQualification,
   disableLoadControl,
+  disconnectLanQualification,
   enableLoadControl,
   getDiscoveredActuators,
+  getLanQualificationStatus,
   getLoadControlStatus,
   getRecentLoadControlEvidence,
   scanLanActuators,
@@ -12,6 +15,7 @@ import {
 
 const state = {
   status: null,
+  qualification: null,
   visible: false,
   lanResults: [],
 };
@@ -56,13 +60,13 @@ function createUi() {
   panel.innerHTML = `
     <div class="load-control-panel-header">
       <div>
-        <span class="eyebrow">STAGE 1 · MOCK CONTROL + READ-ONLY LAN DISCOVERY</span>
+        <span class="eyebrow">STAGE 2 · REAL WEBSOCKET HELLO QUALIFICATION · CONTROL DISABLED</span>
         <h2>External Load Control</h2>
       </div>
       <button id="load-control-close" type="button">CLOSE</button>
     </div>
     <p class="load-control-stage-note">
-      Control command transport remains mock-only. LAN discovery is read-only and cannot bind, enable, or send actuator commands.
+      LAN discovery and WebSocket HELLO qualification are real. Real actuator COMMAND transport is not available in Stage 2, and real actuator control remains disabled. Existing mock-control development functions remain separate.
     </p>
 
     <section class="load-control-state-grid" aria-label="Load control state">
@@ -75,7 +79,7 @@ function createUi() {
     </section>
 
     <section class="load-control-section">
-      <div class="load-control-section-header"><h3>Binding</h3><span>DISABLED only</span></div>
+      <div class="load-control-section-header"><h3>Binding</h3><span>MOCK · DISABLED only</span></div>
       <div class="load-control-form-grid">
         <label>Emonio control source
           <input id="lc-source" type="text" autocomplete="off" spellcheck="false" placeholder="emonio device id">
@@ -90,7 +94,7 @@ function createUi() {
     <section class="load-control-section">
       <div class="load-control-section-header"><h3>LAN actuator discovery</h3><span>read-only mDNS</span></div>
       <p class="load-control-section-note">
-        This scan only locates compatible actuator advertisements. It does not change the control binding and it does not open a control connection.
+        This scan only locates compatible actuator advertisements. It does not change the mock control binding, enable external control, or open a WebSocket until you select an actuator explicitly.
       </p>
       <div class="load-control-form-grid">
         <label>Discovery window / s
@@ -105,8 +109,29 @@ function createUi() {
       <div id="lc-lan-results" class="load-control-lan-results">No LAN scan run.</div>
     </section>
 
+    <section class="load-control-section load-control-qualification-section">
+      <div class="load-control-section-header"><h3>Real WebSocket qualification</h3><span>HELLO only</span></div>
+      <p class="load-control-section-note">
+        Qualification uses the WebSocket locator from the latest LAN discovery result. The qualified actuator instance is node ID plus boot ID. IP address is only a locator.
+      </p>
+      <div class="load-control-value-grid load-control-qualification-grid">
+        <div><span>Qualification</span><strong id="lc-qualification-state">IDLE</strong></div>
+        <div><span>Node</span><strong id="lc-qualification-node">—</strong></div>
+        <div><span>Boot</span><strong id="lc-qualification-boot">—</strong></div>
+        <div><span>Protocol</span><strong id="lc-qualification-protocol">—</strong></div>
+        <div><span>Device class</span><strong id="lc-qualification-class">—</strong></div>
+        <div><span>Capability</span><strong id="lc-qualification-capability">—</strong></div>
+        <div><span>Advertised test limit</span><strong id="lc-qualification-limits">—</strong></div>
+        <div><span>WebSocket locator</span><strong id="lc-qualification-location">—</strong></div>
+      </div>
+      <div id="lc-qualification-error" class="load-control-status-text" aria-live="polite"></div>
+      <div class="load-control-actions">
+        <button id="lc-qualification-disconnect" type="button">DISCONNECT</button>
+      </div>
+    </section>
+
     <section class="load-control-section">
-      <div class="load-control-section-header"><h3>Active-power target and limits</h3><span>W</span></div>
+      <div class="load-control-section-header"><h3>Active-power target and limits</h3><span>MOCK · W</span></div>
       <div class="load-control-form-grid">
         <label>Import reserve per phase
           <input id="lc-reserve" type="number" min="0" step="any" placeholder="required">
@@ -125,7 +150,7 @@ function createUi() {
     </section>
 
     <section class="load-control-section">
-      <div class="load-control-section-header"><h3>Volatile timing qualification</h3><span>not persisted</span></div>
+      <div class="load-control-section-header"><h3>Volatile timing qualification</h3><span>MOCK · not persisted</span></div>
       <div class="load-control-form-grid">
         <label>Maximum sample age / s
           <input id="lc-sample-age-limit" type="number" min="0" step="any" placeholder="required each start">
@@ -138,7 +163,7 @@ function createUi() {
     </section>
 
     <section class="load-control-section">
-      <div class="load-control-section-header"><h3>Supervisor evidence</h3><span id="lc-session-id">—</span></div>
+      <div class="load-control-section-header"><h3>Supervisor evidence</h3><span id="lc-session-id">MOCK · —</span></div>
       <div class="load-control-value-grid">
         <div><span>Acknowledged load</span><strong id="lc-ack-p">—</strong></div>
         <div><span>Outstanding command</span><strong id="lc-outstanding">—</strong></div>
@@ -160,6 +185,7 @@ function createUi() {
   element("load-control-close").addEventListener("click", () => setVisible(false));
   element("lc-save-binding").addEventListener("click", saveBinding);
   element("lc-scan-lan").addEventListener("click", runLanScan);
+  element("lc-qualification-disconnect").addEventListener("click", runLanQualificationDisconnect);
   element("lc-save-limits").addEventListener("click", saveLimits);
   element("lc-save-timing").addEventListener("click", saveTiming);
   element("lc-enable").addEventListener("click", runEnable);
@@ -232,11 +258,42 @@ function renderLanResults(values) {
     details.textContent = `${item.device_class || "UNKNOWN CLASS"} · ${capabilities}`;
 
     const limits = document.createElement("span");
-    limits.textContent = `Physical max: ${powerTriplet(item.p_max)}`;
+    limits.textContent = `Advertised test limit: ${powerTriplet(item.p_max)}`;
 
-    card.append(identity, location, details, limits);
+    const qualify = document.createElement("button");
+    qualify.type = "button";
+    qualify.className = "load-control-lan-qualify";
+    qualify.textContent = "SELECT / QUALIFY";
+    qualify.addEventListener("click", () => runLanQualification(item.node_id));
+
+    card.append(identity, location, details, limits, qualify);
     target.append(card);
   }
+}
+
+function renderLanQualification(status) {
+  state.qualification = status || null;
+
+  const labels = [status?.state || "IDLE"];
+  if (status?.connected) labels.push("CONNECTED");
+  if (status?.hello_qualified) labels.push("HELLO QUALIFIED");
+  element("lc-qualification-state").textContent = labels.join(" · ");
+  element("lc-qualification-node").textContent = status?.node_id || status?.selected_node_id || "—";
+  element("lc-qualification-boot").textContent = status?.boot_id || "—";
+  element("lc-qualification-protocol").textContent = status?.protocol_version ?? "—";
+  element("lc-qualification-class").textContent = status?.device_class || "—";
+  element("lc-qualification-capability").textContent = Array.isArray(status?.capabilities)
+    ? status.capabilities.join(", ") || "—"
+    : "—";
+  element("lc-qualification-limits").textContent = powerTriplet(status?.p_max);
+  element("lc-qualification-location").textContent = status?.location || "—";
+
+  const error = element("lc-qualification-error");
+  error.textContent = status?.last_error || "";
+  error.dataset.error = status?.last_error ? "true" : "false";
+
+  const disconnect = element("lc-qualification-disconnect");
+  disconnect.disabled = !status || status.state === "IDLE";
 }
 
 function renderStatus(status) {
@@ -302,6 +359,12 @@ async function refreshActuators() {
   if (selected && values.some((item) => item.node_id === selected)) select.value = selected;
 }
 
+async function refreshLanQualification() {
+  const status = await getLanQualificationStatus();
+  renderLanQualification(status);
+  return status;
+}
+
 async function refreshEvidence() {
   try {
     const rows = await getRecentLoadControlEvidence(20);
@@ -317,6 +380,7 @@ async function refreshAll() {
   try {
     await refreshStatus();
     await refreshActuators();
+    await refreshLanQualification();
     if (state.visible) await refreshEvidence();
   } catch (error) {
     setMessage(error.message, true);
@@ -340,6 +404,37 @@ async function runLanScan() {
     setLanMessage(error.message, true);
   } finally {
     if (button) button.disabled = false;
+  }
+}
+
+async function runLanQualification(nodeId) {
+  const errorTarget = element("lc-qualification-error");
+  try {
+    errorTarget.textContent = "Opening WebSocket and waiting for HELLO...";
+    errorTarget.dataset.error = "false";
+    renderLanQualification(await connectLanQualification(nodeId));
+  } catch (error) {
+    try {
+      await refreshLanQualification();
+    } catch (_refreshError) {
+      // Keep the connection error as the operator evidence.
+    }
+    errorTarget.textContent = error.message;
+    errorTarget.dataset.error = "true";
+  }
+}
+
+async function runLanQualificationDisconnect() {
+  const button = element("lc-qualification-disconnect");
+  try {
+    if (button) button.disabled = true;
+    renderLanQualification(await disconnectLanQualification());
+  } catch (error) {
+    const target = element("lc-qualification-error");
+    target.textContent = error.message;
+    target.dataset.error = "true";
+  } finally {
+    if (button && state.qualification?.state !== "IDLE") button.disabled = false;
   }
 }
 
@@ -399,7 +494,7 @@ async function runEnable() {
 async function runDisable() {
   try {
     await disableLoadControl();
-    setMessage("External control authority revoked. Safe 0/0/0 W requested.");
+    setMessage("External control authority revoked. Safe 0/0/0 W requested for the mock actuator.");
     await refreshStatus();
   } catch (error) {
     setMessage(error.message, true);
@@ -408,4 +503,7 @@ async function runDisable() {
 
 createUi();
 refreshAll();
-setInterval(() => refreshStatus().catch(() => {}), 1000);
+setInterval(() => {
+  refreshStatus().catch(() => {});
+  if (state.visible) refreshLanQualification().catch(() => {});
+}, 1000);
