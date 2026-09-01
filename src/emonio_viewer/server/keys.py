@@ -4,6 +4,7 @@ from emonio_viewer.config.model import RuntimeConfig
 from emonio_viewer.device_evidence.service import CtConfigurationService, ModbusDeviceEvidenceService
 from emonio_viewer.lifecycle.service import DeviceLifecycleService
 from emonio_viewer.load_control.lan_discovery import LanActuatorDiscoveryService
+from emonio_viewer.load_control.qualification import LoadControlQualificationService
 from emonio_viewer.load_control.service import LoadControlService
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
@@ -22,3 +23,7 @@ MODBUS_DEVICE_EVIDENCE_SERVICE_KEY = web.AppKey("modbus_device_evidence_service"
 SCOPE_SERVICE_KEY = web.AppKey("scope_service", ScopeService)
 LOAD_CONTROL_SERVICE_KEY = web.AppKey("load_control_service", LoadControlService)
 LAN_ACTUATOR_DISCOVERY_SERVICE_KEY = web.AppKey("lan_actuator_discovery_service", LanActuatorDiscoveryService)
+LOAD_CONTROL_QUALIFICATION_SERVICE_KEY = web.AppKey(
+    "load_control_qualification_service",
+    LoadControlQualificationService,
+)
