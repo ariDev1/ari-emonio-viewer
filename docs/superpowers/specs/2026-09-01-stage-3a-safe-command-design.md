@@ -1,6 +1,6 @@
 # ARI Emonio Viewer Stage 3A Safe Command Design
 
-Status: APPROVED DESIGN — NOT IMPLEMENTED
+Status: DESIGN APPROVED IN CHAT — WRITTEN SPEC PENDING REVIEW
 
 Date: 2026-09-01
 
@@ -104,6 +104,8 @@ The action must not send a command immediately. It first arms a wait for the nex
 
 The Viewer must reject a second concurrent SAFE test request while one test is active.
 
+A later test after `PASSED` or `REJECTED` requires another explicit button activation. There is no automatic restart of a test exchange.
+
 ## 8. Canonical sample boundary
 
 When the operator starts a SAFE test, Stage 3A records the current source cycle boundary.
@@ -168,9 +170,11 @@ Stage 3A must not modify, clamp, repair, average, smooth, or sign-correct the co
 
 Stage 3A owns one volatile non-empty `viewer_session_id` for the Viewer process.
 
-The command sequence starts at 1 for that Stage-3A Viewer session and increases by exactly one for each command that is actually transmitted.
+The command sequence starts at 1 for that Stage-3A Viewer session.
 
-A sequence number is never reused in the same Viewer session, including after PASS or REJECTED results.
+A sequence number is allocated immediately before one command send attempt. Once allocated, that sequence number is consumed permanently, whether the send succeeds or fails. It is never reused in the same Viewer session.
+
+Each later operator-initiated SAFE test that reaches the send boundary receives the next sequence number.
 
 The first Stage-3A field qualification therefore uses sequence 1.
 
@@ -186,9 +190,11 @@ The design is:
 2. After HELLO qualification, exactly one receive loop owns all later WebSocket receives.
 3. The receive loop classifies inbound application frames.
 4. `ACK` frames are delivered to the one active Stage-3A ACK waiter.
-5. `STATUS` frames can be observed and logged but cannot qualify a SAFE command.
-6. WebSocket CLOSE, CLOSED, ERROR, heartbeat loss, or transport failure invalidates the real session.
-7. No other task may call `websocket.receive()` directly while the receive owner is active.
+5. `STATUS` frames are allowed. They can be logged but cannot satisfy an ACK waiter and cannot qualify a SAFE command.
+6. A second `HELLO`, an actuator-originated `COMMAND`, malformed protocol JSON, or another unexpected application frame is a protocol fault.
+7. A protocol fault invalidates the real actuator session and rejects an active Stage-3A exchange.
+8. WebSocket CLOSE, CLOSED, ERROR, heartbeat loss, or transport failure invalidates the real session.
+9. No other task may call `websocket.receive()` directly while the receive owner is active.
 
 This refactor must preserve all Stage-2 disconnect and heartbeat behavior.
 
@@ -205,6 +211,8 @@ If no valid ACK is accepted within 2.0 s:
 - no command is retried;
 - no second command is generated automatically;
 - a late ACK cannot change the terminal result.
+
+A late ACK received after the exchange is terminal is logged as unexpected evidence. It does not change the state and does not cause an automatic command.
 
 ## 14. Strict SAFE ACK acceptance
 
@@ -227,6 +235,8 @@ There is no tolerance for `applied_p` in Stage 3A because the present actuator i
 The validator must not clamp, repair, default, or reinterpret any ACK field.
 
 Any mismatch rejects the test. The diagnostic reason must identify the mismatch category without changing the received evidence.
+
+An ACK received while no Stage-3A command is outstanding is logged as `SAFE_ACK_UNEXPECTED`. It cannot change `PASSED`, `REJECTED`, or any Stage-2 qualification state.
 
 ## 15. Actuator reboot and disconnect behavior
 
@@ -273,7 +283,7 @@ State meaning:
 
 `WAITING_FOR_SAMPLE`: operator started a SAFE test and the service is waiting for the next qualifying canonical sample.
 
-`COMMAND_SENT`: the one SAFE command was serialized and transmitted successfully.
+`COMMAND_SENT`: the one SAFE command was serialized and its WebSocket send completed successfully.
 
 `WAITING_FOR_ACK`: the command is outstanding and the 2.0 s ACK deadline is active.
 
@@ -281,7 +291,11 @@ State meaning:
 
 `REJECTED`: the active SAFE test failed deterministically.
 
-`PASSED` and `REJECTED` are terminal for that one test exchange. A later operator test action creates a new exchange only if the service is again admissible. It uses the next unused sequence number.
+`PASSED` and `REJECTED` are terminal for that one test exchange. They do not clear the selected Emonio source and they do not trigger another exchange.
+
+When the operator later presses `SEND SAFE TEST COMMAND`, the backend re-evaluates the complete admissibility gate. If the gate passes, a new exchange starts at `WAITING_FOR_SAMPLE` and uses a new source cycle boundary. If the gate fails, no command is sent.
+
+If Stage-2 qualification is lost, the effective Stage-3A readiness becomes `SOURCE_SELECTED` until a new explicit Stage-2 qualification succeeds.
 
 ## 17. Stage-3A admissibility gate
 
@@ -325,16 +339,26 @@ It must not own or modify acquisition.
 
 ## 19. API design
 
-Stage 3A adds a small API surface separate from the Stage-1 mock API.
+Stage 3A adds these exact API operations:
 
-Required operations are:
+- `GET /api/v1/load-control/lan-safe-test/status`
+- `GET /api/v1/load-control/lan-safe-test/sources`
+- `POST /api/v1/load-control/lan-safe-test/source`
+- `POST /api/v1/load-control/lan-safe-test/send`
 
-- read Stage-3A status;
-- read available current Emonio sources for explicit selection;
-- set the volatile Stage-3A Emonio source;
-- start one SAFE test exchange.
+`POST /api/v1/load-control/lan-safe-test/source` accepts exactly one field:
 
-The start operation accepts no power request from the browser. The backend constructs the fixed zero-output command.
+```json
+{"emonio_device_id":"<selected-current-device-id>"}
+```
+
+`POST /api/v1/load-control/lan-safe-test/send` accepts only an empty JSON object:
+
+```json
+{}
+```
+
+Unknown or additional request fields are rejected.
 
 The browser must never be able to supply:
 
@@ -389,7 +413,7 @@ The Stage-1 mock controls remain inside `DEVELOPMENT / MOCK CONTROL`.
 
 The existing bounded backend diagnostic log remains the primary field evidence for the real LAN actuator path.
 
-Stage 3A should add stable events such as:
+Stage 3A must add these stable events:
 
 - `SAFE_SOURCE_SELECTED`
 - `SAFE_TEST_REQUESTED`
@@ -398,10 +422,11 @@ Stage 3A should add stable events such as:
 - `SAFE_COMMAND_SENT`
 - `SAFE_ACK_RECEIVED`
 - `SAFE_ACK_QUALIFIED`
+- `SAFE_ACK_UNEXPECTED`
 - `SAFE_TEST_PASSED`
 - `SAFE_TEST_REJECTED`
 
-The log should include only the fields needed to reconstruct protocol qualification, including as applicable:
+The log must include the fields needed to reconstruct protocol qualification, as applicable:
 
 - Emonio device ID;
 - measurement cycle ID;
@@ -420,7 +445,7 @@ No credentials or secrets are logged.
 
 ## 22. Deterministic rejection categories
 
-At minimum, Stage 3A must distinguish these failures:
+Stage 3A must distinguish these failures:
 
 - `SOURCE_NOT_SELECTED`
 - `SOURCE_NOT_AVAILABLE`
@@ -438,6 +463,8 @@ At minimum, Stage 3A must distinguish these failures:
 - `ACK_RESULT_MISMATCH`
 - `ACK_APPLIED_P_MISMATCH`
 - `UNEXPECTED_ACTUATOR_FRAME`
+
+A malformed post-HELLO protocol frame is `UNEXPECTED_ACTUATOR_FRAME` unless an active ACK exchange can classify it more specifically as `ACK_PROTOCOL_MISMATCH`.
 
 A failure must never trigger an automatic command.
 
@@ -473,7 +500,7 @@ Unit tests must prove:
 - acquisition failure before sample acceptance sends no command;
 - SAFE command is exactly zero P and zero Q request with `control_enabled=false`;
 - canonical measured P/Q are copied without transformation;
-- sequence allocation is monotonic and never reused;
+- sequence allocation is monotonic and never reused, including after send failure;
 - ACK deadline is 2.0 s after successful send;
 - ACK timeout produces no retry;
 - every strict ACK identity mismatch is rejected;
@@ -483,7 +510,9 @@ Unit tests must prove:
 - concurrent SAFE tests are rejected;
 - source change during active exchange is rejected;
 - actuator disconnect invalidates active exchange;
-- actuator boot change requires new Stage-2 qualification.
+- actuator boot change requires new Stage-2 qualification;
+- a new explicit test after PASS or REJECTED gets a new sample boundary and next sequence;
+- malformed and unexpected post-HELLO frames fail closed.
 
 ### 24.2 WebSocket ownership tests
 
@@ -493,14 +522,20 @@ Tests must prove:
 - ACK delivery does not create a second `receive()` caller;
 - Stage-2 heartbeat remote-disconnect detection still works;
 - STATUS does not satisfy an ACK waiter;
-- WebSocket error closes/invalidate the qualification path;
+- a second HELLO fails closed;
+- an actuator-originated COMMAND fails closed;
+- malformed post-HELLO protocol JSON fails closed;
+- WebSocket error closes and invalidates the qualification path;
 - no automatic reconnect occurs.
 
 ### 24.3 API tests
 
-Tests must prove that the browser cannot submit nonzero power, sequence, measured data, node override, or boot override.
+Tests must prove:
 
-The SAFE-test start endpoint must contain no user-supplied power fields.
+- source selection accepts exactly `emonio_device_id`;
+- SAFE send accepts exactly `{}`;
+- additional fields are rejected;
+- the browser cannot submit nonzero power, sequence, measured data, node override, or boot override.
 
 ### 24.4 Frontend contract tests
 
