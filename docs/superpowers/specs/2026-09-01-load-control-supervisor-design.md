@@ -64,6 +64,15 @@ The following values can also persist as safety configuration:
 - operator maximum active-load limit for Phase B;
 - operator maximum active-load limit for Phase C.
 
+Persistent safety configuration shall be validated before it replaces the active configuration:
+
+- `P_reserve` shall be finite and greater than `0 W`;
+- each operator maximum shall be finite and greater than `0 W`;
+- invalid configuration is rejected without partial application;
+- persistence failure is rejected without replacing the previously valid in-memory and persisted configuration.
+
+Persistent configuration updates shall use an atomic replacement pattern. A partially written configuration shall never become active.
+
 The following values are always volatile and shall not persist across Viewer restarts:
 
 - control-enabled state;
@@ -192,7 +201,10 @@ The control-mode state machine has only:
 - Trip reason is latched.
 - Automatic discovery, reconnect, and identity verification are permitted.
 - Automatic return to `ENABLED` is forbidden.
-- Only a new explicit operator enable request can clear the trip, and only if the complete enable gate passes.
+- Only a new explicit operator enable request can leave `TRIPPED`, and only if the complete enable gate passes.
+- An operator disable request while already `TRIPPED` may reassert the safe demand but shall not clear the trip or change the control mode.
+
+This preserves the approved manual re-enable rule. A Viewer restart starts a new volatile control session in `DISABLED` but does not erase historical trip evidence.
 
 ### 6.2 Actuator session readiness
 
@@ -206,13 +218,15 @@ Session readiness is separate from control authority. Conceptual states are:
 - `READY`;
 - `SESSION_FAULT`.
 
-`READY` means only that the selected actuator connection and protocol session are qualified. It never means that active control is enabled.
+`READY` means only that the selected actuator connection, identity, protocol version, capabilities, and limit contract are qualified. It never means that active control is enabled and it does not imply that safe state is confirmed.
 
-A normal startup condition can therefore be:
+A valid condition can therefore be:
 
 `control_mode = DISABLED`
 
 `session_state = READY`
+
+`safe_state = SAFE_UNCONFIRMED`
 
 ### 6.3 Safe-state confirmation
 
@@ -224,7 +238,7 @@ Safe-state evidence is independent:
 
 `SAFE_UNCONFIRMED` means the Viewer requires `0/0/0 W` but does not yet have valid actuator evidence that this state is physically applied.
 
-`SAFE_CONFIRMED` means the bound actuator has acknowledged the current safe command and reports applied active-load demand of exactly `0/0/0 W` according to protocol precision rules.
+`SAFE_CONFIRMED` means the bound actuator has acknowledged the current safe command with a successful result and reports applied active-load setpoints of exactly `0/0/0 W` in the protocol data model.
 
 A sent safe command is not proof of safe applied state.
 
@@ -236,6 +250,8 @@ The Viewer shall enter `ENABLED` only when all required conditions are true:
 
 - a control-source Emonio is bound;
 - an actuator persistent node ID is bound;
+- `P_reserve` is configured, finite, and greater than `0 W`;
+- all operator per-phase limits are configured, finite, and greater than `0 W`;
 - the bound Emonio has a current sample;
 - the current sample quality is `VALID`;
 - the current sample passes the dedicated control-freshness rule;
@@ -246,8 +262,9 @@ The Viewer shall enter `ENABLED` only when all required conditions are true:
 - the actuator advertises `ACTIVE_LOAD_CONTROL`;
 - effective per-phase active-load limits are valid;
 - no protocol/session fault is active;
-- no outstanding command from an incompatible session exists;
-- safe state is `SAFE_CONFIRMED`.
+- no incompatible outstanding command exists;
+- safe state is `SAFE_CONFIRMED`;
+- the control evidence writer is healthy.
 
 If any condition fails, the Viewer remains in its current non-enabled mode and reports the exact rejection reason.
 
@@ -416,12 +433,14 @@ If a fault or operator disable occurs while a non-zero normal command is outstan
 - the previous command becomes superseded for control purposes;
 - allocate a new command sequence;
 - transmit a safe `0/0/0 W` command if the session permits transmission;
-- enter `TRIPPED` for a fault or `DISABLED` for operator disable;
+- enter `TRIPPED` for a fault or `DISABLED` for operator disable from `ENABLED`;
 - set safe state to `SAFE_UNCONFIRMED` until a valid safe acknowledgement arrives.
 
 A late acknowledgement for the superseded non-zero command is recorded as obsolete and cannot restore control state or authoritative actuator state.
 
 Only the current safe command can establish `SAFE_CONFIRMED`.
+
+A safe acknowledgement confirms safety only if its identity and sequence are valid, its result is successful, and all three applied active-load setpoints are exactly zero.
 
 If the connection is lost and no safe command can be delivered, safe state remains `SAFE_UNCONFIRMED`.
 
@@ -429,7 +448,7 @@ If the connection is lost and no safe command can be delivered, safe state remai
 
 Operator disable is not a trip.
 
-On `DISABLE EXTERNAL CONTROL`:
+On `DISABLE EXTERNAL CONTROL` while `ENABLED`:
 
 - immediately revoke authority for non-zero demand;
 - transition to `DISABLED`;
@@ -437,6 +456,10 @@ On `DISABLE EXTERNAL CONTROL`:
 - transmit a safe command if possible;
 - track `SAFE_UNCONFIRMED` or `SAFE_CONFIRMED` independently;
 - continue discovery, connection, telemetry, and evidence collection.
+
+While already `DISABLED`, disable is idempotent and can reassert the safe demand.
+
+While `TRIPPED`, disable can reassert the safe demand but shall not clear the trip or transition to `DISABLED`.
 
 ## 16. Latched trip behavior
 
@@ -458,7 +481,8 @@ Trip conditions include at least:
 - required capability loss;
 - active actuator limit contract change;
 - invalid or incompatible acknowledgement;
-- qualified acknowledgement timeout.
+- qualified acknowledgement timeout;
+- control evidence write failure before or during active control.
 
 After the fault clears, automatic reconnect and verification are permitted, but control remains `TRIPPED`.
 
@@ -495,7 +519,7 @@ Measurement cycle ID and actuator command sequence are separate identities and s
 
 ### 18.1 Discovery
 
-Preferred discovery is mDNS using a service concept such as:
+Preferred real discovery is mDNS using a service concept such as:
 
 `_ari-emonio-load._tcp.local`
 
@@ -506,6 +530,8 @@ Discovery can update network location information such as hostname, IP address, 
 Discovery never changes persistent control binding and never enables control.
 
 No automatic transfer to another discovered actuator is permitted.
+
+The discovery boundary shall be abstracted so the first implementation can use a deterministic `MockActuatorDiscovery` without adding active mDNS networking.
 
 ### 18.2 Persistent actuator identity
 
@@ -577,7 +603,7 @@ WebSocket is preferred over custom raw TCP framing because it provides:
 
 Connection alone is never sufficient for `READY`.
 
-The session must complete protocol qualification first.
+The session must complete identity, protocol, capability, and limit qualification first.
 
 Transport heartbeat and application protocol evidence are distinct. A technically open WebSocket does not prove that the actuator application is ready.
 
@@ -603,12 +629,14 @@ The Viewer verifies:
 - node ID equals persistent binding;
 - protocol version is supported;
 - `ACTIVE_LOAD_CONTROL` capability exists;
-- all required limits are finite and valid;
+- all required limits are finite, positive, and valid;
 - boot ID is present and valid.
 
-A current safe physical state must then be established. The Viewer can issue a safe command after qualification and use its acknowledgement to establish `SAFE_CONFIRMED`.
+After identity, protocol, capability, and limit qualification succeeds, session state can become `READY`.
 
-Only after qualification is complete can session state become `READY`.
+Safe-state confirmation remains a separate state domain. While `DISABLED` or `TRIPPED`, the service can issue a safe command through a `READY` session and use its valid acknowledgement to establish `SAFE_CONFIRMED`.
+
+The enable gate requires both `session_state = READY` and `safe_state = SAFE_CONFIRMED`.
 
 ## 22. Protocol model
 
@@ -675,9 +703,21 @@ An `ACK` logically contains at least:
 - applied `P_A/P_B/P_C`;
 - result state.
 
-The Viewer accepts an acknowledgement only if identity, sequence, protocol, numeric validity, limits, and result all pass strict validation.
+The Viewer accepts an acknowledgement only if:
+
+- protocol version matches the qualified session;
+- Viewer session ID matches;
+- node ID matches;
+- boot ID matches;
+- sequence matches the expected command;
+- result state is valid;
+- each applied active-load value is finite;
+- each applied active-load value is non-negative;
+- each applied active-load value does not exceed its qualified actuator limit.
 
 Accepted applied values become authoritative actuator state.
+
+For a safe command, `SAFE_CONFIRMED` additionally requires a successful result and exactly zero applied active-load setpoints on A, B, and C.
 
 ### 22.4 STATUS
 
@@ -749,7 +789,8 @@ Typical events include:
 - `CONTROL_SAMPLE_STALE`;
 - `ACTUATOR_CONNECTION_LOST`;
 - `ACTUATOR_BOOT_CHANGED`;
-- `PROTOCOL_ERROR`.
+- `PROTOCOL_ERROR`;
+- `CONTROL_EVIDENCE_WRITE_ERROR`.
 
 Command-calculation evidence contains at least:
 
@@ -788,6 +829,14 @@ Evidence serialization requirements:
 - UTC timestamps are explicit ISO-8601 values;
 - deterministic key and numeric serialization rules are testable;
 - each event is append-only and is never rewritten as a different fact.
+
+Evidence health is safety-relevant:
+
+- a normal non-zero command shall not be transmitted if its required calculation/command evidence cannot be recorded;
+- an evidence write failure while `ENABLED` causes `TRIPPED`;
+- an evidence write failure while `DISABLED` or `TRIPPED` blocks enable until evidence health is restored;
+- a safe command is still attempted when required even if evidence storage has failed, because physical safety takes priority over audit persistence;
+- evidence-storage failure shall remain visible through status/diagnostics even when the primary JSONL event cannot be appended.
 
 ## 25. Viewer API boundary
 
@@ -844,7 +893,8 @@ A compact Load Control status area shall expose at least:
 - per-phase limit state;
 - outstanding command sequence;
 - last acknowledged sequence;
-- last trip reason.
+- last trip reason;
+- evidence health.
 
 The UI shall not expose direct manual actuator power command fields.
 
@@ -854,25 +904,31 @@ A browser reload or browser disconnect shall not define backend control state.
 
 The first implementation is Viewer-side only and is incapable of commanding a real actuator.
 
-The actuator session is abstracted:
+Both discovery and transport are abstracted:
 
 ```text
+ActuatorDiscovery interface
+        |
+        +--> MockActuatorDiscovery        first implementation
+        +--> MdnsActuatorDiscovery        later qualification stage
+
 LoadControlSupervisor
         |
         v
 ActuatorSession interface
         |
         +--> MockActuatorSession          first implementation
-        |
         +--> WebSocketActuatorSession     later qualification stage
 ```
 
-The first implementation selects only deterministic mock transport.
+The first implementation selects only deterministic mock discovery and mock transport.
 
-There is no fallback from mock transport to network transport.
+There is no fallback from mock components to network components.
 
 The mock can deterministically simulate:
 
+- discovery of multiple nodes;
+- changing mock network location;
 - node ID;
 - boot ID;
 - capabilities;
@@ -896,7 +952,7 @@ The mock begins after canonical measurement input. It does not modify the measur
 
 The required progression is:
 
-1. Viewer logic plus deterministic in-process mock actuator;
+1. Viewer logic plus deterministic in-process mock discovery and mock actuator;
 2. Viewer real networking plus network mock actuator;
 3. ESP32 protocol implementation;
 4. real low-risk actuator qualification;
@@ -913,11 +969,11 @@ Viewer shutdown revokes control authority before closing the actuator session.
 Shutdown sequence for load control is conceptually:
 
 1. reject new enable/configuration operations;
-2. transition active control authority to non-enabled state;
+2. revoke active non-zero control authority;
 3. require safe `0/0/0 W`;
 4. transmit a safe command if a qualified session is available;
 5. record `SAFE_CONFIRMED` if valid acknowledgement arrives before the bounded shutdown deadline;
-6. otherwise record `SAFE_UNCONFIRMED`;
+6. otherwise record `SAFE_UNCONFIRMED` when evidence storage remains available;
 7. close actuator session and stop load-control tasks.
 
 Shutdown shall not block indefinitely waiting for safe confirmation.
@@ -937,6 +993,7 @@ The first stage shall include deterministic tests for at least:
 - closed supervisory update from acknowledged state;
 - per-phase independence;
 - non-negative active-load commands;
+- persistent configuration validation and atomic replacement;
 - operator and actuator limits;
 - maximum saturation without trip;
 - startup always disabled;
@@ -950,10 +1007,12 @@ The first stage shall include deterministic tests for at least:
 - one outstanding normal command;
 - intermediate sample observation without delayed command replay;
 - acknowledgement identity and sequence validation;
+- acknowledgement non-negative and limit validation;
 - acknowledged applied value as authoritative state;
 - safe-command preemption;
+- exact safe acknowledgement requirements;
 - obsolete late acknowledgement rejection;
-- operator disable behavior;
+- operator disable behavior in `ENABLED`, `DISABLED`, and `TRIPPED`;
 - trip latching;
 - manual re-enable requirement;
 - safe requested versus safe confirmed;
@@ -965,8 +1024,11 @@ The first stage shall include deterministic tests for at least:
 - monotonic command sequence;
 - protocol malformed/non-finite rejection;
 - Q telemetry with zero Q compensation request;
-- deterministic mock scenarios;
+- deterministic mock discovery scenarios;
+- deterministic mock session scenarios;
 - append-only JSONL evidence;
+- evidence write failure blocking non-zero control and causing trip when enabled;
+- safe command attempt despite evidence failure;
 - separation of measured, calculated, transmitted, and acknowledged values;
 - persistence boundaries;
 - shutdown safe-state evidence;
@@ -982,7 +1044,7 @@ The first implementation is acceptable only when all of these are demonstrated:
 - existing SCOPE semantics remain unchanged;
 - existing CSV precision and recording tests remain unchanged;
 - all new load-control unit tests pass;
-- all new load-control integration tests pass with mock transport only;
+- all new load-control integration tests pass with mock components only;
 - control starts disabled on every process start;
 - no path can transmit to a real actuator;
 - no browser endpoint can directly set phase power commands;
@@ -1030,7 +1092,9 @@ The following invariants are mandatory:
 12. Viewer restart never restores enabled control.
 13. Actuator reboot never preserves previous acknowledged load state.
 14. A cleared fault never automatically exits `TRIPPED`.
-15. No real actuator path is active in the first implementation stage.
+15. Evidence failure never permits a new non-zero command.
+16. Physical safe-command attempts are not suppressed by evidence-storage failure.
+17. No real actuator path is active in the first implementation stage.
 
 ## 34. Resulting architecture
 
