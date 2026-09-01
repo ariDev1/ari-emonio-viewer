@@ -14,7 +14,7 @@
   position: fixed;
   inset: 0 0 0 auto;
   z-index: 80;
-  width: min(560px, 96vw);
+  width: min(620px, 96vw);
   height: 100vh;
   overflow: auto;
   padding: 18px;
@@ -29,16 +29,31 @@
 
 .load-control-panel-header,
 .load-control-section-header,
-.load-control-actions {
+.load-control-actions,
+.load-control-header-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
+.load-control-header-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
 .load-control-panel h2,
 .load-control-panel h3 {
   margin: 0;
+}
+
+.load-control-real-disabled {
+  padding: 4px 7px;
+  border: 1px solid var(--line, #313845);
+  color: var(--muted, #9ca6b5);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
 }
 
 .load-control-stage-note,
@@ -56,47 +71,22 @@
   margin: 8px 0 0;
 }
 
-.load-control-state-grid,
-.load-control-value-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin: 12px 0;
-}
-
-.load-control-state-grid > div,
-.load-control-value-grid > div,
-.load-control-section {
+.load-control-section,
+.load-control-development-tools {
+  margin-top: 10px;
   border: 1px solid var(--line, #313845);
   background: var(--panel-raised, #171c24);
 }
 
-.load-control-state-grid > div,
-.load-control-value-grid > div {
-  padding: 8px 10px;
-}
-
-.load-control-state-grid span,
-.load-control-value-grid span {
-  display: block;
-  color: var(--muted, #9ca6b5);
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.load-control-state-grid strong,
-.load-control-value-grid strong {
-  display: block;
-  margin-top: 4px;
-  overflow-wrap: anywhere;
-}
-
 .load-control-section {
-  margin-top: 10px;
   padding: 12px;
 }
 
+.load-control-primary-section {
+  padding: 14px;
+}
+
+.load-control-connection-controls,
 .load-control-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -104,15 +94,23 @@
   margin-top: 10px;
 }
 
-.load-control-form-grid label {
+.load-control-connection-controls label,
+.load-control-form-grid label,
+.load-control-real-actuator-label {
   display: grid;
   gap: 4px;
   color: var(--muted, #9ca6b5);
   font-size: 0.72rem;
 }
 
+.load-control-real-actuator-label {
+  margin-top: 10px;
+}
+
+.load-control-connection-controls input,
 .load-control-form-grid input,
-.load-control-form-grid select {
+.load-control-form-grid select,
+.load-control-real-actuator-label select {
   min-width: 0;
   padding: 7px 8px;
   color: inherit;
@@ -137,60 +135,144 @@
   color: var(--danger, #ff7a7a);
 }
 
-.load-control-lan-results {
-  display: grid;
-  gap: 8px;
+.load-control-real-actuator-summary {
+  min-height: 52px;
   margin-top: 8px;
+  padding: 9px 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line, #313845);
+  background: var(--input, #0d1117);
   color: var(--muted, #9ca6b5);
-  font-size: 0.75rem;
+  font: 0.72rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-.load-control-lan-result {
+.load-control-primary-status,
+.load-control-state-grid,
+.load-control-value-grid {
   display: grid;
-  gap: 4px;
-  padding: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.load-control-primary-status > div,
+.load-control-state-grid > div,
+.load-control-value-grid > div,
+.load-control-qualification-evidence > div {
+  min-width: 0;
+  padding: 8px 10px;
   border: 1px solid var(--line, #313845);
   background: var(--input, #0d1117);
 }
 
-.load-control-lan-result strong {
-  color: inherit;
-  overflow-wrap: anywhere;
+.load-control-primary-status span,
+.load-control-state-grid span,
+.load-control-value-grid span,
+.load-control-qualification-evidence span {
+  display: block;
+  color: var(--muted, #9ca6b5);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-.load-control-lan-result span {
-  overflow-wrap: anywhere;
-}
-
-.load-control-lan-qualify {
-  justify-self: start;
+.load-control-primary-status strong,
+.load-control-state-grid strong,
+.load-control-value-grid strong,
+.load-control-qualification-evidence strong {
+  display: block;
   margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 
-.load-control-qualification-grid > div {
-  min-width: 0;
+.load-control-qualification-evidence {
+  display: grid;
+  gap: 8px;
 }
 
-.load-control-qualification-section .load-control-actions {
-  margin-top: 8px;
+.load-control-qualification-evidence > div {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.7fr) minmax(0, 1.5fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.load-control-qualification-evidence strong {
+  margin-top: 0;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+
+.load-control-diagnostic-log,
+.load-control-evidence {
+  overflow: auto;
+  margin: 10px 0 0;
+  padding: 9px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--line, #313845);
+  background: var(--input, #0d1117);
+  font: 0.72rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.load-control-diagnostic-log {
+  min-height: 150px;
+  max-height: 300px;
 }
 
 .load-control-evidence {
   max-height: 220px;
-  overflow: auto;
+}
+
+.load-control-development-tools {
+  padding: 0;
+}
+
+.load-control-development-tools > summary {
+  cursor: pointer;
+  padding: 11px 12px;
+  color: var(--muted, #9ca6b5);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  user-select: none;
+}
+
+.load-control-development-tools[open] {
+  padding: 0 12px 12px;
+}
+
+.load-control-development-tools[open] > summary {
+  margin: 0 -12px;
+  border-bottom: 1px solid var(--line, #313845);
+}
+
+.load-control-development-tools > .load-control-section-note {
   margin: 10px 0 0;
-  padding: 8px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font: 0.72rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  border: 1px solid var(--line, #313845);
+}
+
+.load-control-development-tools .load-control-section {
   background: var(--input, #0d1117);
 }
 
 @media (max-width: 760px) {
+  .load-control-panel-header,
+  .load-control-header-actions {
+    align-items: flex-start;
+  }
+
+  .load-control-panel-header {
+    flex-direction: column;
+  }
+
+  .load-control-connection-controls,
+  .load-control-primary-status,
   .load-control-state-grid,
   .load-control-value-grid,
-  .load-control-form-grid {
+  .load-control-form-grid,
+  .load-control-qualification-evidence > div {
     grid-template-columns: 1fr;
   }
 }
