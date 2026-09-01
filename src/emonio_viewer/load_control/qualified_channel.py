@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from .protocol import AckFrame, CommandFrame, HelloFrame, StatusFrame
 
 
@@ -18,6 +20,8 @@ class QualifiedActuatorChannel:
     def __init__(self) -> None:
         self._session = None
         self._hello: HelloFrame | None = None
+        self._disconnect_event = asyncio.Event()
+        self._disconnect_event.set()
 
     def bind(self, session, hello: HelloFrame) -> None:
         if not isinstance(hello, HelloFrame):
@@ -28,10 +32,12 @@ class QualifiedActuatorChannel:
             raise QualifiedActuatorChannelError("qualified actuator channel is already bound")
         self._session = session
         self._hello = hello
+        self._disconnect_event = asyncio.Event()
 
     def clear(self, session=None) -> None:
         if session is not None and session is not self._session:
             return
+        self._disconnect_event.set()
         self._session = None
         self._hello = None
 
@@ -40,6 +46,10 @@ class QualifiedActuatorChannel:
         if session is None or not bool(getattr(session, "connected", False)):
             return None
         return self._hello
+
+    def disconnect_event(self) -> asyncio.Event:
+        """Return the disconnect boundary for the current qualified instance."""
+        return self._disconnect_event
 
     def _qualified_session(self):
         session = self._session
@@ -60,3 +70,7 @@ class QualifiedActuatorChannel:
     async def receive(self, timeout_s: float) -> AckFrame | StatusFrame:
         session = self._qualified_session()
         return await session.receive_frame(timeout_s)
+
+    def receive_nowait(self) -> AckFrame | StatusFrame:
+        session = self._qualified_session()
+        return session.receive_frame_nowait()
