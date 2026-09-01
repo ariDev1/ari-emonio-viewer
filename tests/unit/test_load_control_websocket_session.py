@@ -308,6 +308,29 @@ def test_websocket_session_disconnect_watcher_sends_no_frame() -> None:
     asyncio.run(scenario())
 
 
+def test_websocket_session_remote_close_wakes_frame_waiter() -> None:
+    async def scenario() -> None:
+        websocket = FakeWebSocket(
+            [
+                FakeMessage(WSMsgType.TEXT, encode_frame(_hello())),
+                FakeMessage(WSMsgType.CLOSE, ""),
+            ]
+        )
+        session, _client = _session(websocket)
+
+        await session.connect()
+        session.start_receive_loop()
+
+        with pytest.raises(ConnectionError, match="disconnected"):
+            await session.receive_frame(0.15)
+        await session.wait_for_disconnect()
+        assert websocket.sent == []
+
+        await session.disconnect()
+
+    asyncio.run(scenario())
+
+
 def test_websocket_session_uses_explicit_timeouts_and_protocol_frames() -> None:
     async def scenario() -> None:
         hello = _hello()
