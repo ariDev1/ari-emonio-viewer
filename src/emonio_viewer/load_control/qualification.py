@@ -96,6 +96,7 @@ class LoadControlQualificationService:
         self._session = None
         self._watch_task = None
         self._last_error: str | None = None
+        self._operation_lock = asyncio.Lock()
 
     def _resolve_descriptor(self, node_id: str) -> ActuatorDescriptor:
         if not isinstance(node_id, str) or not node_id:
@@ -141,43 +142,44 @@ class LoadControlQualificationService:
         )
 
     async def connect(self, node_id: str) -> QualificationStatus:
-        if self._session is not None and self._session.connected:
+        if self._operation_lock.locked() or self._session is not None:
             raise LoadControlQualificationError(
                 "a Stage-2 actuator connection is already open"
             )
 
-        descriptor = self._resolve_descriptor(node_id)
-        self._selected_descriptor = descriptor
-        self._hello = None
-        self._last_error = None
-        self._state = QualificationState.DISCOVERED
-
-        session = self._session_factory(
-            descriptor,
-            connect_timeout_s=self._connect_timeout_s,
-            receive_timeout_s=self._receive_timeout_s,
-        )
-        self._session = session
-
-        try:
-            self._state = QualificationState.CONNECTING
-            await session.open()
-            self._state = QualificationState.HELLO_WAIT
-            hello = await session.receive_hello()
-            qualify_hello(descriptor, hello)
-            self._hello = hello
-            self._state = QualificationState.QUALIFIED
-            self._watch_task = self._create_task(self._watch_disconnect(session))
-            return self.status()
-        except Exception as exc:
+        async with self._operation_lock:
+            descriptor = self._resolve_descriptor(node_id)
+            self._selected_descriptor = descriptor
             self._hello = None
-            self._last_error = _error_text(exc)
-            self._state = QualificationState.REJECTED
+            self._last_error = None
+            self._state = QualificationState.DISCOVERED
+
+            session = self._session_factory(
+                descriptor,
+                connect_timeout_s=self._connect_timeout_s,
+                receive_timeout_s=self._receive_timeout_s,
+            )
+            self._session = session
+
             try:
-                await session.disconnect()
-            finally:
-                self._session = None
-            return self.status()
+                self._state = QualificationState.CONNECTING
+                await session.open()
+                self._state = QualificationState.HELLO_WAIT
+                hello = await session.receive_hello()
+                qualify_hello(descriptor, hello)
+                self._hello = hello
+                self._state = QualificationState.QUALIFIED
+                self._watch_task = self._create_task(self._watch_disconnect(session))
+                return self.status()
+            except Exception as exc:
+                self._hello = None
+                self._last_error = _error_text(exc)
+                self._state = QualificationState.REJECTED
+                try:
+                    await session.disconnect()
+                finally:
+                    self._session = None
+                return self.status()
 
     async def _watch_disconnect(self, session) -> None:
         try:
@@ -200,26 +202,29 @@ class LoadControlQualificationService:
                         self._last_error = _error_text(exc)
 
     async def disconnect(self) -> QualificationStatus:
-        had_selection = self._selected_descriptor is not None
-        session = self._session
-        watch_task = self._watch_task
+        async with self._operation_lock:
+            had_selection = self._selected_descriptor is not None
+            session = self._session
+            watch_task = self._watch_task
 
-        self._session = None
-        self._watch_task = None
-        self._hello = None
+            self._session = None
+            self._watch_task = None
+            self._hello = None
 
-        if watch_task is not None and watch_task is not asyncio.current_task():
-            watch_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await watch_task
+            if watch_task is not None and watch_task is not asyncio.current_task():
+                watch_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await watch_task
 
-        if session is not None:
-            await session.disconnect()
+            if session is not None:
+                await session.disconnect()
 
-        self._state = (
-            QualificationState.DISCONNECTED if had_selection else QualificationState.IDLE
-        )
-        return self.status()
+            self._state = (
+                QualificationState.DISCONNECTED
+                if had_selection
+                else QualificationState.IDLE
+            )
+            return self.status()
 
     async def close(self) -> None:
         await self.disconnect()
