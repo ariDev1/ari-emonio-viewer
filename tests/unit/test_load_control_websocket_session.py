@@ -9,6 +9,7 @@ from emonio_viewer.load_control.protocol import (
     AckFrame,
     CommandFrame,
     HelloFrame,
+    ProtocolError,
     decode_frame,
     encode_frame,
 )
@@ -18,7 +19,7 @@ from emonio_viewer.load_control.session_websocket import WebSocketActuatorSessio
 @dataclass
 class FakeMessage:
     type: WSMsgType
-    data: str
+    data: object
 
 
 class FakeWebSocket:
@@ -92,20 +93,126 @@ def _command() -> CommandFrame:
     )
 
 
+def _ack() -> AckFrame:
+    command = _command()
+    return AckFrame(
+        protocol_version=1,
+        viewer_session_id=command.viewer_session_id,
+        node_id=command.node_id,
+        boot_id=command.boot_id,
+        sequence=command.sequence,
+        ack_utc="2026-09-01T12:00:00.200000+00:00",
+        applied_p=command.p_load_request,
+        result="APPLIED",
+    )
+
+
+def _session(websocket: FakeWebSocket, *, wait_for=asyncio.wait_for):
+    client = FakeClientSession(websocket)
+    return (
+        WebSocketActuatorSession(
+            _descriptor(),
+            connect_timeout_s=0.25,
+            receive_timeout_s=0.15,
+            client_session_factory=lambda: client,
+            wait_for=wait_for,
+        ),
+        client,
+    )
+
+
+def test_websocket_session_supports_open_then_receive_hello() -> None:
+    async def scenario() -> None:
+        websocket = FakeWebSocket([FakeMessage(WSMsgType.TEXT, encode_frame(_hello()))])
+        session, client = _session(websocket)
+
+        await session.open()
+        assert session.connected is True
+        assert client.locations == ["ws://192.168.20.44:8765/control"]
+        assert len(websocket.messages) == 1
+
+        received_hello = await session.receive_hello()
+        assert received_hello == _hello()
+        assert websocket.messages == []
+        assert websocket.sent == []
+
+        await session.disconnect()
+
+    asyncio.run(scenario())
+
+
+def test_websocket_session_rejects_non_hello_first_application_frame() -> None:
+    async def scenario() -> None:
+        websocket = FakeWebSocket([FakeMessage(WSMsgType.TEXT, encode_frame(_ack()))])
+        session, client = _session(websocket)
+
+        await session.open()
+        with pytest.raises(ProtocolError, match="first actuator frame must be HELLO"):
+            await session.receive_hello()
+
+        assert websocket.sent == []
+        assert websocket.closed is True
+        assert client.closed is True
+        assert session.connected is False
+
+    asyncio.run(scenario())
+
+
+def test_websocket_session_rejects_malformed_json_first_frame() -> None:
+    async def scenario() -> None:
+        websocket = FakeWebSocket([FakeMessage(WSMsgType.TEXT, "{not-json")])
+        session, _client = _session(websocket)
+
+        await session.open()
+        with pytest.raises(ProtocolError, match="invalid protocol JSON"):
+            await session.receive_hello()
+
+        assert websocket.sent == []
+        assert session.connected is False
+
+    asyncio.run(scenario())
+
+
+def test_websocket_session_rejects_binary_first_frame() -> None:
+    async def scenario() -> None:
+        websocket = FakeWebSocket([FakeMessage(WSMsgType.BINARY, b"binary")])
+        session, _client = _session(websocket)
+
+        await session.open()
+        with pytest.raises(ProtocolError, match="frame must be text"):
+            await session.receive_hello()
+
+        assert websocket.sent == []
+        assert session.connected is False
+
+    asyncio.run(scenario())
+
+
+def test_websocket_session_disconnect_watcher_sends_no_frame() -> None:
+    async def scenario() -> None:
+        websocket = FakeWebSocket(
+            [
+                FakeMessage(WSMsgType.TEXT, encode_frame(_hello())),
+                FakeMessage(WSMsgType.CLOSE, ""),
+            ]
+        )
+        session, _client = _session(websocket)
+
+        await session.connect()
+        await session.wait_for_disconnect()
+
+        assert websocket.sent == []
+
+        await session.disconnect()
+
+    asyncio.run(scenario())
+
+
 def test_websocket_session_uses_explicit_timeouts_and_protocol_frames() -> None:
     async def scenario() -> None:
         hello = _hello()
         command = _command()
-        ack = AckFrame(
-            protocol_version=1,
-            viewer_session_id=command.viewer_session_id,
-            node_id=command.node_id,
-            boot_id=command.boot_id,
-            sequence=command.sequence,
-            ack_utc="2026-09-01T12:00:00.200000+00:00",
-            applied_p=command.p_load_request,
-            result="APPLIED",
-        )
+        ack = _ack()
         websocket = FakeWebSocket(
             [
                 FakeMessage(WSMsgType.TEXT, encode_frame(hello)),
