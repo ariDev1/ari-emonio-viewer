@@ -162,6 +162,19 @@
   overflow-wrap: anywhere;
 }
 
+.load-control-lan-qualify {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.load-control-qualification-grid > div {
+  min-width: 0;
+}
+
+.load-control-qualification-section .load-control-actions {
+  margin-top: 8px;
+}
+
 .load-control-evidence {
   max-height: 220px;
   overflow: auto;
