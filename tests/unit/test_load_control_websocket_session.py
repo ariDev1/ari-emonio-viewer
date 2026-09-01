@@ -1,7 +1,8 @@
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from aiohttp import WSMsgType
+import pytest
 
 from emonio_viewer.load_control.model import ActuatorDescriptor, ThreePhasePower
 from emonio_viewer.load_control.protocol import (
@@ -141,5 +142,27 @@ def test_websocket_session_uses_explicit_timeouts_and_protocol_frames() -> None:
         assert websocket.closed is True
         assert client.closed is True
         assert session.connected is False
+
+    asyncio.run(scenario())
+
+
+def test_websocket_session_rejects_command_for_different_boot() -> None:
+    async def scenario() -> None:
+        websocket = FakeWebSocket([FakeMessage(WSMsgType.TEXT, encode_frame(_hello()))])
+        client = FakeClientSession(websocket)
+        session = WebSocketActuatorSession(
+            _descriptor(),
+            connect_timeout_s=0.25,
+            receive_timeout_s=0.15,
+            client_session_factory=lambda: client,
+        )
+        await session.connect()
+
+        wrong_boot = replace(_command(), boot_id="BOOT-OLD")
+        with pytest.raises(ValueError, match="boot_id"):
+            await session.send_command(wrong_boot)
+        assert websocket.sent == []
+
+        await session.disconnect()
 
     asyncio.run(scenario())
