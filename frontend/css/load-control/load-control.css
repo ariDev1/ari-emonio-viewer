@@ -41,11 +41,19 @@
   margin: 0;
 }
 
-.load-control-stage-note {
-  margin: 8px 0 14px;
+.load-control-stage-note,
+.load-control-section-note {
   color: var(--muted, #9ca6b5);
   font-size: 0.78rem;
   line-height: 1.4;
+}
+
+.load-control-stage-note {
+  margin: 8px 0 14px;
+}
+
+.load-control-section-note {
+  margin: 8px 0 0;
 }
 
 .load-control-state-grid,
@@ -123,6 +131,35 @@
   margin-top: 10px;
   color: var(--muted, #9ca6b5);
   font-size: 0.78rem;
+}
+
+.load-control-status-text[data-error="true"] {
+  color: var(--danger, #ff7a7a);
+}
+
+.load-control-lan-results {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--muted, #9ca6b5);
+  font-size: 0.75rem;
+}
+
+.load-control-lan-result {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line, #313845);
+  background: var(--input, #0d1117);
+}
+
+.load-control-lan-result strong {
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.load-control-lan-result span {
+  overflow-wrap: anywhere;
 }
 
 .load-control-evidence {
