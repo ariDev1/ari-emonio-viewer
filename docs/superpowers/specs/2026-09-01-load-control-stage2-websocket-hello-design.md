@@ -8,7 +8,7 @@ Target branch: `testing`
 
 Viewer baseline: ARI Emonio Viewer v0.4.19
 
-Audit branch HEAD before this design document: `4e66d549b813ac3a1bdcacf413d6c41721b2bf1e`
+Audited branch HEAD before this design: `4e66d549b813ac3a1bdcacf413d6c41721b2bf1e`
 
 Status: APPROVED ARCHITECTURE. IMPLEMENTATION NOT STARTED.
 
@@ -30,12 +30,12 @@ The Emonio remains the electrical measurement authority.
 
 ## 2. Verified Starting Point
 
-The current testing branch already contains these independent parts:
+The current `testing` branch already contains:
 
 - read-only mDNS discovery;
-- an `ActuatorDescriptor` model;
+- `ActuatorDescriptor`;
 - strict protocol V1 frame decoding;
-- a `WebSocketActuatorSession` transport;
+- `WebSocketActuatorSession`;
 - deterministic mock actuator control;
 - the Stage-1 LOAD CTRL user interface;
 - the Stage-1 mock-control supervisor.
@@ -44,49 +44,43 @@ The real LAN discovery path is field-confirmed through the ESP32 advertisement a
 
 The real WebSocket connection and HELLO qualification are not field-confirmed yet.
 
-The current active runtime entry point is `emonio_viewer.main_v0416:main`. This runtime injects `server.app_v0416.create_app` into the base runtime.
+The active runtime entry point is `emonio_viewer.main_v0416:main`. It injects `server.app_v0416.create_app` into the base runtime.
 
-## 3. Existing Files and Responsibilities
+## 3. Existing Responsibility Boundary
 
 ### 3.1 Discovery
 
 `src/emonio_viewer/load_control/discovery.py`
 
-Responsibilities:
+- defines the mDNS service type;
+- parses resolved mDNS advertisements;
+- creates `ActuatorDescriptor` values;
+- preserves `node_id`, location, device class, capabilities, and advertised `p_max`;
+- provides deterministic mock discovery.
 
-- define the mDNS service type;
-- parse resolved mDNS advertisements;
-- create `ActuatorDescriptor` objects;
-- preserve `node_id`, location, device class, capabilities, and advertised `p_max` values;
-- provide the deterministic mock discovery source.
-
-This file shall remain unchanged unless a failing test proves that Stage 2 requires a correction.
+This file shall remain unchanged unless a failing Stage-2 test proves that a correction is required.
 
 `src/emonio_viewer/load_control/discovery_zeroconf.py`
 
-Responsibilities:
-
-- perform the Zeroconf/mDNS network scan;
-- resolve service records.
+- performs Zeroconf/mDNS network discovery;
+- resolves service records.
 
 This file shall remain unchanged.
 
 `src/emonio_viewer/load_control/lan_discovery.py`
 
-Responsibilities:
+- owns operator-triggered read-only LAN discovery;
+- preserves the most recent discovery result.
 
-- own the operator-triggered read-only LAN discovery operation;
-- preserve the most recent discovery result.
-
-This file shall remain unchanged unless a failing test proves that Stage 2 requires a correction.
+This file shall remain unchanged unless a failing Stage-2 test proves that a correction is required.
 
 ### 3.2 Protocol
 
 `src/emonio_viewer/load_control/protocol.py`
 
-The current decoder already performs strict HELLO schema validation.
+The existing decoder already performs strict HELLO schema validation.
 
-For HELLO it already requires the exact field set:
+For HELLO it requires exactly:
 
 - `message_type`;
 - `protocol_version`;
@@ -96,7 +90,7 @@ For HELLO it already requires the exact field set:
 - `capabilities`;
 - `p_max`.
 
-The current protocol model already rejects:
+The existing protocol model already rejects:
 
 - unsupported protocol versions;
 - empty text identity fields;
@@ -106,36 +100,36 @@ The current protocol model already rejects:
 - non-finite `p_max` values;
 - `p_max <= 0` on any phase.
 
-Stage 2 shall reuse this decoder. Stage 2 shall not duplicate or weaken protocol parsing.
+Stage 2 shall reuse this decoder. It shall not duplicate or weaken protocol parsing.
 
 ### 3.3 Real WebSocket transport
 
 `src/emonio_viewer/load_control/session_websocket.py`
 
-The transport already:
+The existing transport already:
 
 - opens the descriptor WebSocket location;
 - accepts only `ws://` or `wss://` locations;
 - uses explicit positive finite timeouts;
 - requires the first application frame to be HELLO;
-- clears the retained HELLO on disconnect;
+- clears retained HELLO data on disconnect;
 - does not bind an actuator;
 - does not authorize control;
 - does not perform automatic reconnection.
 
 Stage 2 shall reuse this transport.
 
-A small transport change is permitted only to expose the state transition between TCP/WebSocket connection completion and HELLO reception. The existing public behavior shall remain compatible with existing tests.
+A small transport change is permitted only to expose WebSocket-open and first-frame-receive as separate deterministic steps while preserving the existing `connect()` behavior for existing callers and tests.
 
 ### 3.4 Existing Stage-1 mock control
 
 `src/emonio_viewer/load_control/service.py`
 
-This service owns the Stage-1 deterministic mock-control path. It also observes canonical measurement events and can produce mock COMMAND/ACK control activity.
+This service owns the deterministic Stage-1 mock-control path. It observes canonical measurement events and can produce mock COMMAND/ACK activity.
 
-Stage 2 shall not convert this service into the real actuator owner.
+Stage 2 shall not convert this service into the real actuator qualification owner.
 
-The existing mock path shall remain available for its existing tests and development functions.
+The Stage-1 mock path shall remain available for its existing tests and development functions.
 
 ## 4. Protected Scientific Boundary
 
@@ -166,19 +160,19 @@ Stage 2 shall not change:
 - CSV precision;
 - SCOPE measurement semantics.
 
-The final implementation verification shall include a source-diff gate that confirms that no protected production file changed.
+Final verification shall include deterministic diff evidence that no protected production file changed.
 
 ## 5. Stage-2 Architecture
 
 Stage 2 shall add one independent qualification owner.
 
-Recommended production file:
+Approved new production file:
 
 ```text
 src/emonio_viewer/load_control/qualification.py
 ```
 
-The qualification owner shall have one purpose:
+Its responsibility is only:
 
 ```text
 latest LAN discovery evidence
@@ -192,7 +186,7 @@ real WebSocket transport
 first application frame = HELLO
         |
         v
-strict HELLO comparison
+strict discovery-to-HELLO comparison
         |
         v
 QUALIFIED or REJECTED
@@ -201,23 +195,24 @@ QUALIFIED or REJECTED
 The qualification owner shall not depend on:
 
 - `MeasurementSample`;
-- the Emonio acquisition coordinator;
-- the Modbus package;
-- the recording package;
+- the acquisition coordinator;
+- Modbus;
+- recording;
 - SCOPE;
 - the load-request controller;
 - `LoadControlSupervisor`;
 - COMMAND generation;
 - ACK handling.
 
-This separation prevents Stage 2 from obtaining control authority.
+The qualification owner shall not expose a `send_command()` method.
 
 ## 6. Qualification State Model
 
-Stage 2 shall use a dedicated connection-qualification state. It shall not reuse measurement-health states and shall not reuse the Stage-1 control supervisor state as the qualification authority.
+Stage 2 shall use a dedicated connection-qualification state. It shall not reuse measurement-health states or the Stage-1 control-supervisor state.
 
 Required states:
 
+- `IDLE`
 - `DISCOVERED`
 - `CONNECTING`
 - `HELLO_WAIT`
@@ -225,37 +220,37 @@ Required states:
 - `REJECTED`
 - `DISCONNECTED`
 
-### 6.1 State meaning
+### 6.1 State definitions
+
+`IDLE`
+
+No LAN actuator is selected for Stage-2 qualification. No Stage-2 WebSocket is open.
 
 `DISCOVERED`
 
-The operator selected one actuator from the latest LAN discovery result. No WebSocket connection is qualified.
+The operator explicitly selected exactly one actuator from the most recent successful LAN discovery result. No WebSocket is open yet.
 
 `CONNECTING`
 
-The Viewer is opening the WebSocket location from the selected descriptor.
+The Viewer is opening the WebSocket location stored in the selected descriptor.
 
 `HELLO_WAIT`
 
-The WebSocket transport is open. The Viewer is waiting for the first application frame.
+The WebSocket is open. The Viewer is waiting for the first application frame.
 
 `QUALIFIED`
 
-The first application frame was a valid HELLO and all Stage-2 discovery-to-HELLO checks passed.
+The first application frame was HELLO and all Stage-2 checks passed.
 
 `REJECTED`
 
-A connection or HELLO qualification requirement failed. No qualification survives.
+Connection or HELLO qualification failed. No qualification survives. The Stage-2 socket shall be closed.
 
 `DISCONNECTED`
 
-A previously open or qualified WebSocket is no longer connected. No qualification survives.
+A previously opened Stage-2 WebSocket is no longer connected. No qualification survives.
 
-### 6.2 Initial state
-
-Before an operator selects a LAN actuator, there is no Stage-2 selected actuator and no qualified connection.
-
-The UI shall not imply that the first discovery result is selected.
+The initial state shall be `IDLE`.
 
 ## 7. Operator Selection Rules
 
@@ -263,31 +258,31 @@ The operator shall explicitly select one actuator returned by the most recent su
 
 The browser shall submit only the selected `node_id` as selection authority.
 
-Example request:
-
 ```json
 {
   "node_id": "ARI-LOAD-001"
 }
 ```
 
-The backend shall resolve this `node_id` against `LanActuatorDiscoveryService.last_result`.
+The backend shall resolve this value against `LanActuatorDiscoveryService.last_result`.
 
 The backend shall use the exact stored descriptor location. The browser shall not provide an IP address, port, path, or replacement WebSocket URL.
 
 The DHCP address is a transport locator only. It is not actuator identity.
 
-If the selected `node_id` is not in the latest discovery result, the connection request shall fail.
+Selection shall fail if:
 
-If the latest discovery result contains more than one descriptor with the selected `node_id`, the connection request shall fail as ambiguous. Stage 2 shall not choose one automatically.
+- the node is not in the latest successful scan result;
+- more than one descriptor in that result has the selected `node_id`;
+- a Stage-2 WebSocket is already open.
 
-If a Stage-2 connection is already open, another selection request shall fail. The operator shall disconnect first. Stage 2 shall not replace a connection automatically.
+The operator shall disconnect before selecting another actuator.
 
-A new LAN scan shall not replace or redirect an already open qualified WebSocket. A changed advertisement becomes relevant only after the operator performs a new connection qualification.
+A later LAN scan shall not replace, redirect, or requalify an already open Stage-2 WebSocket. A new advertisement becomes relevant only after the operator starts a new qualification operation.
 
-## 8. HELLO Schema
+There shall be no automatic selection of the first scan result.
 
-The expected ESP32 HELLO application frame is:
+## 8. Expected HELLO Schema
 
 ```json
 {
@@ -315,9 +310,9 @@ The existing strict decoder shall continue to reject extra fields.
 
 Protocol decoding shall occur first.
 
-Only a successfully decoded `HelloFrame` can enter Stage-2 discovery comparison.
+Only a successfully decoded `HelloFrame` can enter discovery comparison.
 
-The Stage-2 qualification function shall then require all of these conditions:
+The qualification owner shall then require all of these conditions:
 
 1. `hello.protocol_version == 1`.
 2. `hello.node_id == selected_descriptor.node_id`.
@@ -331,23 +326,19 @@ The Stage-2 qualification function shall then require all of these conditions:
 10. `hello.p_max.b == selected_descriptor.p_max.b`.
 11. `hello.p_max.c == selected_descriptor.p_max.c`.
 
-The `p_max` comparison shall use exact numeric equality after both representations have passed finite-number validation.
+`p_max` comparison shall use exact numeric equality after both representations pass finite-number validation.
 
 Stage 2 shall not use a tolerance.
 
-Stage 2 shall not clamp a value.
-
-Stage 2 shall not repair a value.
-
-Stage 2 shall not substitute a default.
+Stage 2 shall not clamp, repair, replace, or default invalid HELLO data.
 
 Stage 2 shall not copy discovery identity into a mismatched HELLO.
 
-Any mismatch shall cause `REJECTED`.
+Any mismatch shall cause `REJECTED` and shall close the Stage-2 WebSocket.
 
 ## 10. Qualified Identity
 
-The qualified active connection instance is identified by:
+The qualified active connection instance is:
 
 ```text
 node_id + current boot_id
@@ -361,11 +352,11 @@ The qualified record shall preserve:
 - HELLO protocol version;
 - HELLO device class;
 - HELLO capabilities;
-- HELLO `p_max` values.
+- HELLO `p_max`.
 
-The IP address shall not be part of actuator identity.
+The IP address shall not be part of identity.
 
-The WebSocket URL may be shown as connection evidence, but it shall remain a locator only.
+The WebSocket URL may be shown as connection evidence, but it remains a locator only.
 
 ## 11. ESP32 Reboot Rule
 
@@ -377,72 +368,89 @@ Qualification for an old boot instance shall never be reused for a new boot inst
 
 After reconnect, the Viewer shall receive and qualify a new HELLO before it can display `QUALIFIED` again.
 
-## 12. Disconnect Rule
+## 12. Disconnect Detection and Invalidation
 
-Any WebSocket disconnect shall invalidate Stage-2 qualification immediately.
+Any WebSocket disconnect shall invalidate Stage-2 qualification.
 
-On disconnect, the qualification owner shall clear:
+After successful HELLO qualification, the qualification owner shall keep one read-only transport watcher active for that WebSocket. Its only Stage-2 purpose is to observe remote close or transport error.
+
+The watcher shall not send any frame.
+
+If later application frames arrive after HELLO, Stage 2 shall not treat them as control evidence and shall not use them to grant additional authority. The watcher may consume and ignore them while it continues to observe the connection. Stage 2 shall not implement ACK or STATUS semantics.
+
+On remote close, local disconnect, transport error, or application cleanup, the qualification owner shall clear:
 
 - retained HELLO;
 - retained qualified boot instance;
-- any pending HELLO-wait task;
-- any Stage-2 transient connection state that could imply qualification.
+- any pending HELLO task;
+- the transport watcher;
+- any transient state that could imply current qualification.
 
-The resulting state shall be `DISCONNECTED` for a connection that was opened previously.
+The state shall become `DISCONNECTED` if a Stage-2 WebSocket was previously opened.
 
 External control shall remain `DISABLED`.
 
-Stage 2 has no COMMAND authority, so it shall have no command replay queue and no outstanding control command.
+Stage 2 shall have no command replay queue and no outstanding control command.
 
-No previous nonzero control request shall be restored or recreated by Stage 2.
+No previous nonzero request shall be restored or recreated.
 
 ## 13. Reconnection Rule
 
 Stage 2 shall not automatically reconnect.
 
-The operator shall initiate a new connection qualification.
+The operator shall initiate every new connection qualification.
 
-Every new connection shall require a new first-frame HELLO qualification.
+Every new connection shall require a new first-frame HELLO.
 
 No cached HELLO shall satisfy a later connection.
 
-No reconnect action shall send a COMMAND.
+No reconnect action shall send COMMAND.
 
 ## 14. WebSocket Transport State Exposure
 
-The current `WebSocketActuatorSession.connect()` method combines WebSocket opening and first-frame HELLO reception.
+The current `WebSocketActuatorSession.connect()` combines socket opening and first-frame HELLO reception.
 
 Stage 2 requires explicit `CONNECTING` and `HELLO_WAIT` evidence.
 
-The preferred minimal transport change is:
+The minimal approved transport change is:
 
-- preserve the existing `connect()` method and its existing behavior for compatibility;
-- add a small internal or additional two-step transport interface that can open the WebSocket first and receive the first application frame second;
-- keep all timeout validation and cleanup rules in `session_websocket.py`;
-- keep the existing no-auto-reconnect rule.
+- preserve existing `connect()` behavior for compatibility;
+- add a small two-step interface that opens the WebSocket first and receives the first application frame second;
+- keep timeout validation and cleanup in `session_websocket.py`;
+- keep the no-auto-reconnect rule.
 
-Existing `connect()` tests shall remain valid.
+Required Stage-2 transition order:
 
-The Stage-2 qualification owner shall use the two-step path so that it can publish `HELLO_WAIT` only after the WebSocket is open.
+```text
+IDLE
+  -> DISCOVERED
+  -> CONNECTING
+  -> HELLO_WAIT
+  -> QUALIFIED
+```
+
+Any failure after selection shall transition to `REJECTED` and close the Stage-2 socket.
+
+A later transport loss from `QUALIFIED` shall transition to `DISCONNECTED`.
 
 ## 15. Timeouts
 
-The qualification owner shall use explicit finite positive connection and HELLO receive timeouts.
+The qualification owner shall use explicit finite positive timeouts.
 
-The production defaults shall be:
+Production defaults:
 
 - WebSocket connect timeout: `3.0 s`;
 - first HELLO receive timeout: `2.0 s`.
 
-These values apply only to the external actuator qualification path. They shall not modify any Emonio acquisition timeout.
+These values apply only to external actuator qualification. They shall not modify any Emonio acquisition timeout.
 
-Tests may inject smaller deterministic timeout values.
+Tests may inject smaller deterministic values.
 
-A timeout shall cause qualification failure. It shall not cause automatic retry.
+A timeout shall reject the qualification. It shall not start an automatic retry.
 
 ## 16. API Design
 
-Stage 2 shall add these endpoints to the existing LOAD CTRL API surface:
+Stage 2 shall add:
 
 ```text
 POST /api/v1/load-control/lan-qualification/connect
@@ -452,7 +460,7 @@ POST /api/v1/load-control/lan-qualification/disconnect
 
 ### 16.1 Connect
 
-Request body:
+Request:
 
 ```json
 {
@@ -460,24 +468,36 @@ Request body:
 }
 ```
 
-The endpoint shall:
+Required operation order:
 
-1. verify explicit `node_id` input;
+1. validate explicit `node_id` input;
 2. resolve exactly one descriptor from the latest LAN discovery result;
-3. transition to `DISCOVERED`;
-4. open the descriptor WebSocket;
-5. transition to `CONNECTING` and then `HELLO_WAIT`;
-6. receive the first application frame;
-7. perform strict HELLO qualification;
-8. return the resulting Stage-2 status.
+3. set `DISCOVERED`;
+4. set `CONNECTING`;
+5. open the descriptor WebSocket;
+6. set `HELLO_WAIT`;
+7. receive the first application frame;
+8. decode and qualify HELLO;
+9. set `QUALIFIED` or `REJECTED`;
+10. return Stage-2 status.
 
-The endpoint shall not call the existing binding API.
+This endpoint shall not call the existing binding API.
 
-The endpoint shall not call the existing enable API.
+This endpoint shall not call the existing enable API.
 
-The endpoint shall not send COMMAND.
+This endpoint shall not send COMMAND.
 
 ### 16.2 Status
+
+Before selection, status shall report:
+
+```json
+{
+  "state": "IDLE",
+  "connected": false,
+  "hello_qualified": false
+}
+```
 
 A qualified status shall expose at least:
 
@@ -503,7 +523,7 @@ A qualified status shall expose at least:
 
 `location` is connection evidence only. It is not identity.
 
-For non-qualified states, identity fields that have not been qualified shall be `null` rather than copied from invalid HELLO data.
+For non-qualified states, unqualified HELLO identity fields shall be `null`. Invalid HELLO values shall not be presented as qualified values.
 
 The selected discovery descriptor may be reported separately from qualified HELLO identity.
 
@@ -517,32 +537,32 @@ It shall not send a safe COMMAND because Stage 2 never obtains command authority
 
 The active v0.4.19 runtime uses `server/app_v0416.py` for LOAD CTRL integration.
 
-Stage 2 shall wire the new qualification owner through this compatibility application layer.
+Stage 2 shall wire the qualification owner through this compatibility application layer.
 
-Expected small wiring changes:
+Expected changes:
 
-- add a dedicated AppKey in `src/emonio_viewer/server/keys.py`;
+- add one dedicated AppKey in `src/emonio_viewer/server/keys.py`;
 - construct the qualification owner in `server/app_v0416.py` from the existing LAN discovery service;
 - close it during application cleanup;
 - expose it through `server/load_control_api.py`.
 
 `src/emonio_viewer/main.py` shall not change.
 
-`src/emonio_viewer/main_v0416.py` shall not change unless an implementation test proves that wiring cannot be completed through `app_v0416.py` alone.
+`src/emonio_viewer/main_v0416.py` shall not change unless a failing implementation test proves that wiring cannot be completed through `app_v0416.py` alone. Any such scope expansion requires explicit review before modification.
 
 ## 18. UI Design
 
-The LOAD CTRL panel shall change its stage description from Stage 1 to a Stage-2 description that remains scientifically precise.
+The LOAD CTRL panel shall identify Stage 2 accurately.
 
-Recommended header:
+Approved wording:
 
 ```text
 STAGE 2 · REAL WEBSOCKET HELLO QUALIFICATION · CONTROL DISABLED
 ```
 
-The LAN discovery section shall continue to use the existing read-only scan.
+The existing read-only LAN scan shall remain.
 
-Each discovered LAN actuator card shall provide an explicit operator action such as:
+Each discovered actuator card shall provide an explicit action such as:
 
 ```text
 SELECT / QUALIFY
@@ -550,52 +570,46 @@ SELECT / QUALIFY
 
 There shall be no default selection.
 
-The selected actuator shall not populate or modify the existing mock binding automatically.
+The selected LAN actuator shall not populate or modify the existing mock binding automatically.
 
-The Stage-2 qualification view shall show:
+The Stage-2 view shall show:
 
 - connection state;
-- `CONNECTED` only while the WebSocket is open;
-- `HELLO QUALIFIED` only after all qualification checks pass;
+- `CONNECTED` only while the Stage-2 WebSocket is open;
+- `HELLO QUALIFIED` only after every qualification check passes;
 - `node_id`;
 - `boot_id`;
 - protocol version;
 - device class;
 - required capability;
 - advertised test limits;
-- current WebSocket locator as connection evidence;
-- last qualification error if present.
+- WebSocket locator as connection evidence;
+- last qualification error when present.
 
-The Viewer shall continue to show external control as `DISABLED`.
+External control shall still show `DISABLED`.
 
-The Stage-2 UI shall not invoke:
+The Stage-2 selection and qualification action shall not invoke:
 
 - save binding;
 - enable external control;
-- set a control demand;
-- send COMMAND.
+- a control-demand calculation;
+- COMMAND transmission.
 
 ## 19. Scientific Wording Correction
 
-The current UI text:
+Current text:
 
 ```text
 Physical max: A 1000.0 W · B 1000.0 W · C 1000.0 W
 ```
 
-is incorrect for the protocol test actuator.
-
-It shall be replaced with:
+Approved replacement:
 
 ```text
 Advertised test limit: A 1000.0 W · B 1000.0 W · C 1000.0 W
 ```
 
-The Viewer shall not describe these values as:
-
-- physical ratings;
-- measured power;
-- applied electrical power.
+The Viewer shall not describe these values as physical ratings, measured power, or applied electrical power.
 
 They are advertised protocol test limits.
 
@@ -603,46 +617,45 @@ They are advertised protocol test limits.
 
 Stage 2 shall not send a COMMAND frame under any condition.
 
-This rule applies to:
+This applies to:
 
 - successful qualification;
-- failed qualification;
+- rejected qualification;
 - disconnect;
 - reconnect;
 - timeout;
 - ESP32 reboot;
 - repeated LAN scans;
 - UI refresh;
+- transport watcher activity;
 - application shutdown.
 
-The Stage-2 qualification owner shall not expose a `send_command()` method.
-
-The automated test suite shall verify that the fake WebSocket sent-frame list remains empty after successful and rejected Stage-2 qualification scenarios.
+Automated tests shall assert that the fake WebSocket sent-frame list remains empty for successful qualification, rejected qualification, disconnect, and connection-loss scenarios.
 
 ## 21. Error Handling
 
 Stage 2 shall fail closed.
 
-Examples:
+These conditions shall reject qualification:
 
-- selected node missing from latest discovery: reject;
-- duplicate selected node IDs in latest discovery: reject;
-- WebSocket open failure: reject;
-- WebSocket timeout: reject;
-- binary first application frame: reject;
-- malformed JSON: reject;
-- first frame not HELLO: reject;
-- protocol mismatch: reject;
-- node mismatch: reject;
-- empty boot ID: reject;
-- device-class mismatch: reject;
-- capability missing: reject;
-- invalid `p_max`: reject;
-- discovery/HELLO `p_max` mismatch: reject.
+- selected node missing from the latest successful discovery result;
+- duplicate selected node IDs in that result;
+- another Stage-2 connection already open;
+- WebSocket open failure;
+- WebSocket connect timeout;
+- HELLO receive timeout;
+- binary first application frame;
+- malformed JSON;
+- first frame not HELLO;
+- protocol mismatch;
+- node mismatch;
+- empty boot ID;
+- device-class mismatch;
+- missing required capability;
+- invalid `p_max`;
+- discovery/HELLO `p_max` mismatch.
 
-The service shall retain a concise `last_error` suitable for operator evidence.
-
-Invalid HELLO values shall not be presented as qualified values.
+The qualification owner shall retain one concise `last_error` for operator evidence.
 
 A rejection shall not modify Emonio measurement state.
 
@@ -650,7 +663,7 @@ A rejection shall not modify Emonio measurement state.
 
 Tests shall be added before production behavior changes.
 
-Required unit and integration coverage:
+Required coverage:
 
 1. valid HELLO qualifies;
 2. HELLO must be the first application frame;
@@ -665,22 +678,25 @@ Required unit and integration coverage:
 11. `p_max <= 0` rejects;
 12. discovery/HELLO `p_max` mismatch rejects;
 13. WebSocket disconnect invalidates qualification;
-14. reconnect requires a new HELLO;
-15. changed `boot_id` creates a new actuator boot instance;
-16. no automatic actuator selection;
-17. duplicate discovered `node_id` selection rejects as ambiguous;
-18. no automatic binding;
-19. no automatic external-control enable;
-20. no COMMAND is sent during successful qualification;
-21. no COMMAND is sent during rejected qualification;
-22. no COMMAND is sent during disconnect;
-23. Emonio measurement production files remain unchanged.
+14. remote close invalidates qualification;
+15. reconnect requires a new HELLO;
+16. changed `boot_id` creates a new actuator boot instance;
+17. initial state is `IDLE`;
+18. no automatic actuator selection;
+19. duplicate discovered `node_id` selection rejects as ambiguous;
+20. no automatic binding;
+21. no automatic external-control enable;
+22. no COMMAND is sent during successful qualification;
+23. no COMMAND is sent during rejected qualification;
+24. no COMMAND is sent during disconnect or connection loss;
+25. later application frames do not grant Stage-2 control authority;
+26. Emonio protected production files remain unchanged.
 
 Existing Stage-1 tests shall remain in the complete test run.
 
 The complete repository regression suite shall pass before a Stage-2 candidate is given to the operator for field testing.
 
-## 23. Expected Test File Boundary
+## 23. Expected Test Boundary
 
 Expected new or updated tests:
 
@@ -692,17 +708,17 @@ tests/integration/test_load_control_stage2_api.py
 tests/browser/test_load_control_contract.py
 ```
 
-A protected-file contract test shall verify the agreed scientific production boundary by source diff or equivalent deterministic evidence.
+Final verification shall also compare the candidate diff against the approved protected scientific boundary.
 
 ## 24. Expected Production Change Boundary
 
-Expected new production file:
+New production file:
 
 ```text
 src/emonio_viewer/load_control/qualification.py
 ```
 
-Expected small production changes:
+Expected small changes:
 
 ```text
 src/emonio_viewer/load_control/session_websocket.py
@@ -714,13 +730,13 @@ frontend/js/load-control-ui.js
 frontend/css/load-control/load-control.css
 ```
 
-No other production file is part of the approved Stage-2 scope unless a failing test provides evidence that the boundary is insufficient.
+No other production file is in the approved Stage-2 scope.
 
-Any required expansion of the production change boundary shall stop implementation and require explicit review before the additional file is changed.
+If a failing test proves that another production file must change, implementation shall stop before that file is modified and the boundary shall be reviewed explicitly.
 
 ## 25. Stage-2 Field Acceptance Target
 
-The automated suite can qualify software behavior, but it cannot provide real ESP32 field evidence.
+Automated tests cannot provide real ESP32 field evidence.
 
 Field PASS shall not be claimed until the operator tests the candidate with the real ESP32.
 
@@ -790,4 +806,4 @@ explicit binding
 -> sequence / duplicate / out-of-order qualification
 ```
 
-That work shall require a separate architecture review and approval.
+Stage 3 shall require a separate architecture review and explicit approval.
