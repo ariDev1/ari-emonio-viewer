@@ -76,9 +76,11 @@ class LoadControlService:
         self._subscriber: Queue[RuntimeEvent] | None = None
         self._task: asyncio.Task[None] | None = None
         self._stop_sentinel = object()
+        self._wake_sentinel = object()
         self._started = False
         self._last_service_error: str | None = None
         self._last_calculation: dict[str, Any] | None = None
+        self._last_command_sent_monotonic_ns: int | None = None
 
     @property
     def viewer_session_id(self) -> str:
@@ -116,16 +118,7 @@ class LoadControlService:
                 await self.disable()
             except Exception as exc:
                 self._last_service_error = str(exc) or type(exc).__name__
-        if self._subscriber is not None:
-            while True:
-                try:
-                    self._subscriber.put_nowait(self._stop_sentinel)  # type: ignore[arg-type]
-                    break
-                except Full:
-                    try:
-                        self._subscriber.get_nowait()
-                    except Exception:
-                        break
+        self._queue_private(self._stop_sentinel)
         if self._task is not None:
             await self._task
         if self._subscriber is not None:
@@ -136,13 +129,98 @@ class LoadControlService:
         self._task = None
         self._started = False
 
+    def _queue_private(self, item: object) -> None:
+        subscriber = self._subscriber
+        if subscriber is None:
+            return
+        while True:
+            try:
+                subscriber.put_nowait(item)  # type: ignore[arg-type]
+                return
+            except Full:
+                try:
+                    subscriber.get_nowait()
+                except Exception:
+                    return
+
+    def _wake_consumer(self) -> None:
+        if self._started:
+            self._queue_private(self._wake_sentinel)
+
+    def _next_deadline_monotonic_ns(self) -> int | None:
+        supervisor = self._supervisor
+        timing = self._timing
+        if supervisor is None or timing is None:
+            return None
+        deadlines: list[int] = []
+        source = self._config.bound_emonio_device_id
+        source_sample = None if source is None else self._latest_samples.get(source)
+        if supervisor.control_mode is ControlMode.ENABLED and source_sample is not None:
+            sample_deadline = (
+                source_sample.timing.cycle_finished_monotonic_ns
+                + int(timing.control_sample_max_age_s * 1_000_000_000)
+                + 1
+            )
+            deadlines.append(sample_deadline)
+        if (
+            supervisor.outstanding_command is not None
+            and self._last_command_sent_monotonic_ns is not None
+        ):
+            ack_deadline = (
+                self._last_command_sent_monotonic_ns
+                + int(timing.ack_timeout_s * 1_000_000_000)
+                + 1
+            )
+            deadlines.append(ack_deadline)
+        return min(deadlines) if deadlines else None
+
     async def _consume_events(self) -> None:
         assert self._subscriber is not None
+        pending_get = asyncio.create_task(asyncio.to_thread(self._subscriber.get))
         while True:
-            item = await asyncio.to_thread(self._subscriber.get)
+            deadline = self._next_deadline_monotonic_ns()
+            timeout = None
+            if deadline is not None:
+                timeout = max(0.0, (deadline - time.monotonic_ns()) / 1_000_000_000.0)
+            done, _pending = await asyncio.wait({pending_get}, timeout=timeout)
+            if pending_get not in done:
+                await self._check_deadlines()
+                continue
+
+            item = pending_get.result()
             if item is self._stop_sentinel:
                 return
+            pending_get = asyncio.create_task(asyncio.to_thread(self._subscriber.get))
+            if item is self._wake_sentinel:
+                continue
             await self._handle_runtime_event(item)
+
+    async def _check_deadlines(self) -> None:
+        supervisor = self._supervisor
+        timing = self._timing
+        if supervisor is None or timing is None:
+            return
+        now_ns = time.monotonic_ns()
+        now_utc = datetime.now(timezone.utc)
+        source = self._config.bound_emonio_device_id
+        source_sample = None if source is None else self._latest_samples.get(source)
+        if supervisor.control_mode is ControlMode.ENABLED and source_sample is not None:
+            sample_age_s = (
+                now_ns - source_sample.timing.cycle_finished_monotonic_ns
+            ) / 1_000_000_000.0
+            if sample_age_s > timing.control_sample_max_age_s:
+                decision = supervisor._trip_with_safe(  # package-internal safety transition
+                    TripReason.CONTROL_SAMPLE_STALE,
+                    now_utc=now_utc,
+                    now_monotonic_ns=now_ns,
+                )
+                await self._apply_decision(decision, now_monotonic_ns=now_ns)
+                return
+        decision = supervisor.check_ack_timeout(
+            now_monotonic_ns=now_ns,
+            now_utc=now_utc,
+        )
+        await self._apply_decision(decision, now_monotonic_ns=now_ns)
 
     async def _handle_runtime_event(self, event: RuntimeEvent) -> None:
         if isinstance(event, MeasurementSample):
@@ -209,6 +287,7 @@ class LoadControlService:
             },
             required=False,
         )
+        self._wake_consumer()
 
     async def configure_limits(
         self,
@@ -244,6 +323,7 @@ class LoadControlService:
             },
             required=False,
         )
+        self._wake_consumer()
 
     async def configure_timing(
         self,
@@ -272,6 +352,7 @@ class LoadControlService:
             },
             required=False,
         )
+        self._wake_consumer()
 
     async def refresh_discovery(self) -> tuple[ActuatorDescriptor, ...]:
         self._visible = await self._discovery.discover()
@@ -285,6 +366,7 @@ class LoadControlService:
         self._session = None
         self._hello = None
         self._last_calculation = None
+        self._last_command_sent_monotonic_ns = None
         if self._timing is None:
             self._supervisor = None
         else:
@@ -361,6 +443,7 @@ class LoadControlService:
             raise LoadControlCommandError(
                 "control evidence write failed; control was tripped"
             ) from exc
+        self._wake_consumer()
 
     async def disable(self) -> None:
         if self._supervisor is None:
@@ -371,6 +454,7 @@ class LoadControlService:
             now_monotonic_ns=now_ns,
         )
         await self._apply_decision(decision, now_monotonic_ns=now_ns)
+        self._wake_consumer()
 
     def _trip_evidence_failure(
         self,
@@ -466,6 +550,7 @@ class LoadControlService:
             return
         if self._session is None or not self._session.connected:
             self._last_service_error = "mock actuator session is unavailable"
+            self._last_command_sent_monotonic_ns = None
             if self._supervisor is not None:
                 lost = self._supervisor.session_lost()
                 if lost.event is not None:
@@ -476,13 +561,18 @@ class LoadControlService:
             return
 
         try:
+            self._last_command_sent_monotonic_ns = time.monotonic_ns()
             await self._session.send_command(command)
         except (ConnectionError, ValueError) as exc:
             self._last_service_error = str(exc) or type(exc).__name__
+            self._last_command_sent_monotonic_ns = None
             if self._supervisor is not None:
                 lost = self._supervisor.session_lost()
                 self._append_evidence(
-                    {"event": lost.event or "ACTUATOR_CONNECTION_LOST", "reason": lost.reason},
+                    {
+                        "event": lost.event or "ACTUATOR_CONNECTION_LOST",
+                        "reason": lost.reason,
+                    },
                     required=False,
                 )
             return
@@ -498,11 +588,14 @@ class LoadControlService:
         )
         ack = await self._session.receive_ack()
         if ack is None or self._supervisor is None:
+            self._wake_consumer()
             return
         ack_decision = self._supervisor.accept_ack(
             ack,
-            now_monotonic_ns=now_monotonic_ns,
+            now_monotonic_ns=time.monotonic_ns(),
         )
+        if self._supervisor.outstanding_command is None:
+            self._last_command_sent_monotonic_ns = None
         self._append_evidence(
             {
                 "event": ack_decision.event or "CONTROL_ACK_OBSERVED",
@@ -516,7 +609,7 @@ class LoadControlService:
         if ack_decision.command is not None:
             await self._apply_decision(
                 ack_decision,
-                now_monotonic_ns=now_monotonic_ns,
+                now_monotonic_ns=time.monotonic_ns(),
             )
 
     def _append_evidence(self, event: dict[str, Any], *, required: bool) -> None:
