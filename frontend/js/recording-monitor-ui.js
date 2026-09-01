@@ -135,7 +135,7 @@ function panelMarkup() {
         <select id="recording-monitor-q-direction">
           <option value="POSITIVE">POSITIVE</option>
           <option value="NEGATIVE">NEGATIVE</option>
-          <option value="BOTH" selected>BOTH</option>
+          <option value="BOTH">BOTH</option>
         </select>
       </label>
     </div>
