@@ -10,6 +10,7 @@ from emonio_viewer.load_control.protocol import (
     CommandFrame,
     HelloFrame,
     ProtocolError,
+    StatusFrame,
     decode_frame,
     encode_frame,
 )
@@ -27,8 +28,10 @@ class FakeWebSocket:
         self.messages = list(messages)
         self.sent = []
         self.closed = False
+        self.receive_calls = 0
 
     async def receive(self):
+        self.receive_calls += 1
         return self.messages.pop(0)
 
     async def send_str(self, text: str) -> None:
@@ -106,6 +109,18 @@ def _ack() -> AckFrame:
         ack_utc="2026-09-01T12:00:00.200000+00:00",
         applied_p=command.p_load_request,
         result="APPLIED",
+    )
+
+
+def _status() -> StatusFrame:
+    return StatusFrame(
+        protocol_version=1,
+        node_id="ARI-LOAD-001",
+        boot_id="BOOT-001",
+        status_utc="2026-09-01T12:00:00.300000+00:00",
+        applied_p=ThreePhasePower(0.0, 0.0, 0.0),
+        state="READY",
+        faults=(),
     )
 
 
@@ -191,6 +206,86 @@ def test_websocket_session_rejects_binary_first_frame() -> None:
     asyncio.run(scenario())
 
 
+def test_websocket_session_post_hello_receive_owner_routes_ack_and_disconnect() -> None:
+    async def scenario() -> None:
+        websocket = FakeWebSocket(
+            [
+                FakeMessage(WSMsgType.TEXT, encode_frame(_hello())),
+                FakeMessage(WSMsgType.TEXT, encode_frame(_ack())),
+                FakeMessage(WSMsgType.CLOSE, ""),
+            ]
+        )
+        session, _client = _session(websocket)
+
+        await session.connect()
+        session.start_receive_loop()
+
+        assert await session.receive_frame(0.15) == _ack()
+        await session.wait_for_disconnect()
+        assert websocket.receive_calls == 3
+        assert websocket.sent == []
+
+        await session.disconnect()
+
+    asyncio.run(scenario())
+
+
+def test_websocket_session_post_hello_receive_owner_routes_status() -> None:
+    async def scenario() -> None:
+        websocket = FakeWebSocket(
+            [
+                FakeMessage(WSMsgType.TEXT, encode_frame(_hello())),
+                FakeMessage(WSMsgType.TEXT, encode_frame(_status())),
+                FakeMessage(WSMsgType.CLOSE, ""),
+            ]
+        )
+        session, _client = _session(websocket)
+
+        await session.connect()
+        session.start_receive_loop()
+
+        assert await session.receive_frame(0.15) == _status()
+        await session.wait_for_disconnect()
+        assert websocket.receive_calls == 3
+        assert websocket.sent == []
+
+        await session.disconnect()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("message", "match"),
+    [
+        (FakeMessage(WSMsgType.TEXT, "{not-json"), "invalid protocol JSON"),
+        (FakeMessage(WSMsgType.BINARY, b"binary"), "frame must be text"),
+        (FakeMessage(WSMsgType.TEXT, encode_frame(_hello())), "unexpected post-HELLO frame"),
+        (FakeMessage(WSMsgType.TEXT, encode_frame(_command())), "unexpected post-HELLO frame"),
+    ],
+)
+def test_websocket_session_post_hello_invalid_frame_fails_closed(message, match) -> None:
+    async def scenario() -> None:
+        websocket = FakeWebSocket(
+            [
+                FakeMessage(WSMsgType.TEXT, encode_frame(_hello())),
+                message,
+            ]
+        )
+        session, _client = _session(websocket)
+
+        await session.connect()
+        session.start_receive_loop()
+
+        with pytest.raises(ProtocolError, match=match):
+            await session.receive_frame(0.15)
+        await session.wait_for_disconnect()
+        assert websocket.sent == []
+
+        await session.disconnect()
+
+    asyncio.run(scenario())
+
+
 def test_websocket_session_disconnect_watcher_sends_no_frame() -> None:
     async def scenario() -> None:
         websocket = FakeWebSocket(
@@ -202,9 +297,11 @@ def test_websocket_session_disconnect_watcher_sends_no_frame() -> None:
         session, _client = _session(websocket)
 
         await session.connect()
+        session.start_receive_loop()
         await session.wait_for_disconnect()
 
         assert websocket.sent == []
+        assert websocket.receive_calls == 2
 
         await session.disconnect()
 
@@ -244,7 +341,8 @@ def test_websocket_session_uses_explicit_timeouts_and_protocol_frames() -> None:
         await session.send_command(command)
         assert decode_frame(websocket.sent[0]) == command
 
-        received_ack = await session.receive_ack()
+        session.start_receive_loop()
+        received_ack = await session.receive_frame(0.15)
         assert received_ack == ack
         assert observed_timeouts == [0.25, 0.15, 0.15]
 
