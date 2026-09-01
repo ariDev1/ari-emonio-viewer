@@ -24,11 +24,13 @@ class FakeSession:
         hello: HelloFrame | None,
         receive_error: Exception | None,
         observe_state=None,
+        open_gate: asyncio.Event | None = None,
     ) -> None:
         self.descriptor = descriptor
         self.hello = hello
         self.receive_error = receive_error
         self.observe_state = observe_state
+        self.open_gate = open_gate
         self.connected = False
         self.sent = []
         self.disconnect_calls = 0
@@ -37,6 +39,8 @@ class FakeSession:
     async def open(self) -> None:
         if self.observe_state is not None:
             self.observe_state("open")
+        if self.open_gate is not None:
+            await self.open_gate.wait()
         self.connected = True
 
     async def receive_hello(self) -> HelloFrame:
@@ -80,6 +84,7 @@ class FakeSessionFactory:
             hello=spec.get("hello"),
             receive_error=spec.get("receive_error"),
             observe_state=observe,
+            open_gate=spec.get("open_gate"),
         )
         session.connect_timeout_s = connect_timeout_s
         session.receive_timeout_s = receive_timeout_s
@@ -214,6 +219,63 @@ def test_stage2_service_requires_disconnect_before_second_connection() -> None:
 
         assert len(factory.created) == 1
         await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_stage2_service_rejects_second_connect_while_first_is_connecting() -> None:
+    async def scenario() -> None:
+        gate = asyncio.Event()
+        factory = FakeSessionFactory(
+            {"hello": _hello(), "open_gate": gate},
+            {"hello": _hello("BOOT-002")},
+        )
+        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+
+        first_task = asyncio.create_task(service.connect("ARI-LOAD-001"))
+        await asyncio.sleep(0)
+        assert service.status().state is QualificationState.CONNECTING
+
+        with pytest.raises(LoadControlQualificationError, match="already open"):
+            await service.connect("ARI-LOAD-001")
+        assert len(factory.created) == 1
+
+        gate.set()
+        first = await first_task
+        assert first.state is QualificationState.QUALIFIED
+        assert first.boot_id == "BOOT-001"
+        assert factory.created[0].sent == []
+
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_stage2_disconnect_requested_during_connect_runs_after_connect_operation() -> None:
+    async def scenario() -> None:
+        gate = asyncio.Event()
+        factory = FakeSessionFactory({"hello": _hello(), "open_gate": gate})
+        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+
+        connect_task = asyncio.create_task(service.connect("ARI-LOAD-001"))
+        await asyncio.sleep(0)
+        assert service.status().state is QualificationState.CONNECTING
+
+        disconnect_task = asyncio.create_task(service.disconnect())
+        await asyncio.sleep(0)
+        assert disconnect_task.done() is False
+
+        gate.set()
+        connected = await connect_task
+        assert connected.state is QualificationState.QUALIFIED
+
+        disconnected = await disconnect_task
+        assert disconnected.state is QualificationState.DISCONNECTED
+        assert disconnected.connected is False
+        assert disconnected.hello_qualified is False
+        assert disconnected.node_id is None
+        assert disconnected.boot_id is None
+        assert factory.created[0].sent == []
 
     asyncio.run(scenario())
 
