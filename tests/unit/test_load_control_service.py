@@ -115,6 +115,46 @@ def test_required_evidence_failure_trips_and_preempts_with_zero(tmp_path, real_s
     asyncio.run(scenario())
 
 
+def test_silent_source_trips_at_control_freshness_deadline(tmp_path, real_sample):
+    async def scenario():
+        service = LoadControlService(
+            RuntimeEventBus(),
+            config_path=tmp_path / "load-control-silent.json",
+            evidence_path=tmp_path / "load-control-silent.jsonl",
+            viewer_session_id="VIEWER-TEST-SILENT",
+        )
+        await service.configure_binding(
+            emonio_device_id=real_sample.identity.device_id,
+            actuator_node_id=MOCK_ACTUATOR.node_id,
+        )
+        await service.configure_limits(
+            p_reserve=30.0,
+            operator_limit_a=600.0,
+            operator_limit_b=600.0,
+            operator_limit_c=600.0,
+        )
+        await service.configure_timing(
+            control_sample_max_age_s=0.04,
+            ack_timeout_s=0.5,
+        )
+        first = _sample(real_sample, cycle_id=1, p_a=30.0, p_b=30.0, p_c=30.0)
+        await service._handle_runtime_event(first)
+        assert service.status()["safe_state"] == SafeState.SAFE_CONFIRMED.value
+        await service.start()
+        try:
+            await service.enable()
+            assert service.status()["control_mode"] == ControlMode.ENABLED.value
+            await asyncio.sleep(0.08)
+            status = service.status()
+            assert status["control_mode"] == ControlMode.TRIPPED.value
+            assert status["trip_reason"] == "CONTROL_SAMPLE_STALE"
+            assert status["last_requested_p"] == {"a": 0.0, "b": 0.0, "c": 0.0}
+        finally:
+            await service.close()
+
+    asyncio.run(scenario())
+
+
 def test_timing_is_volatile_and_not_written_to_persistent_config(tmp_path, real_sample):
     async def scenario():
         config_path = tmp_path / "load-control.json"
