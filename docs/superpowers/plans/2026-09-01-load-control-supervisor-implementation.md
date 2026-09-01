@@ -17,8 +17,8 @@
 - Do not merge or modify `main`.
 - Do not modify Modbus acquisition, register maps, decoder logic, canonical measurement signs, P/Q quadrant semantics, validation, fixed-deadline acquisition, SCOPE semantics, or existing CSV precision.
 - These paths must remain byte-identical to the protected production-code baseline: `src/emonio_viewer/modbus`, `src/emonio_viewer/measurement`, `src/emonio_viewer/acquisition`, `src/emonio_viewer/runtime/events.py`, `src/emonio_viewer/runtime/store.py`, and `src/emonio_viewer/scope`.
-- The first implementation contains no mDNS network implementation, no real WebSocket actuator client, no ESP32 firmware, no PWM logic, and no physical power-stage control path.
-- The first implementation uses `MockActuatorDiscovery` and `MockActuatorSession` only.
+- Stage 1 contains no mDNS network implementation, no real WebSocket actuator client, no ESP32 firmware, no PWM logic, and no physical power-stage control path.
+- Stage 1 uses `MockActuatorDiscovery` and `MockActuatorSession` only.
 - Control starts `DISABLED` on every Viewer process start.
 - Persistent binding and safety configuration never restore control authority.
 - Only canonical `MeasurementSample.quality == VALID` is eligible for active control.
@@ -29,7 +29,7 @@
 - A transmitted command is never evidence of applied state.
 - V1 control law: `P_request_raw = P_acknowledged + P_reserve - P_measured`, independently for A, B, and C.
 - Do not add gain, PID, averaging, smoothing, interpolation, hysteresis, synthetic samples, or invented timing constants.
-- Control freshness and acknowledgement timeouts are explicit volatile mock-stage qualification inputs. They have no production default and are not persisted.
+- Control freshness and acknowledgement timeouts are explicit volatile mock-stage qualification inputs. They have no default and are not persisted.
 - Safety-critical configuration changes are allowed only while `DISABLED`.
 - The browser has no endpoint or field for direct actuator `P_A`, `P_B`, or `P_C` demand.
 - Preserve the known unrelated `tests/browser/test_header_status_layout.py` issue as a separate baseline observation. Do not change that test or the existing header layout.
@@ -129,11 +129,15 @@ No `WebSocketActuatorSession` or `MdnsActuatorDiscovery` implementation is creat
 - Create: `tests/unit/test_load_control_config_store.py`
 
 **Interfaces:**
-- Produce: `ThreePhasePower`, `ControlMode`, `SessionState`, `SafeState`, `LimitState`, `ActuatorCapability`, `TripReason`, `ActuatorDescriptor`, `ActuatorSessionIdentity`, `LoadControlTiming`, `PersistentLoadControlConfig`, `LoadControlStatus`.
-- Produce: `LoadControlConfigStore.load() -> PersistentLoadControlConfig`.
-- Produce: `LoadControlConfigStore.replace(config: PersistentLoadControlConfig) -> None`.
+- `ThreePhasePower(a: float, b: float, c: float)`.
+- `LoadControlTiming(control_sample_max_age_s: float, ack_timeout_s: float)`.
+- `PersistentLoadControlConfig(bound_emonio_device_id: str | None, bound_actuator_node_id: str | None, p_reserve: float | None, operator_limit_a: float | None, operator_limit_b: float | None, operator_limit_c: float | None)`.
+- `LoadControlConfigStore.load() -> PersistentLoadControlConfig`.
+- `LoadControlConfigStore.replace(config: PersistentLoadControlConfig) -> None`.
+- Enums: `ControlMode`, `SessionState`, `SafeState`, `LimitState`, `ActuatorCapability`, `TripReason`.
+- Immutable status/identity types: `ActuatorDescriptor`, `ActuatorSessionIdentity`, `LoadControlStatus`.
 
-- [ ] **Step 1: Write failing model-validation tests**
+- [ ] **Step 1: Write failing model tests**
 
 ```python
 import math
@@ -148,15 +152,17 @@ def test_three_phase_power_preserves_mapping():
 
 
 @pytest.mark.parametrize("bad", [0.0, -1.0, math.nan, math.inf, -math.inf])
-def test_config_rejects_invalid_reserve(bad):
+def test_persistent_config_rejects_invalid_reserve(bad):
     with pytest.raises(ValueError):
         PersistentLoadControlConfig(p_reserve=bad)
 
 
-def test_timing_requires_explicit_positive_values():
-    timing = LoadControlTiming(control_sample_max_age_s=1.25, ack_timeout_s=0.75)
-    assert timing.control_sample_max_age_s == 1.25
-    assert timing.ack_timeout_s == 0.75
+@pytest.mark.parametrize("bad", [0.0, -1.0, math.nan, math.inf, -math.inf])
+def test_timing_rejects_invalid_limits(bad):
+    with pytest.raises(ValueError):
+        LoadControlTiming(control_sample_max_age_s=bad, ack_timeout_s=1.0)
+    with pytest.raises(ValueError):
+        LoadControlTiming(control_sample_max_age_s=1.0, ack_timeout_s=bad)
 ```
 
 - [ ] **Step 2: Run RED**
@@ -167,7 +173,7 @@ python3 -m pytest tests/unit/test_load_control_model.py -q
 
 Expected: import failure.
 
-- [ ] **Step 3: Implement frozen models and validation**
+- [ ] **Step 3: Implement the immutable model core**
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -175,6 +181,18 @@ class ThreePhasePower:
     a: float
     b: float
     c: float
+
+
+@dataclass(frozen=True, slots=True)
+class LoadControlTiming:
+    control_sample_max_age_s: float
+    ack_timeout_s: float
+
+    def __post_init__(self) -> None:
+        for name in ("control_sample_max_age_s", "ack_timeout_s"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and > 0")
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,11 +215,16 @@ class PersistentLoadControlConfig:
                 raise ValueError(f"{name} must be finite and > 0")
 ```
 
-`LoadControlTiming` is a separate frozen type. It rejects non-finite and non-positive values and is never serialized by the persistent store.
+Define enum values exactly as the approved design: control `DISABLED/ENABLED/TRIPPED`; session `UNBOUND/DISCOVERING/UNAVAILABLE/CONNECTING/VERIFYING/READY/SESSION_FAULT`; safe `NOT_REQUIRED/SAFE_UNCONFIRMED/SAFE_CONFIRMED`.
 
-- [ ] **Step 4: Write store tests**
+- [ ] **Step 4: Write exact store tests**
 
 ```python
+def test_store_empty_file_state_is_empty_config(tmp_path):
+    store = LoadControlConfigStore(tmp_path / "load-control.json")
+    assert store.load() == PersistentLoadControlConfig()
+
+
 def test_store_round_trips_without_timing(tmp_path):
     path = tmp_path / "load-control.json"
     store = LoadControlConfigStore(path)
@@ -210,21 +233,37 @@ def test_store_round_trips_without_timing(tmp_path):
         bound_actuator_node_id="ARI-LOAD-MOCK-001",
         p_reserve=30.0,
         operator_limit_a=600.0,
-        operator_limit_b=600.0,
-        operator_limit_c=600.0,
+        operator_limit_b=700.0,
+        operator_limit_c=800.0,
     )
     store.replace(config)
     assert store.load() == config
     text = path.read_text(encoding="utf-8")
     assert "ack_timeout_s" not in text
     assert "control_sample_max_age_s" not in text
-```
 
-Also test invalid JSON, wrong schema version, wrong field set, temporary-file cleanup, and old-content preservation if `os.replace` fails.
+
+def test_store_rejects_wrong_schema(tmp_path):
+    path = tmp_path / "load-control.json"
+    path.write_text('{"schema_version":2,"config":{}}\n', encoding="utf-8")
+    with pytest.raises(LoadControlConfigStoreError):
+        LoadControlConfigStore(path).load()
+
+
+def test_replace_failure_preserves_old_file(tmp_path, monkeypatch):
+    path = tmp_path / "load-control.json"
+    store = LoadControlConfigStore(path)
+    original = PersistentLoadControlConfig(p_reserve=30.0)
+    store.replace(original)
+    monkeypatch.setattr(os, "replace", lambda *_args: (_ for _ in ()).throw(OSError("replace failed")))
+    with pytest.raises(LoadControlConfigStoreError):
+        store.replace(PersistentLoadControlConfig(p_reserve=40.0))
+    assert LoadControlConfigStore(path).load() == original
+```
 
 - [ ] **Step 5: Implement strict schema and atomic replacement**
 
-Use schema version `1`, `json.dump(..., indent=2, sort_keys=True)`, `flush`, `os.fsync`, and `os.replace`. Match the existing atomic persistence pattern without modifying `RememberedDeviceRegistry`.
+Use schema version `1`, exact top-level fields `schema_version` and `config`, deterministic JSON, `flush`, `os.fsync`, temporary sibling file, and `os.replace`. Delete the temporary file in `finally`.
 
 - [ ] **Step 6: Verify and commit**
 
@@ -236,25 +275,25 @@ git commit -m "feat: add load control models and configuration store"
 
 ---
 
-### Task 2: Deterministic Unity Controller
+### Task 2: Deterministic Unity Controller and Small State Machine
 
 **Files:**
 - Create: `src/emonio_viewer/load_control/controller.py`
+- Create: `src/emonio_viewer/load_control/state_machine.py`
 - Create: `tests/unit/test_load_control_controller.py`
+- Create: `tests/unit/test_load_control_state_machine.py`
 
 **Interfaces:**
-- Produce `PhaseControlResult`, `ThreePhaseControlResult`.
-- Produce `calculate_phase_request(*, measured_p: float, p_reserve: float, acknowledged_p: float, p_limit: float) -> PhaseControlResult`.
-- Produce `calculate_three_phase_request(...) -> ThreePhaseControlResult`.
+- `calculate_phase_request(*, measured_p: float, p_reserve: float, acknowledged_p: float, p_limit: float) -> PhaseControlResult`.
+- `calculate_three_phase_request(*, measured_p: ThreePhasePower, p_reserve: float, acknowledged_p: ThreePhasePower, p_limit: ThreePhasePower) -> ThreePhaseControlResult`.
+- `ControlStateMachine.enable()`, `.disable()`, `.trip(reason)`, `.mark_safe_unconfirmed()`, `.mark_safe_confirmed()`.
 
-- [ ] **Step 1: Write arithmetic tests**
+- [ ] **Step 1: Write failing controller tests**
 
 ```python
 def test_export_from_zero_load_requests_450_w():
     result = calculate_phase_request(measured_p=-420.0, p_reserve=30.0, acknowledged_p=0.0, p_limit=1000.0)
-    assert result.error == 450.0
-    assert result.raw_request == 450.0
-    assert result.limited_request == 450.0
+    assert (result.error, result.raw_request, result.limited_request) == (450.0, 450.0, 450.0)
 
 
 def test_next_request_uses_acknowledged_state():
@@ -262,66 +301,60 @@ def test_next_request_uses_acknowledged_state():
     assert result.raw_request == 455.0
 
 
-def test_minimum_clamp_is_zero():
-    result = calculate_phase_request(measured_p=250.0, p_reserve=30.0, acknowledged_p=100.0, p_limit=1000.0)
-    assert result.limited_request == 0.0
-    assert result.limited_min is True
+def test_zero_and_maximum_clamps_are_explicit():
+    low = calculate_phase_request(measured_p=250.0, p_reserve=30.0, acknowledged_p=100.0, p_limit=1000.0)
+    high = calculate_phase_request(measured_p=-900.0, p_reserve=30.0, acknowledged_p=0.0, p_limit=600.0)
+    assert (low.limited_request, low.limited_min) == (0.0, True)
+    assert (high.raw_request, high.limited_request, high.limited_max) == (930.0, 600.0, True)
 
 
-def test_maximum_saturation_is_visible():
-    result = calculate_phase_request(measured_p=-900.0, p_reserve=30.0, acknowledged_p=0.0, p_limit=600.0)
-    assert result.raw_request == 930.0
-    assert result.limited_request == 600.0
-    assert result.limited_max is True
+def test_three_phase_calculation_keeps_phase_mapping():
+    result = calculate_three_phase_request(
+        measured_p=ThreePhasePower(-420.0, 25.0, 100.0),
+        p_reserve=30.0,
+        acknowledged_p=ThreePhasePower(0.0, 450.0, 50.0),
+        p_limit=ThreePhasePower(600.0, 700.0, 800.0),
+    )
+    assert result.a.limited_request == 450.0
+    assert result.b.limited_request == 455.0
+    assert result.c.limited_request == 0.0
 ```
 
-- [ ] **Step 2: Run RED**
+- [ ] **Step 2: Run controller RED**
 
 ```bash
 python3 -m pytest tests/unit/test_load_control_controller.py -q
 ```
 
-- [ ] **Step 3: Implement only approved math**
+- [ ] **Step 3: Implement only approved controller math**
 
 ```python
-raw = acknowledged_p + p_reserve - measured_p
-limited = min(max(raw, 0.0), p_limit)
+def calculate_phase_request(*, measured_p, p_reserve, acknowledged_p, p_limit):
+    for value in (measured_p, p_reserve, acknowledged_p, p_limit):
+        if not math.isfinite(value):
+            raise ValueError("control inputs must be finite")
+    if p_reserve <= 0.0 or acknowledged_p < 0.0 or p_limit <= 0.0:
+        raise ValueError("invalid control limits")
+    error = p_reserve - measured_p
+    raw = acknowledged_p + error
+    limited = min(max(raw, 0.0), p_limit)
+    return PhaseControlResult(
+        error=error,
+        raw_request=raw,
+        limited_request=limited,
+        limited_min=raw < 0.0,
+        limited_max=raw > p_limit,
+    )
 ```
 
-Reject non-finite inputs, `p_reserve <= 0`, `acknowledged_p < 0`, and `p_limit <= 0`.
-
-- [ ] **Step 4: Add independent A/B/C mapping test**
-
-Use different measured values and different limits on all phases. Assert no phase value crosses into another phase result.
-
-- [ ] **Step 5: Verify and commit**
-
-```bash
-python3 -m pytest tests/unit/test_load_control_controller.py -q
-git add src/emonio_viewer/load_control/controller.py tests/unit/test_load_control_controller.py
-git commit -m "feat: add deterministic load control calculation"
-```
-
----
-
-### Task 3: Three-Domain Safety State
-
-**Files:**
-- Create: `src/emonio_viewer/load_control/state_machine.py`
-- Create: `tests/unit/test_load_control_state_machine.py`
-
-**Interfaces:**
-- Produce `ControlStateMachine` with `enable()`, `disable()`, `trip(reason)`, `mark_safe_unconfirmed()`, `mark_safe_confirmed()`.
-- Network/session state remains outside this state machine.
-
-- [ ] **Step 1: Write transition tests**
+- [ ] **Step 4: Write failing state-machine tests**
 
 ```python
 def test_startup_is_disabled():
     assert ControlStateMachine().mode is ControlMode.DISABLED
 
 
-def test_trip_is_latched():
+def test_disable_does_not_clear_trip():
     machine = ControlStateMachine()
     machine.enable()
     machine.trip(TripReason.ACTUATOR_CONNECTION_LOST)
@@ -330,7 +363,7 @@ def test_trip_is_latched():
     assert machine.trip_reason is TripReason.ACTUATOR_CONNECTION_LOST
 
 
-def test_explicit_enable_can_leave_trip_after_supervisor_gate():
+def test_explicit_enable_can_leave_trip_after_external_gate_passes():
     machine = ControlStateMachine()
     machine.enable()
     machine.trip(TripReason.ACTUATOR_CONNECTION_LOST)
@@ -339,89 +372,100 @@ def test_explicit_enable_can_leave_trip_after_supervisor_gate():
     assert machine.trip_reason is None
 ```
 
-- [ ] **Step 2: Run RED and implement exact transitions**
+- [ ] **Step 5: Implement exact state transitions**
 
-`disable()` is idempotent in `DISABLED`. In `TRIPPED`, it can reassert safe state but cannot clear trip or change control mode.
+The state machine never performs readiness checks. The supervisor calls `enable()` only after its complete gate passes. `disable()` is idempotent in `DISABLED`; in `TRIPPED` it does not change mode or trip reason.
 
-- [ ] **Step 3: Verify and commit**
+- [ ] **Step 6: Verify and commit**
 
 ```bash
-python3 -m pytest tests/unit/test_load_control_state_machine.py -q
-git add src/emonio_viewer/load_control/state_machine.py tests/unit/test_load_control_state_machine.py
-git commit -m "feat: add load control safety state machine"
+python3 -m pytest tests/unit/test_load_control_controller.py tests/unit/test_load_control_state_machine.py -q
+git add src/emonio_viewer/load_control/controller.py src/emonio_viewer/load_control/state_machine.py tests/unit/test_load_control_controller.py tests/unit/test_load_control_state_machine.py
+git commit -m "feat: add load control math and state machine"
 ```
 
 ---
 
-### Task 4: Strict Protocol V1 Data Model
+### Task 3: Strict Protocol V1 and Deterministic JSONL Evidence
 
 **Files:**
 - Create: `src/emonio_viewer/load_control/protocol.py`
-- Create: `tests/unit/test_load_control_protocol.py`
-
-**Interfaces:**
-- Constant: `LOAD_CONTROL_PROTOCOL_VERSION = 1`.
-- Produce frozen `HelloFrame`, `CommandFrame`, `AckFrame`, `StatusFrame`.
-- Produce `encode_frame(frame) -> str` and `decode_frame(text: str) -> HelloFrame | CommandFrame | AckFrame | StatusFrame`.
-- Serializer uses `allow_nan=False`, `sort_keys=True`, `separators=(",", ":")`.
-
-- [ ] **Step 1: Write round-trip and rejection tests**
-
-```python
-command = CommandFrame(
-    protocol_version=1,
-    viewer_session_id="VIEWER-TEST-1",
-    node_id="ARI-LOAD-MOCK-001",
-    boot_id="MOCK-BOOT-001",
-    sequence=7,
-    emonio_device_id="emonio-example",
-    measurement_cycle_id=42,
-    measurement_utc="2026-09-01T10:00:00+00:00",
-    command_utc="2026-09-01T10:00:00.010000+00:00",
-    control_enabled=True,
-    p_reserve=30.0,
-    measured_p=ThreePhasePower(-420.0, 10.0, 50.0),
-    measured_q=ThreePhasePower(100.0, -20.0, 0.0),
-    p_load_request=ThreePhasePower(450.0, 20.0, 0.0),
-    q_comp_request=ThreePhasePower(0.0, 0.0, 0.0),
-)
-assert decode_frame(encode_frame(command)) == command
-```
-
-Add rejection tests for unknown protocol version, wrong field set, missing field, non-finite numeric value, negative applied P in `ACK`, and non-zero V1 Q compensation request.
-
-- [ ] **Step 2: Run RED and implement exact schemas**
-
-Every frame has `message_type` and `protocol_version`. Do not supply silent defaults for missing safety fields.
-
-- [ ] **Step 3: Add safe-command test**
-
-A safe command has `control_enabled=False`, exact `P=0/0/0 W`, and exact `Q_comp=0/0/0 var`.
-
-- [ ] **Step 4: Verify and commit**
-
-```bash
-python3 -m pytest tests/unit/test_load_control_protocol.py -q
-git add src/emonio_viewer/load_control/protocol.py tests/unit/test_load_control_protocol.py
-git commit -m "feat: add load control protocol model"
-```
-
----
-
-### Task 5: Append-Only JSONL Evidence
-
-**Files:**
 - Create: `src/emonio_viewer/load_control/evidence.py`
+- Create: `tests/unit/test_load_control_protocol.py`
 - Create: `tests/unit/test_load_control_evidence.py`
 
 **Interfaces:**
-- Produce `EvidenceWriteError`, `EvidenceEvent`, `JsonlEvidenceWriter`.
-- `append(event) -> None`, `healthy -> bool`, `recent(limit: int = 100) -> tuple[dict, ...]`.
+- `LOAD_CONTROL_PROTOCOL_VERSION = 1`.
+- Frozen `HelloFrame`, `CommandFrame`, `AckFrame`, `StatusFrame`.
+- `encode_frame(frame) -> str`, `decode_frame(text: str) -> HelloFrame | CommandFrame | AckFrame | StatusFrame`.
+- `EvidenceEvent`, `EvidenceWriteError`, `JsonlEvidenceWriter.append()`, `.healthy`, `.recent()`.
 
-- [ ] **Step 1: Write deterministic line test**
+- [ ] **Step 1: Write exact protocol round-trip test**
 
 ```python
-def test_writer_appends_sorted_json_line(tmp_path):
+def test_command_round_trip_preserves_all_three_phases():
+    frame = CommandFrame(
+        protocol_version=1,
+        viewer_session_id="VIEWER-TEST-1",
+        node_id="ARI-LOAD-MOCK-001",
+        boot_id="MOCK-BOOT-001",
+        sequence=7,
+        emonio_device_id="emonio-example",
+        measurement_cycle_id=42,
+        measurement_utc="2026-09-01T10:00:00+00:00",
+        command_utc="2026-09-01T10:00:00.010000+00:00",
+        control_enabled=True,
+        p_reserve=30.0,
+        measured_p=ThreePhasePower(-420.0, 10.0, 50.0),
+        measured_q=ThreePhasePower(100.0, -20.0, 0.0),
+        p_load_request=ThreePhasePower(450.0, 20.0, 0.0),
+        q_comp_request=ThreePhasePower(0.0, 0.0, 0.0),
+    )
+    assert decode_frame(encode_frame(frame)) == frame
+```
+
+- [ ] **Step 2: Write strict rejection tests**
+
+```python
+@pytest.mark.parametrize("payload", [
+    '{"message_type":"COMMAND","protocol_version":99}',
+    '{"message_type":"COMMAND","protocol_version":1,"extra":1}',
+    '{"message_type":"ACK","protocol_version":1,"applied_p":{"a":NaN,"b":0,"c":0}}',
+])
+def test_invalid_protocol_payload_is_rejected(payload):
+    with pytest.raises(ProtocolValidationError):
+        decode_frame(payload)
+
+
+def test_v1_command_rejects_nonzero_q_compensation():
+    with pytest.raises(ProtocolValidationError):
+        CommandFrame.create_validated(
+            protocol_version=1,
+            viewer_session_id="V",
+            node_id="N",
+            boot_id="B",
+            sequence=1,
+            emonio_device_id="E",
+            measurement_cycle_id=1,
+            measurement_utc="2026-09-01T10:00:00+00:00",
+            command_utc="2026-09-01T10:00:00+00:00",
+            control_enabled=True,
+            p_reserve=30.0,
+            measured_p=ThreePhasePower(0.0, 0.0, 0.0),
+            measured_q=ThreePhasePower(1.0, 2.0, 3.0),
+            p_load_request=ThreePhasePower(0.0, 0.0, 0.0),
+            q_comp_request=ThreePhasePower(1.0, 0.0, 0.0),
+        )
+```
+
+- [ ] **Step 3: Implement strict serializer/parser**
+
+Use exact field sets per message type. Use `json.dumps(..., allow_nan=False, sort_keys=True, separators=(",", ":"))`. Do not infer missing safety fields.
+
+- [ ] **Step 4: Write deterministic evidence tests**
+
+```python
+def test_jsonl_writer_writes_one_sorted_line(tmp_path):
     writer = JsonlEvidenceWriter(tmp_path / "control.jsonl")
     writer.append(EvidenceEvent(
         schema_version=1,
@@ -430,29 +474,34 @@ def test_writer_appends_sorted_json_line(tmp_path):
         event="CONTROL_COMMAND_CALCULATED",
         payload={"b": 2, "a": 1},
     ))
-    line = (tmp_path / "control.jsonl").read_text(encoding="utf-8").splitlines()[0]
-    assert line == '{"event":"CONTROL_COMMAND_CALCULATED","occurred_utc":"2026-09-01T10:00:00+00:00","payload":{"a":1,"b":2},"schema_version":1,"viewer_session_id":"VIEWER-1"}'
+    assert (tmp_path / "control.jsonl").read_text(encoding="utf-8").splitlines() == [
+        '{"event":"CONTROL_COMMAND_CALCULATED","occurred_utc":"2026-09-01T10:00:00+00:00","payload":{"a":1,"b":2},"schema_version":1,"viewer_session_id":"VIEWER-1"}'
+    ]
+
+
+def test_evidence_failure_marks_writer_unhealthy(tmp_path, monkeypatch):
+    writer = JsonlEvidenceWriter(tmp_path / "control.jsonl")
+    monkeypatch.setattr(os, "fsync", lambda _fd: (_ for _ in ()).throw(OSError("fsync failed")))
+    with pytest.raises(EvidenceWriteError):
+        writer.append(EvidenceEvent(1, "VIEWER-1", "2026-09-01T10:00:00+00:00", "TEST", {}))
+    assert writer.healthy is False
 ```
 
-- [ ] **Step 2: Write failure-health test**
+- [ ] **Step 5: Implement append-only evidence writer**
 
-Inject an `OSError` from the low-level write or `os.fsync`. Assert `EvidenceWriteError` and `healthy is False`.
+Use append mode, `flush`, `os.fsync`, and a bounded in-memory deque for recent evidence. A failed append sets health false. Never rewrite an earlier event.
 
-- [ ] **Step 3: Implement append-only writer**
-
-Use append mode, one event per line, `flush`, and `os.fsync`. Keep a bounded in-memory deque for recent UI evidence. Never rewrite an earlier event.
-
-- [ ] **Step 4: Verify and commit**
+- [ ] **Step 6: Verify and commit**
 
 ```bash
-python3 -m pytest tests/unit/test_load_control_evidence.py -q
-git add src/emonio_viewer/load_control/evidence.py tests/unit/test_load_control_evidence.py
-git commit -m "feat: add load control evidence writer"
+python3 -m pytest tests/unit/test_load_control_protocol.py tests/unit/test_load_control_evidence.py -q
+git add src/emonio_viewer/load_control/protocol.py src/emonio_viewer/load_control/evidence.py tests/unit/test_load_control_protocol.py tests/unit/test_load_control_evidence.py
+git commit -m "feat: add load control protocol and evidence"
 ```
 
 ---
 
-### Task 6: Mock Discovery and Mock Actuator Session
+### Task 4: Mock Discovery and Mock Session Boundary
 
 **Files:**
 - Create: `src/emonio_viewer/load_control/discovery.py`
@@ -462,10 +511,10 @@ git commit -m "feat: add load control evidence writer"
 
 **Interfaces:**
 - `ActuatorDiscovery` Protocol: `async discover() -> tuple[ActuatorDescriptor, ...]`.
-- `ActuatorSession` Protocol: `async connect(descriptor) -> HelloFrame`, `async send_command(command) -> None`, `async receive() -> AckFrame | StatusFrame`, `async close() -> None`.
-- `MockActuatorDiscovery` and `MockActuatorSession` are the only stage-1 implementations.
+- `ActuatorSession` Protocol: `async connect(descriptor: ActuatorDescriptor) -> HelloFrame`, `async send_command(command: CommandFrame) -> None`, `async receive() -> AckFrame | StatusFrame`, `async close() -> None`.
+- Stage-1 implementations: `MockActuatorDiscovery`, `MockActuatorSession` only.
 
-**Exact default mock fixture used by the Viewer:**
+**Exact Viewer mock fixture:**
 
 ```text
 node_id: ARI-LOAD-MOCK-001
@@ -478,21 +527,59 @@ P_max_B: 1000 W
 P_max_C: 1000 W
 ```
 
-These are deterministic mock fixture values only. They are not hardware ratings or controller constants.
+These are deterministic fixture values, not hardware ratings or controller constants.
 
-- [ ] **Step 1: Write discovery tests**
+- [ ] **Step 1: Write discovery authority tests**
 
-Prove multiple mock nodes can exist, mock location can change without node identity change, disappearance of the bound node does not select another node, and discovery never grants control authority.
+```python
+@pytest.mark.asyncio
+async def test_discovery_does_not_select_or_rebind():
+    a = mock_descriptor("ARI-LOAD-MOCK-001", "mock://one")
+    b = mock_descriptor("ARI-LOAD-MOCK-002", "mock://two")
+    discovery = MockActuatorDiscovery((a, b))
+    assert await discovery.discover() == (a, b)
+    assert not hasattr(discovery, "selected_node_id")
 
-- [ ] **Step 2: Write session scenario tests**
 
-Cover exact ACK, missing ACK, wrong sequence, wrong node ID, boot change, capability change, limit change, connection loss, and explicit applied-value offset. No random behavior is allowed.
+@pytest.mark.asyncio
+async def test_bound_node_disappearance_does_not_promote_other_node():
+    a = mock_descriptor("ARI-LOAD-MOCK-001", "mock://one")
+    b = mock_descriptor("ARI-LOAD-MOCK-002", "mock://two")
+    discovery = MockActuatorDiscovery((a, b))
+    discovery.set_visible((b,))
+    visible = await discovery.discover()
+    assert [item.node_id for item in visible] == ["ARI-LOAD-MOCK-002"]
+```
 
-- [ ] **Step 3: Implement Protocols and mocks**
+- [ ] **Step 2: Write explicit mock-session scenario tests**
 
-Do not import `socket`, `zeroconf`, or `aiohttp.ClientSession` in the load-control package.
+```python
+@pytest.mark.asyncio
+async def test_mock_session_exact_ack_reports_applied_request():
+    session = MockActuatorSession.exact_ack(boot_id="MOCK-BOOT-001")
+    await session.connect(mock_descriptor("ARI-LOAD-MOCK-001", "mock://one"))
+    command = safe_test_command(sequence=5, p=ThreePhasePower(100.0, 200.0, 300.0))
+    await session.send_command(command)
+    ack = await session.receive()
+    assert ack.sequence == 5
+    assert ack.applied_p == ThreePhasePower(100.0, 200.0, 300.0)
 
-- [ ] **Step 4: Add stage-1 source contract**
+
+@pytest.mark.asyncio
+async def test_mock_session_missing_ack_is_explicit():
+    session = MockActuatorSession.no_ack(boot_id="MOCK-BOOT-001")
+    await session.connect(mock_descriptor("ARI-LOAD-MOCK-001", "mock://one"))
+    await session.send_command(safe_test_command(sequence=6, p=ThreePhasePower(0.0, 0.0, 0.0)))
+    assert session.pending_receive_count == 0
+```
+
+Add named factory scenarios for wrong sequence, wrong node ID, boot change, capability change, limit change, connection loss, and applied-value offset. Each scenario uses fixed explicit values.
+
+- [ ] **Step 3: Implement Protocols and deterministic mocks**
+
+No random delay, random load error, smoothing, plant simulation, socket, mDNS, or HTTP/WebSocket client is allowed.
+
+- [ ] **Step 4: Write mock-only source gate**
 
 ```python
 from pathlib import Path
@@ -501,10 +588,8 @@ from pathlib import Path
 def test_stage1_has_no_real_actuator_transport_implementation():
     root = Path("src/emonio_viewer/load_control")
     source = "\n".join(path.read_text(encoding="utf-8") for path in root.glob("*.py"))
-    assert "WebSocketActuatorSession" not in source
-    assert "MdnsActuatorDiscovery" not in source
-    assert "zeroconf" not in source
-    assert "ClientSession" not in source
+    for forbidden in ("WebSocketActuatorSession", "MdnsActuatorDiscovery", "zeroconf", "ClientSession"):
+        assert forbidden not in source
 ```
 
 - [ ] **Step 5: Verify and commit**
@@ -517,7 +602,7 @@ git commit -m "feat: add deterministic mock actuator boundary"
 
 ---
 
-### Task 7: Pure Supervisor Decisions and Safety Logic
+### Task 5: Pure LoadControlSupervisor
 
 **Files:**
 - Create: `src/emonio_viewer/load_control/supervisor.py`
@@ -525,48 +610,153 @@ git commit -m "feat: add deterministic mock actuator boundary"
 - Create: `tests/unit/test_load_control_supervisor.py`
 
 **Interfaces:**
-- Consume canonical `MeasurementSample` and `DiagnosticEvent` objects without mutation.
-- Produce immutable `SupervisorDecision` with zero or more `EvidenceEvent` values and at most one `CommandFrame`.
-- Methods:
-  - `request_enable(now_monotonic_ns: int, command_utc: datetime) -> SupervisorDecision`
-  - `request_disable(command_utc: datetime) -> SupervisorDecision`
-  - `on_measurement(sample: MeasurementSample, now_monotonic_ns: int, command_utc: datetime) -> SupervisorDecision`
-  - `on_diagnostic(event: DiagnosticEvent, command_utc: datetime) -> SupervisorDecision`
-  - `on_ack(ack: AckFrame, command_utc: datetime) -> SupervisorDecision`
-  - `on_session_ready(hello: HelloFrame, command_utc: datetime) -> SupervisorDecision`
-  - `on_session_lost(command_utc: datetime) -> SupervisorDecision`
-  - `on_time(now_monotonic_ns: int, command_utc: datetime) -> SupervisorDecision`
-  - `on_evidence_failure(command_utc: datetime) -> SupervisorDecision`
+- `SupervisorDecision(events: tuple[EvidenceEvent, ...], command: CommandFrame | None, status: LoadControlStatus)`.
+- `LoadControlSupervisor.request_enable(now_monotonic_ns: int, command_utc: datetime) -> SupervisorDecision`.
+- `request_disable(command_utc: datetime) -> SupervisorDecision`.
+- `on_measurement(sample: MeasurementSample, now_monotonic_ns: int, command_utc: datetime) -> SupervisorDecision`.
+- `on_diagnostic(event: DiagnosticEvent, command_utc: datetime) -> SupervisorDecision`.
+- `on_ack(ack: AckFrame, command_utc: datetime) -> SupervisorDecision`.
+- `on_session_ready(hello: HelloFrame, command_utc: datetime) -> SupervisorDecision`.
+- `on_session_lost(command_utc: datetime) -> SupervisorDecision`.
+- `on_time(now_monotonic_ns: int, command_utc: datetime) -> SupervisorDecision`.
+- `on_evidence_failure(command_utc: datetime) -> SupervisorDecision`.
 
-- [ ] **Step 1: Add immutable test sample helper**
+- [ ] **Step 1: Create immutable sample test helper**
 
-Use `dataclasses.replace` on `real_sample` to change P/Q, quality, cycle ID, and monotonic finish time. Do not change production measurement classes.
+```python
+def sample_with_power(base, *, cycle_id, p_a, p_b, p_c, q_a=0.0, q_b=0.0, q_c=0.0, quality=SampleQuality.VALID, finished_ns=1_100_000_000):
+    def phase(block, p, q):
+        measurement = replace(block.measurement, p=p, q=q)
+        return replace(block, measurement=measurement)
+    return replace(
+        base,
+        identity=replace(base.identity, cycle_id=cycle_id),
+        timing=replace(base.timing, cycle_finished_monotonic_ns=finished_ns),
+        phase_a=phase(base.phase_a, p_a, q_a),
+        phase_b=phase(base.phase_b, p_b, q_b),
+        phase_c=phase(base.phase_c, p_c, q_c),
+        quality=quality,
+    )
+```
 
-- [ ] **Step 2: Write enable-gate tests**
+- [ ] **Step 2: Write table-driven enable-gate tests**
 
-Prove rejection for: missing Emonio binding, missing actuator binding, missing reserve, incomplete operator limits, missing mock timing qualification, missing current sample, non-VALID sample, stale sample, non-READY session, identity mismatch, capability missing, invalid effective limit, safe state not confirmed, and evidence health false. Then prove one complete valid gate enters `ENABLED`.
+```python
+@pytest.mark.parametrize("case", [
+    "NO_EMONIO_BINDING",
+    "NO_ACTUATOR_BINDING",
+    "NO_RESERVE",
+    "NO_OPERATOR_LIMITS",
+    "TIMING_UNQUALIFIED",
+    "NO_SAMPLE",
+    "SAMPLE_NOT_VALID",
+    "SAMPLE_STALE",
+    "SESSION_NOT_READY",
+    "IDENTITY_MISMATCH",
+    "CAPABILITY_MISSING",
+    "SAFE_NOT_CONFIRMED",
+    "EVIDENCE_UNHEALTHY",
+])
+def test_enable_gate_rejects_one_missing_condition(case, ready_supervisor_factory):
+    supervisor = ready_supervisor_factory(except_condition=case)
+    decision = supervisor.request_enable(2_000_000_000, utc(10, 0, 1))
+    assert decision.status.control_mode is not ControlMode.ENABLED
+    assert decision.status.last_enable_rejection == case
 
-- [ ] **Step 3: Write phase/sign/controller integration test**
 
-Use `P_A=-420`, `P_B=25`, `P_C=100`, acknowledged loads `0`, `450`, `50`, reserve `30`, and separate limits. Assert exact A/B/C results and no total-power redistribution.
+def test_complete_enable_gate_enters_enabled(ready_supervisor):
+    decision = ready_supervisor.request_enable(2_000_000_000, utc(10, 0, 1))
+    assert decision.status.control_mode is ControlMode.ENABLED
+```
 
-- [ ] **Step 4: Write sequence and outstanding-command tests**
+- [ ] **Step 3: Write exact sign and phase test**
 
-Prove sequence starts at `1` for an injected Viewer session, increments for every command including safe commands, allows only one normal outstanding command, observes intermediate samples without delayed command replay, and keeps measurement cycle ID separate from command sequence.
+```python
+def test_control_uses_ack_state_and_keeps_phases_independent(ready_supervisor, real_sample):
+    ready_supervisor.set_acknowledged_p(ThreePhasePower(0.0, 450.0, 50.0))
+    sample = sample_with_power(real_sample, cycle_id=10, p_a=-420.0, p_b=25.0, p_c=100.0, q_a=100.0, q_b=-20.0, q_c=5.0)
+    decision = ready_supervisor.on_measurement(sample, 1_100_000_001, utc(10, 0, 2))
+    assert decision.command.p_load_request == ThreePhasePower(450.0, 455.0, 0.0)
+    assert decision.command.measured_q == ThreePhasePower(100.0, -20.0, 5.0)
+    assert decision.command.q_comp_request == ThreePhasePower(0.0, 0.0, 0.0)
+```
 
-- [ ] **Step 5: Write acknowledgement authority tests**
+- [ ] **Step 4: Write sequence and intermediate-sample tests**
 
-Validate Viewer session ID, node ID, boot ID, sequence, finite non-negative applied P, and actuator limit. Accepted applied values become the next authoritative acknowledged state. Obsolete ACK after safe preemption is recorded but cannot restore authority. Incompatible active ACK trips.
+```python
+def test_intermediate_samples_are_not_replayed(ready_supervisor, real_sample):
+    first = ready_supervisor.on_measurement(sample_with_power(real_sample, cycle_id=20, p_a=-100.0, p_b=0.0, p_c=0.0), 1_100_000_001, utc(10, 0, 2))
+    assert first.command.sequence == 1
+    second = ready_supervisor.on_measurement(sample_with_power(real_sample, cycle_id=21, p_a=-200.0, p_b=0.0, p_c=0.0), 1_200_000_001, utc(10, 0, 3))
+    assert second.command is None
+    ready_supervisor.on_ack(valid_ack_for(first.command), utc(10, 0, 4))
+    third = ready_supervisor.on_measurement(sample_with_power(real_sample, cycle_id=22, p_a=-300.0, p_b=0.0, p_c=0.0), 1_300_000_001, utc(10, 0, 5))
+    assert third.command.sequence == 2
+    assert third.command.measurement_cycle_id == 22
+```
 
-- [ ] **Step 6: Write trip and safe-preemption tests**
+- [ ] **Step 5: Write ACK authority and safe-preemption tests**
 
-Cover `DEGRADED`, `STALE`, `INVALID`, acquisition diagnostic event, cycle gap, session loss, boot change, capability change, actuator-limit change, invalid acknowledgement, freshness deadline, acknowledgement deadline, and evidence failure. Assert a newer safe command is created when session transmission is available.
+```python
+def test_safe_command_supersedes_nonzero_command(ready_supervisor, real_sample):
+    active = ready_supervisor.on_measurement(sample_with_power(real_sample, cycle_id=30, p_a=-100.0, p_b=0.0, p_c=0.0), 1_100_000_001, utc(10, 0, 2))
+    tripped = ready_supervisor.on_session_lost(utc(10, 0, 3))
+    assert tripped.status.control_mode is ControlMode.TRIPPED
+    assert tripped.command.sequence == active.command.sequence + 1
+    assert tripped.command.p_load_request == ThreePhasePower(0.0, 0.0, 0.0)
+    obsolete = ready_supervisor.on_ack(valid_ack_for(active.command), utc(10, 0, 4))
+    assert obsolete.status.control_mode is ControlMode.TRIPPED
+```
 
-- [ ] **Step 7: Write operator-disable tests**
+- [ ] **Step 6: Write cycle-gap and acquisition-failure tests**
 
-Cover `ENABLED`, `DISABLED`, and `TRIPPED`. Disable cannot clear a latched trip.
+```python
+def test_unexplained_cycle_gap_trips(ready_supervisor, real_sample):
+    ready_supervisor.on_measurement(sample_with_power(real_sample, cycle_id=40, p_a=0.0, p_b=0.0, p_c=0.0), 1_100_000_001, utc(10, 0, 2))
+    decision = ready_supervisor.on_measurement(sample_with_power(real_sample, cycle_id=42, p_a=0.0, p_b=0.0, p_c=0.0), 1_200_000_001, utc(10, 0, 3))
+    assert decision.status.trip_reason is TripReason.CONTROL_SAMPLE_SEQUENCE_GAP
 
-- [ ] **Step 8: Run RED, implement, verify, commit**
+
+def test_explicit_acquisition_failure_trips_immediately(ready_supervisor):
+    event = DiagnosticEvent("emonio-example", 41, utc(10, 0, 3), "ACQUISITION_TIMEOUT", Severity.WARNING, "A: timeout")
+    decision = ready_supervisor.on_diagnostic(event, utc(10, 0, 3))
+    assert decision.status.control_mode is ControlMode.TRIPPED
+```
+
+- [ ] **Step 7: Write quality, deadline, identity, capability, and evidence-failure tests**
+
+```python
+@pytest.mark.parametrize("quality", [SampleQuality.DEGRADED, SampleQuality.STALE, SampleQuality.INVALID])
+def test_non_valid_quality_trips(ready_supervisor, real_sample, quality):
+    sample = sample_with_power(real_sample, cycle_id=50, p_a=0.0, p_b=0.0, p_c=0.0, quality=quality)
+    assert ready_supervisor.on_measurement(sample, 1_100_000_001, utc(10, 0, 2)).status.control_mode is ControlMode.TRIPPED
+
+
+def test_freshness_deadline_trips(ready_supervisor):
+    decision = ready_supervisor.on_time(ready_supervisor.sample_deadline_ns + 1, utc(10, 0, 9))
+    assert decision.status.trip_reason is TripReason.CONTROL_SAMPLE_STALE
+
+
+def test_evidence_failure_trips_active_control(ready_supervisor):
+    decision = ready_supervisor.on_evidence_failure(utc(10, 0, 9))
+    assert decision.status.trip_reason is TripReason.CONTROL_EVIDENCE_WRITE_ERROR
+```
+
+Add fixed-value tests for boot change, wrong node ID, protocol mismatch, capability loss, limit change, invalid active ACK, and acknowledgement deadline. Each must assert the exact `TripReason`.
+
+- [ ] **Step 8: Write operator-disable state tests**
+
+```python
+def test_disable_from_tripped_does_not_clear_trip(tripped_supervisor):
+    reason = tripped_supervisor.status().trip_reason
+    decision = tripped_supervisor.request_disable(utc(10, 0, 9))
+    assert decision.status.control_mode is ControlMode.TRIPPED
+    assert decision.status.trip_reason is reason
+```
+
+- [ ] **Step 9: Implement supervisor and verify**
+
+The supervisor performs no file I/O and no network I/O. It owns command sequence allocation for the injected Viewer session ID and returns decisions only.
 
 ```bash
 python3 -m pytest tests/unit/test_load_control_supervisor.py -q
@@ -574,62 +764,114 @@ git add src/emonio_viewer/load_control/supervisor.py tests/fixtures/load_control
 git commit -m "feat: add load control supervisor decisions"
 ```
 
-The supervisor performs no file I/O and no network I/O.
-
 ---
 
-### Task 8: Async LoadControlService and RuntimeEventBus Isolation
+### Task 6: Async LoadControlService and RuntimeEventBus Isolation
 
 **Files:**
 - Create: `src/emonio_viewer/load_control/service.py`
 - Create: `tests/unit/test_load_control_service.py`
 
 **Interfaces:**
-- `LoadControlService` owns one RuntimeEventBus subscription, one supervisor, one discovery adapter, one session adapter, one evidence writer, and one persistent config store.
-- Async lifecycle: `start()`, `stop()`.
-- Operator methods: `set_binding(...)`, `set_safety_config(...)`, `set_mock_timing(...)`, `enable()`, `disable()`.
-- Status methods: `status()`, `discovered_actuators()`, `recent_evidence(limit=100)`.
+- `LoadControlService.start()`, `stop()`.
+- `set_binding(emonio_device_id: str, actuator_node_id: str) -> LoadControlStatus`.
+- `set_safety_config(p_reserve: float, operator_limits: ThreePhasePower) -> LoadControlStatus`.
+- `set_mock_timing(timing: LoadControlTiming) -> LoadControlStatus`.
+- `enable() -> LoadControlStatus`, `disable() -> LoadControlStatus`.
+- `status() -> LoadControlStatus`.
+- `discovered_actuators() -> tuple[ActuatorDescriptor, ...]`.
+- `recent_evidence(limit: int = 100) -> tuple[dict, ...]`.
 
-- [ ] **Step 1: Write startup isolation test**
+- [ ] **Step 1: Write event-bus isolation test**
 
-Use a real `RuntimeEventBus` and mock components. Assert service starts `DISABLED`, subscribes independently, and `bus.publish(sample)` does not wait for service work.
+```python
+@pytest.mark.asyncio
+async def test_service_subscribes_without_blocking_bus(real_sample, tmp_path):
+    bus = RuntimeEventBus()
+    service = build_test_service(bus=bus, tmp_path=tmp_path)
+    await service.start()
+    started = time.monotonic()
+    bus.publish(real_sample)
+    assert time.monotonic() - started < 0.05
+    await service.stop()
+```
 
-- [ ] **Step 2: Write binding and session-qualification test**
+The test threshold measures local non-blocking publication only; it is not a controller timing constant.
 
-Persist a binding to `ARI-LOAD-MOCK-001`. Start the service. Assert discovery locates that exact node, HELLO qualifies it, session becomes `READY`, safe demand is issued, and only a valid successful exact-zero ACK establishes `SAFE_CONFIRMED`.
+- [ ] **Step 2: Write exact startup qualification test**
 
-- [ ] **Step 3: Write no-automatic-transfer test**
+```python
+@pytest.mark.asyncio
+async def test_bound_mock_node_qualifies_and_confirms_safe(tmp_path):
+    service = build_test_service(tmp_path=tmp_path, persisted_node="ARI-LOAD-MOCK-001", mock_mode="EXACT_ACK")
+    await service.start()
+    status = service.status()
+    assert status.control_mode is ControlMode.DISABLED
+    assert status.session_state is SessionState.READY
+    assert status.safe_state is SafeState.SAFE_CONFIRMED
+    assert status.actuator_boot_id == "MOCK-BOOT-001"
+    await service.stop()
+```
 
-Remove the bound mock node while another compatible node remains. Assert the service reports the bound actuator unavailable and never binds or connects to the other node.
+- [ ] **Step 3: Write no-auto-transfer test**
 
-- [ ] **Step 4: Write atomic service-configuration test**
+```python
+@pytest.mark.asyncio
+async def test_missing_bound_node_does_not_use_other_visible_node(tmp_path):
+    service, discovery = build_two_node_service(tmp_path=tmp_path, bound_node="ARI-LOAD-MOCK-001")
+    await service.start()
+    discovery.set_visible((mock_descriptor("ARI-LOAD-MOCK-002", "mock://two"),))
+    await service.refresh_discovery()
+    assert service.status().bound_actuator_node_id == "ARI-LOAD-MOCK-001"
+    assert service.status().session_state is SessionState.UNAVAILABLE
+    await service.stop()
+```
 
-Force `LoadControlConfigStore.replace()` to fail. Assert service in-memory configuration remains the previous valid configuration. Persist first, then replace the service's in-memory configuration only after persistence succeeds.
+- [ ] **Step 4: Write atomic service-config test**
+
+```python
+def test_service_does_not_replace_memory_when_persistence_fails(service, monkeypatch):
+    before = service.status().persistent_config
+    monkeypatch.setattr(service.config_store, "replace", lambda _config: (_ for _ in ()).throw(LoadControlConfigStoreError("write failed")))
+    with pytest.raises(LoadControlCommandError):
+        service.set_safety_config(40.0, ThreePhasePower(600.0, 600.0, 600.0))
+    assert service.status().persistent_config == before
+```
 
 - [ ] **Step 5: Write evidence-before-nonzero-send test**
 
-Use a failing evidence writer. Publish an eligible control sample. Assert mock session receives no non-zero command. Assert service trips and still attempts a safe command.
+```python
+@pytest.mark.asyncio
+async def test_evidence_failure_blocks_nonzero_send_and_still_attempts_safe(ready_enabled_service, real_sample):
+    ready_enabled_service.evidence_writer.fail_next_append(OSError("disk error"))
+    ready_enabled_service.bus.publish(sample_with_power(real_sample, cycle_id=70, p_a=-420.0, p_b=0.0, p_c=0.0))
+    await ready_enabled_service.drain()
+    sent = ready_enabled_service.mock_session.sent_commands
+    assert all(command.p_load_request == ThreePhasePower(0.0, 0.0, 0.0) for command in sent)
+    assert ready_enabled_service.status().control_mode is ControlMode.TRIPPED
+```
 
-- [ ] **Step 6: Write event-source isolation tests**
+- [ ] **Step 6: Write source-isolation and explicit-deadline tests**
 
-Publish source and non-source `MeasurementSample` plus acquisition `DiagnosticEvent` objects. Assert only the bound Emonio affects control state. Assert exact cycle continuity on the bound source.
+```python
+@pytest.mark.asyncio
+async def test_other_emonio_samples_do_not_drive_control(ready_enabled_service, real_sample):
+    other = replace(real_sample, identity=replace(real_sample.identity, device_id="other-emonio", cycle_id=1))
+    ready_enabled_service.bus.publish(other)
+    await ready_enabled_service.drain()
+    assert ready_enabled_service.mock_session.nonzero_command_count == 0
 
-- [ ] **Step 7: Write explicit-deadline tests**
 
-Inject `LoadControlTiming` in each test. No constructor numeric default is allowed. Test freshness and acknowledgement expiry using injected monotonic clocks.
+def test_service_has_no_timing_default(tmp_path):
+    service = build_test_service(tmp_path=tmp_path, timing=None)
+    assert service.status().timing_qualified is False
+```
 
-- [ ] **Step 8: Implement service ordering**
+- [ ] **Step 7: Implement service ordering and lifecycle**
 
-For a normal non-zero decision:
+Persist configuration before replacing in-memory configuration. For normal non-zero decisions, required calculation/send-attempt evidence must append before session send. If evidence fails, feed `on_evidence_failure()` to supervisor and block the non-zero send. Required safe commands are attempted even when evidence is unhealthy.
 
-1. write required calculation/send-attempt evidence;
-2. if evidence write fails, feed `on_evidence_failure` to supervisor and block non-zero send;
-3. if evidence succeeds, send through `MockActuatorSession`;
-4. record send result when evidence remains available.
-
-For a required safe command, attempt the safe send even if evidence is unhealthy.
-
-- [ ] **Step 9: Verify and commit**
+- [ ] **Step 8: Verify and commit**
 
 ```bash
 python3 -m pytest tests/unit/test_load_control_service.py -q
@@ -639,7 +881,7 @@ git commit -m "feat: add isolated load control service"
 
 ---
 
-### Task 9: Thin API, Viewer Composition, and Safe Shutdown
+### Task 7: Thin HTTP API, Viewer Composition, and Safe Shutdown
 
 **Files:**
 - Create: `src/emonio_viewer/server/load_control_api.py`
@@ -653,7 +895,7 @@ git commit -m "feat: add isolated load control service"
 
 **Interfaces:**
 - Add `LOAD_CONTROL_SERVICE_KEY`.
-- Endpoints:
+- Routes:
   - `GET /api/v1/load-control/status`
   - `GET /api/v1/load-control/discovered-actuators`
   - `GET /api/v1/load-control/evidence/recent`
@@ -662,53 +904,89 @@ git commit -m "feat: add isolated load control service"
   - `POST /api/v1/load-control/mock-timing`
   - `POST /api/v1/load-control/enable`
   - `POST /api/v1/load-control/disable`
-- No `/api/v1/load-control/command` endpoint exists.
 
-- [ ] **Step 1: Write status API test**
+- [ ] **Step 1: Write status and no-direct-command API tests**
 
-Assert status exposes control mode, session state, safe state, trip reason, Viewer session ID, bindings, boot ID, protocol version, capabilities, reserve, operator/actuator/effective limits, last measurement identity/quality/age, last acknowledged P, outstanding sequence, last acknowledged sequence, last command, last ACK, last trip, evidence health, timing qualification, and `transport_mode="MOCK"`.
+```python
+async def test_status_reports_mock_control_domains(client):
+    response = await client.get("/api/v1/load-control/status")
+    assert response.status == 200
+    body = await response.json()
+    for key in (
+        "control_mode", "session_state", "safe_state", "trip_reason",
+        "viewer_session_id", "bound_emonio_device_id", "bound_actuator_node_id",
+        "actuator_boot_id", "protocol_version", "capabilities", "p_reserve",
+        "operator_limits", "actuator_limits", "effective_limits",
+        "last_measurement_cycle_id", "last_measurement_quality",
+        "last_acknowledged_p", "outstanding_sequence", "last_acknowledged_sequence",
+        "last_command", "last_ack", "last_trip", "evidence_health", "timing_qualified",
+        "transport_mode",
+    ):
+        assert key in body
+    assert body["transport_mode"] == "MOCK"
 
-- [ ] **Step 2: Write operator-command API tests**
 
-Test invalid body -> `400`, configure/bind while enabled -> `409`, enable-gate rejection -> `409` with exact service error code, unavailable service -> `503`.
-
-- [ ] **Step 3: Write no-direct-command route test**
-
-Enumerate routes and assert `/api/v1/load-control/command` is absent.
-
-- [ ] **Step 4: Wire the Viewer composition root**
-
-In `main.py`, create exactly one new volatile Viewer session ID per process. Create:
-
-```text
-LoadControlConfigStore(config_path.parent / "load-control.json")
-MockActuatorDiscovery(default mock descriptor)
-MockActuatorSession
-JsonlEvidenceWriter(PROJECT_ROOT / "load-control-evidence" / f"{viewer_session_id}.jsonl")
-LoadControlService
+async def test_no_direct_phase_command_route(app):
+    paths = {route.resource.canonical for route in app.router.routes()}
+    assert "/api/v1/load-control/command" not in paths
 ```
 
-Start `LoadControlService` before acquisition workers so its event-bus subscriber exists before the first canonical acquisition event. Do not supply timing values at startup.
+- [ ] **Step 2: Write operator error mapping tests**
 
-- [ ] **Step 5: Write safe shutdown ordering test**
+```python
+async def test_binding_change_while_enabled_is_conflict(client, enabled_service):
+    response = await client.post("/api/v1/load-control/binding", json={
+        "emonio_device_id": "emonio-example",
+        "actuator_node_id": "ARI-LOAD-MOCK-001",
+    })
+    assert response.status == 409
+    assert (await response.json())["error"] == "CONTROL_BINDING_CHANGE_FORBIDDEN_WHILE_ENABLED"
 
-Expected high-level order:
 
-```text
-STOP_LOAD_CONTROL_COMMANDS
-STOP_LOAD_CONTROL
-STOP_SCOPE
-STOP_RECORDING_COMMANDS
-STOP_RECORDERS
-STOP_WORKERS
-STOP_SERVER
+async def test_unqualified_enable_returns_exact_gate_reason(client):
+    response = await client.post("/api/v1/load-control/enable", json={})
+    assert response.status == 409
+    assert (await response.json())["error"].startswith("ENABLE_GATE_")
 ```
 
-For the mock stage, `LoadControlService.stop()` revokes non-zero authority and attempts a safe command. If the mock is configured for immediate ACK, record `SAFE_CONFIRMED`. If no ACK is available, record `SAFE_UNCONFIRMED` and close the mock session without waiting indefinitely. No real-network shutdown timeout is introduced in this stage.
+- [ ] **Step 3: Wire composition root with exact mock fixture**
 
-- [ ] **Step 6: Implement thin API and composition**
+In `main.py`, generate one `viewer_session_id` with `uuid.uuid4().hex`. Create `LoadControlConfigStore(config_path.parent / "load-control.json")`, the exact stage-1 mock descriptor from Task 4, `MockActuatorDiscovery`, `MockActuatorSession`, `JsonlEvidenceWriter(PROJECT_ROOT / "load-control-evidence" / f"{viewer_session_id}.jsonl")`, and `LoadControlService`. Start the service before acquisition workers. Do not supply timing defaults.
 
-`load_control_api.py` contains body/JSON adaptation and service error mapping only. It does not calculate power or construct actuator commands.
+- [ ] **Step 4: Write launcher composition test**
+
+```python
+async def test_load_control_starts_before_workers(monkeypatch, tmp_path):
+    trace = []
+    monkeypatch_load_control_and_runtime(trace, tmp_path)
+    await run_viewer_until_cancelled(tmp_path / "emonio-viewer.toml")
+    assert trace.index("START_LOAD_CONTROL") < trace.index("START_WORKERS")
+```
+
+Use the existing launcher test style and existing injected trace mechanism. Do not change acquisition startup code except the composition ordering around it.
+
+- [ ] **Step 5: Write safe shutdown-order tests**
+
+```python
+async def test_shutdown_revokes_load_control_before_other_runtime_owners():
+    trace = []
+    await shutdown_viewer_with_fakes(trace)
+    assert trace == [
+        "STOP_LOAD_CONTROL_COMMANDS",
+        "STOP_LOAD_CONTROL",
+        "STOP_SCOPE",
+        "STOP_RECORDING_COMMANDS",
+        "STOP_RECORDERS",
+        "STOP_WORKERS",
+        "STOP_SERVER",
+    ]
+```
+
+For mock exact ACK, shutdown records safe confirmed. For mock no-ACK, it records safe unconfirmed and closes without indefinite waiting. No real-network shutdown timeout is introduced.
+
+- [ ] **Step 6: Implement thin API and app wiring**
+
+`load_control_api.py` adapts HTTP bodies to service methods and maps service errors. It contains no controller math and no command construction. Both `app.py` and active `app_v0416.py` accept an optional load-control service and register the same load-control route module.
 
 - [ ] **Step 7: Verify and commit**
 
@@ -720,7 +998,7 @@ git commit -m "feat: expose mock load control service"
 
 ---
 
-### Task 10: Compact Frontend Without Header Changes
+### Task 8: Compact Load Control Frontend Without Header Changes
 
 **Files:**
 - Create: `frontend/css/load-control.css`
@@ -730,57 +1008,66 @@ git commit -m "feat: expose mock load control service"
 - Create: `tests/browser/test_load_control_contract.py`
 
 **Interfaces:**
-- Add one compact `details` panel directly after the current Emonio target strip.
-- Do not add or change a control in the current status header.
-- Summary always shows `CONTROL`, control mode, session state, and safe state.
-- Expanded panel shows bindings, reserve, operator limits, volatile mock timing qualification, A/B/C measured P, A/B/C acknowledged load, A/B/C last requested load, effective limits, sequences, evidence health, and last trip.
+- Add one compact `details` panel immediately after the current Emonio target strip.
+- Do not add or change controls in the current status header.
+- Summary always shows control mode, session state, and safe state.
+- Expanded panel shows bindings, reserve, operator limits, volatile mock timing, A/B/C measured P, A/B/C acknowledged load, A/B/C last request, limits, sequence evidence, evidence health, and last trip.
 
-- [ ] **Step 1: Write static contract test**
+- [ ] **Step 1: Write static DOM contract test**
 
-Assert `index.html` contains:
-
-```text
-load-control-panel
-load-control-mode
-load-control-session-state
-load-control-safe-state
-load-control-source
-load-control-actuator
-load-control-reserve
-load-control-limit-a
-load-control-limit-b
-load-control-limit-c
-load-control-sample-max-age
-load-control-ack-timeout
-load-control-enable
-load-control-disable
-load-control-last-trip
+```python
+def test_load_control_panel_has_required_controls_and_no_direct_power_command():
+    source = Path("frontend/index.html").read_text(encoding="utf-8")
+    for element_id in (
+        "load-control-panel", "load-control-mode", "load-control-session-state",
+        "load-control-safe-state", "load-control-source", "load-control-actuator",
+        "load-control-reserve", "load-control-limit-a", "load-control-limit-b",
+        "load-control-limit-c", "load-control-sample-max-age", "load-control-ack-timeout",
+        "load-control-enable", "load-control-disable", "load-control-last-trip",
+    ):
+        assert f'id="{element_id}"' in source
+    for forbidden in ("p_request_a", "p_request_b", "p_request_c"):
+        assert forbidden not in source
 ```
 
-Assert no direct actuator-request input such as `p_request_a`, `p_request_b`, or `p_request_c` exists.
+- [ ] **Step 2: Write JS endpoint and authority contract test**
 
-- [ ] **Step 2: Write JS contract tests**
-
-Assert code calls approved load-control endpoints only. Configuration controls are disabled when backend status is `ENABLED`.
+```python
+def test_load_control_js_uses_only_supervisory_endpoints():
+    source = Path("frontend/js/load-control-api.js").read_text(encoding="utf-8")
+    for required in (
+        "/api/v1/load-control/status",
+        "/api/v1/load-control/discovered-actuators",
+        "/api/v1/load-control/binding",
+        "/api/v1/load-control/config",
+        "/api/v1/load-control/mock-timing",
+        "/api/v1/load-control/enable",
+        "/api/v1/load-control/disable",
+    ):
+        assert required in source
+    assert "/api/v1/load-control/command" not in source
+```
 
 - [ ] **Step 3: Implement structured CSS**
 
-Put all new styling in `frontend/css/load-control.css`. Use existing variables and density. Do not modify existing header CSS and do not add inline styles.
+Create only `frontend/css/load-control.css` for new rules. Reuse existing CSS variables. Do not edit existing header CSS and do not add inline styles.
 
-- [ ] **Step 4: Implement UI behavior**
+- [ ] **Step 4: Implement API module and UI module**
 
-`load-control-api.js` owns HTTP functions. `load-control-ui.js` owns DOM state and status refresh. JavaScript displays backend calculations; it does not recalculate control power.
+`load-control-api.js` contains fetch functions only. `load-control-ui.js` renders backend status and disables binding/config/timing controls whenever backend `control_mode === "ENABLED"`. JavaScript does not recalculate power.
 
-The mock timing UI text must state that timing values are volatile mock-stage qualification inputs and are not persisted for hardware use.
+Operator-visible timing text must state: `MOCK TIMING · VOLATILE · NOT QUALIFIED FOR HARDWARE`.
 
-- [ ] **Step 5: Verify and commit**
+- [ ] **Step 5: Verify frontend scope**
 
 ```bash
 python3 -m pytest tests/browser/test_load_control_contract.py -q
 python3 -m pytest tests/browser/test_header_status_layout.py -q
 ```
 
-Compare the header test result with the preflight baseline. Do not change the header test to force a different result.
+Compare the header result with preflight. Do not alter the existing header test or header layout.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/index.html frontend/css/load-control.css frontend/js/load-control-api.js frontend/js/load-control-ui.js tests/browser/test_load_control_contract.py
@@ -789,10 +1076,10 @@ git commit -m "feat: add load control status interface"
 
 ---
 
-### Task 11: Full Mock-Stage Acceptance
+### Task 9: Full Mock-Stage Acceptance
 
 **Files:**
-- Change only narrow tests/integration code if fresh evidence finds a load-control acceptance defect.
+- Change only narrow load-control tests/integration code if fresh evidence finds a defect.
 - Do not weaken `tools/ari-emonio-acceptance.sh`.
 
 - [ ] **Step 1: Run all load-control unit tests**
@@ -813,7 +1100,7 @@ python3 -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run load-control integration and browser tests**
+- [ ] **Step 2: Run load-control integration and frontend tests**
 
 ```bash
 python3 -m pytest tests/integration/test_load_control_api.py tests/integration/test_load_control_runtime.py -q
@@ -822,7 +1109,7 @@ python3 -m pytest tests/browser/test_load_control_contract.py -q
 
 Expected: PASS.
 
-- [ ] **Step 3: Re-run existing suites**
+- [ ] **Step 3: Run existing suites**
 
 ```bash
 python3 -m pytest tests/unit -q
@@ -830,7 +1117,7 @@ python3 -m pytest tests/integration -q
 python3 -m pytest tests/browser -q
 ```
 
-Any new failure blocks acceptance. Compare the browser result with the preflight result and keep the unrelated pre-existing header-layout result separate.
+Any new failure blocks acceptance. Compare the browser result with preflight and keep the unrelated pre-existing header-layout result separate.
 
 - [ ] **Step 4: Run read-only, compilation, and sign gates**
 
@@ -856,7 +1143,7 @@ git diff --exit-code e3e33ec959d6304ca8471ab1c0f217884b64ed18 HEAD -- \
 
 Expected: exit code `0`.
 
-- [ ] **Step 6: Prove stage 1 has no real actuator network implementation**
+- [ ] **Step 6: Prove no real actuator network implementation exists**
 
 ```bash
 python3 -m pytest tests/unit/test_load_control_stage1_contract.py -q
@@ -866,7 +1153,7 @@ if grep -R -E "WebSocketActuatorSession|MdnsActuatorDiscovery|zeroconf" src/emon
 fi
 ```
 
-Expected: stage contract PASS and grep finds no forbidden implementation.
+Expected: test PASS and grep finds no forbidden implementation.
 
 - [ ] **Step 7: Inspect exact changed paths**
 
