@@ -7,10 +7,19 @@ from aiohttp import ClientSession, WSMsgType
 from yarl import URL
 
 from .model import ActuatorDescriptor
-from .protocol import AckFrame, CommandFrame, HelloFrame, ProtocolError, decode_frame, encode_frame
+from .protocol import (
+    AckFrame,
+    CommandFrame,
+    HelloFrame,
+    ProtocolError,
+    StatusFrame,
+    decode_frame,
+    encode_frame,
+)
 
 
 ACTUATOR_WEBSOCKET_HEARTBEAT_S = 2.0
+PostHelloFrame = AckFrame | StatusFrame
 
 
 def _positive_seconds(value: float, name: str) -> float:
@@ -51,6 +60,9 @@ class WebSocketActuatorSession:
         self._client = None
         self._websocket = None
         self._hello: HelloFrame | None = None
+        self._inbound: asyncio.Queue[PostHelloFrame | Exception] = asyncio.Queue()
+        self._disconnect_event = asyncio.Event()
+        self._receiver_task: asyncio.Task[None] | None = None
 
     @property
     def connected(self) -> bool:
@@ -70,6 +82,9 @@ class WebSocketActuatorSession:
     async def open(self) -> None:
         if self.connected:
             raise RuntimeError("actuator WebSocket is already connected")
+        self._inbound = asyncio.Queue()
+        self._disconnect_event = asyncio.Event()
+        self._receiver_task = None
         self._client = self._client_session_factory()
         try:
             self._websocket = await self._wait_for(
@@ -103,13 +118,45 @@ class WebSocketActuatorSession:
         await self.open()
         return await self.receive_hello()
 
+    def start_receive_loop(self) -> None:
+        if not self.connected or self._hello is None:
+            raise ConnectionError("actuator HELLO is not available for receive loop")
+        if self._receiver_task is not None:
+            raise RuntimeError("actuator receive loop is already running")
+        self._receiver_task = asyncio.create_task(self._receive_loop())
+
+    async def _receive_loop(self) -> None:
+        try:
+            while self.connected:
+                message = await self._websocket.receive()
+                if message.type in {WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR}:
+                    self._disconnect_event.set()
+                    return
+                if message.type is not WSMsgType.TEXT or not isinstance(message.data, str):
+                    raise ProtocolError("actuator WebSocket frame must be text")
+                frame = decode_frame(message.data)
+                if not isinstance(frame, (AckFrame, StatusFrame)):
+                    raise ProtocolError("unexpected post-HELLO frame")
+                await self._inbound.put(frame)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._inbound.put(exc)
+            self._disconnect_event.set()
+
+    async def receive_frame(self, timeout_s: float) -> PostHelloFrame:
+        timeout = _positive_seconds(timeout_s, "timeout_s")
+        if self._receiver_task is None:
+            raise ConnectionError("actuator receive loop is not running")
+        item = await self._wait_for(self._inbound.get(), timeout)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
     async def wait_for_disconnect(self) -> None:
-        if not self.connected:
-            raise ConnectionError("actuator WebSocket is not connected")
-        while self.connected:
-            message = await self._websocket.receive()
-            if message.type in {WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR}:
-                return
+        if self._receiver_task is None:
+            raise ConnectionError("actuator receive loop is not running")
+        await self._disconnect_event.wait()
 
     async def send_command(self, command: CommandFrame) -> None:
         if not isinstance(command, CommandFrame):
@@ -123,17 +170,29 @@ class WebSocketActuatorSession:
         await self._websocket.send_str(encode_frame(command))
 
     async def receive_ack(self) -> AckFrame:
-        frame = decode_frame(await self._receive_text())
+        frame = await self.receive_frame(self._receive_timeout_s)
         if not isinstance(frame, AckFrame):
             raise ProtocolError("expected ACK frame")
         return frame
 
     async def disconnect(self) -> None:
+        receiver_task = self._receiver_task
         websocket = self._websocket
         client = self._client
+        self._receiver_task = None
         self._websocket = None
         self._client = None
         self._hello = None
+        self._disconnect_event.set()
+        if receiver_task is not None and receiver_task is not asyncio.current_task():
+            if not receiver_task.done():
+                receiver_task.cancel()
+            try:
+                await receiver_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
         if websocket is not None:
             await websocket.close()
         if client is not None:
