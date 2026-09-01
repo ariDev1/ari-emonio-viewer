@@ -8,13 +8,8 @@ from enum import Enum
 from .diagnostic_log import LoadControlDiagnosticLog
 from .lan_discovery import LanActuatorDiscoveryService
 from .model import ActuatorDescriptor, ThreePhasePower
-from .protocol import (
-    AckFrame,
-    CommandFrame,
-    HelloFrame,
-    LOAD_CONTROL_PROTOCOL_VERSION,
-    StatusFrame,
-)
+from .protocol import HelloFrame, LOAD_CONTROL_PROTOCOL_VERSION
+from .qualified_channel import QualifiedActuatorChannel
 from .session_websocket import WebSocketActuatorSession
 
 
@@ -92,6 +87,7 @@ class LoadControlQualificationService:
         session_factory=WebSocketActuatorSession,
         create_task=asyncio.create_task,
         diagnostic_log: LoadControlDiagnosticLog | None = None,
+        qualified_channel: QualifiedActuatorChannel | None = None,
     ) -> None:
         self._lan_discovery_service = lan_discovery_service
         self._connect_timeout_s = connect_timeout_s
@@ -99,6 +95,7 @@ class LoadControlQualificationService:
         self._session_factory = session_factory
         self._create_task = create_task
         self.diagnostic_log = diagnostic_log or LoadControlDiagnosticLog()
+        self._qualified_channel = qualified_channel
         self._state = QualificationState.IDLE
         self._selected_descriptor: ActuatorDescriptor | None = None
         self._hello: HelloFrame | None = None
@@ -158,28 +155,6 @@ class LoadControlQualificationService:
         ):
             return self._hello
         return None
-
-    async def send_qualified_command(self, command: CommandFrame) -> None:
-        session = self._session
-        if (
-            self._state is not QualificationState.QUALIFIED
-            or session is None
-            or not session.connected
-            or self._hello is None
-        ):
-            raise LoadControlQualificationError("actuator is not HELLO-qualified")
-        await session.send_command(command)
-
-    async def receive_qualified_frame(self, timeout_s: float) -> AckFrame | StatusFrame:
-        session = self._session
-        if (
-            self._state is not QualificationState.QUALIFIED
-            or session is None
-            or not session.connected
-            or self._hello is None
-        ):
-            raise LoadControlQualificationError("actuator is not HELLO-qualified")
-        return await session.receive_frame(timeout_s)
 
     async def connect(self, node_id: str) -> QualificationStatus:
         if self._operation_lock.locked() or self._session is not None:
@@ -246,9 +221,13 @@ class LoadControlQualificationService:
                 self._hello = hello
                 self._state = QualificationState.QUALIFIED
                 session.start_receive_loop()
+                if self._qualified_channel is not None:
+                    self._qualified_channel.bind(session, hello)
                 self._watch_task = self._create_task(self._watch_disconnect(session))
                 return self.status()
             except Exception as exc:
+                if self._qualified_channel is not None:
+                    self._qualified_channel.clear(session)
                 self._hello = None
                 self._last_error = _error_text(exc)
                 self._state = QualificationState.REJECTED
@@ -276,6 +255,8 @@ class LoadControlQualificationService:
             if session is self._session:
                 hello = self._hello
                 descriptor = self._selected_descriptor
+                if self._qualified_channel is not None:
+                    self._qualified_channel.clear(session)
                 self._session = None
                 self._hello = None
                 self._watch_task = None
@@ -303,6 +284,8 @@ class LoadControlQualificationService:
             descriptor = self._selected_descriptor
             had_connection = session is not None
 
+            if self._qualified_channel is not None:
+                self._qualified_channel.clear(session)
             self._session = None
             self._watch_task = None
             self._hello = None
