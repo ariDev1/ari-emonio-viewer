@@ -59,22 +59,22 @@ export function getLanDiagnosticLog(afterSequence = 0, limit = 200) {
 }
 
 export function getSafeTestSources() {
-  return requestJson("/api/v1/load-control/safe-test/sources");
+  return requestJson("/api/v1/load-control/lan-safe-test/sources");
 }
 
 export function getSafeTestStatus() {
-  return requestJson("/api/v1/load-control/safe-test/status");
+  return requestJson("/api/v1/load-control/lan-safe-test/status");
 }
 
 export function selectSafeTestSource(emonioDeviceId) {
-  return requestJson("/api/v1/load-control/safe-test/source", {
+  return requestJson("/api/v1/load-control/lan-safe-test/source", {
     method: "POST",
     body: JSON.stringify({ emonio_device_id: emonioDeviceId }),
   });
 }
 
 export function runSafeCommandTest() {
-  return requestJson("/api/v1/load-control/safe-test/run", {
+  return requestJson("/api/v1/load-control/lan-safe-test/send", {
     method: "POST",
     body: "{}",
   });
