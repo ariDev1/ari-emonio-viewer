@@ -42,10 +42,12 @@ class FakeClientSession:
     def __init__(self, websocket: FakeWebSocket) -> None:
         self.websocket = websocket
         self.locations = []
+        self.ws_options = []
         self.closed = False
 
-    async def ws_connect(self, location: str):
+    async def ws_connect(self, location: str, **kwargs):
         self.locations.append(location)
+        self.ws_options.append(kwargs)
         return self.websocket
 
     async def close(self) -> None:
@@ -129,6 +131,7 @@ def test_websocket_session_supports_open_then_receive_hello() -> None:
         await session.open()
         assert session.connected is True
         assert client.locations == ["ws://192.168.20.44:8765/control"]
+        assert client.ws_options == [{"autoping": True, "heartbeat": 2.0}]
         assert len(websocket.messages) == 1
 
         received_hello = await session.receive_hello()
