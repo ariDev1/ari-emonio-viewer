@@ -34,6 +34,24 @@ export function scanLanActuators(values) {
   });
 }
 
+export function connectLanQualification(nodeId) {
+  return requestJson("/api/v1/load-control/lan-qualification/connect", {
+    method: "POST",
+    body: JSON.stringify({ node_id: nodeId }),
+  });
+}
+
+export function getLanQualificationStatus() {
+  return requestJson("/api/v1/load-control/lan-qualification/status");
+}
+
+export function disconnectLanQualification() {
+  return requestJson("/api/v1/load-control/lan-qualification/disconnect", {
+    method: "POST",
+    body: "{}",
+  });
+}
+
 export function getRecentLoadControlEvidence(limit = 20) {
   return requestJson(`/api/v1/load-control/evidence/recent?limit=${encodeURIComponent(limit)}`);
 }
