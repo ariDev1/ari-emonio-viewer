@@ -1,8 +1,10 @@
 import asyncio
+from datetime import datetime, timezone
 
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+from emonio_viewer.load_control.diagnostic_log import LoadControlDiagnosticLog
 from emonio_viewer.load_control.model import ActuatorDescriptor, ThreePhasePower
 from emonio_viewer.load_control.qualification import (
     LoadControlQualificationError,
@@ -47,6 +49,11 @@ class FakeLanDiscoveryService:
 
 class FakeQualificationService:
     def __init__(self) -> None:
+        fixed = datetime(2026, 9, 1, 16, 32, 1, 524000, tzinfo=timezone.utc)
+        self.diagnostic_log = LoadControlDiagnosticLog(
+            max_events=50,
+            utc_now=lambda: fixed,
+        )
         self.connect_calls = []
         self.disconnect_calls = 0
         self.reject_connect = False
@@ -228,5 +235,47 @@ def test_existing_lan_scan_route_remains_read_only_with_stage2_routes_registered
         assert qualification.connect_calls == []
         assert payload[0]["node_id"] == "ARI-LOAD-001"
         assert payload[0]["p_max"] == {"a": 1000.0, "b": 1000.0, "c": 1000.0}
+
+    asyncio.run(scenario())
+
+
+def test_lan_scan_writes_backend_diagnostics_and_log_route_supports_view_cursor() -> None:
+    async def scenario() -> None:
+        qualification = FakeQualificationService()
+        lan = FakeLanDiscoveryService()
+        app = _app(qualification=qualification, lan=lan)
+
+        status, _payload = await _request(
+            app,
+            "POST",
+            "/api/v1/load-control/lan-discovery/scan",
+            {"discovery_window_s": 5.0, "resolve_timeout_s": 5.0},
+        )
+        assert status == 200
+
+        status, payload = await _request(
+            app,
+            "GET",
+            "/api/v1/load-control/lan-diagnostics/log?after=0&limit=50",
+        )
+        assert status == 200
+        assert payload["latest_sequence"] == 3
+        assert [item["event"] for item in payload["events"]] == [
+            "LAN_SCAN_STARTED",
+            "ACTUATOR_DISCOVERED",
+            "LAN_SCAN_COMPLETE",
+        ]
+        assert 'node_id="ARI-LOAD-001"' in payload["events"][1]["line"]
+        assert 'location="ws://192.168.1.141:8080/load-control"' in payload["events"][1]["line"]
+        assert all("MOCK" not in item["line"] for item in payload["events"])
+
+        status, payload = await _request(
+            app,
+            "GET",
+            "/api/v1/load-control/lan-diagnostics/log?after=2&limit=50",
+        )
+        assert status == 200
+        assert payload["latest_sequence"] == 3
+        assert [item["sequence"] for item in payload["events"]] == [3]
 
     asyncio.run(scenario())
