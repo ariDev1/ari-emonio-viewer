@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 import math
-from queue import Full, Queue
+from queue import Empty, Full, Queue
 import time
 import uuid
 from typing import Callable
@@ -30,6 +30,7 @@ from .qualified_channel import QualifiedActuatorChannel, QualifiedActuatorChanne
 ACK_TIMEOUT_S = 2.0
 ZERO_POWER = ThreePhasePower(0.0, 0.0, 0.0)
 _ACQUISITION_EVENT_PREFIX = "ACQUISITION_"
+_EVENT_QUEUE_WAIT_S = 0.05
 
 
 class Stage3AState(str, Enum):
@@ -234,7 +235,14 @@ class Stage3ASafeCommandService:
     async def _consume_events(self) -> None:
         assert self._subscriber is not None
         while True:
-            item = await asyncio.to_thread(self._subscriber.get)
+            try:
+                item = await asyncio.to_thread(
+                    self._subscriber.get,
+                    True,
+                    _EVENT_QUEUE_WAIT_S,
+                )
+            except Empty:
+                continue
             if item is self._stop_sentinel:
                 return
             self._handle_runtime_event(item)
