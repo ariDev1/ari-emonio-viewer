@@ -30,7 +30,7 @@ def test_mdns_record_maps_to_actuator_descriptor() -> None:
     assert descriptor.p_max.c == 1400.0
 
 
-def test_mdns_discovery_uses_explicit_window_and_resolved_records() -> None:
+def test_mdns_discovery_forwards_explicit_scan_and_resolution_timeouts() -> None:
     assert hasattr(discovery, "MdnsResolvedService")
     assert hasattr(discovery, "MdnsActuatorDiscovery")
 
@@ -38,8 +38,14 @@ def test_mdns_discovery_uses_explicit_window_and_resolved_records() -> None:
         def __init__(self) -> None:
             self.calls = []
 
-        async def scan(self, *, service_type: str, discovery_window_s: float):
-            self.calls.append((service_type, discovery_window_s))
+        async def scan(
+            self,
+            *,
+            service_type: str,
+            discovery_window_s: float,
+            resolve_timeout_s: float,
+        ):
+            self.calls.append((service_type, discovery_window_s, resolve_timeout_s))
             return (
                 discovery.MdnsResolvedService(
                     address="192.168.20.44",
@@ -60,10 +66,11 @@ def test_mdns_discovery_uses_explicit_window_and_resolved_records() -> None:
         backend = FakeBackend()
         mdns = discovery.MdnsActuatorDiscovery(
             discovery_window_s=0.25,
+            resolve_timeout_s=0.15,
             backend=backend,
         )
         visible = await mdns.discover()
-        assert backend.calls == [("_ari-emonio-load._tcp.local.", 0.25)]
+        assert backend.calls == [("_ari-emonio-load._tcp.local.", 0.25, 0.15)]
         assert tuple(item.node_id for item in visible) == ("ARI-LOAD-001",)
 
     asyncio.run(scenario())
