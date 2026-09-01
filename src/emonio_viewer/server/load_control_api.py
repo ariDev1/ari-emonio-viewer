@@ -7,11 +7,13 @@ from emonio_viewer.load_control.qualification import (
     QualificationStatus,
 )
 from emonio_viewer.load_control.service import LoadControlCommandError
+from emonio_viewer.load_control.stage3a import Stage3AError, Stage3AStatus
 
 from .keys import (
     LAN_ACTUATOR_DISCOVERY_SERVICE_KEY,
     LOAD_CONTROL_QUALIFICATION_SERVICE_KEY,
     LOAD_CONTROL_SERVICE_KEY,
+    LOAD_CONTROL_STAGE3A_SERVICE_KEY,
 )
 
 
@@ -23,6 +25,10 @@ def register_load_control_routes(app: web.Application) -> None:
     app.router.add_get("/api/v1/load-control/lan-qualification/status", get_lan_qualification_status)
     app.router.add_post("/api/v1/load-control/lan-qualification/disconnect", disconnect_lan_actuator)
     app.router.add_get("/api/v1/load-control/lan-diagnostics/log", get_lan_diagnostic_log)
+    app.router.add_get("/api/v1/load-control/safe-test/sources", get_safe_test_sources)
+    app.router.add_get("/api/v1/load-control/safe-test/status", get_safe_test_status)
+    app.router.add_post("/api/v1/load-control/safe-test/source", select_safe_test_source)
+    app.router.add_post("/api/v1/load-control/safe-test/run", run_safe_test)
     app.router.add_get("/api/v1/load-control/evidence/recent", get_recent_evidence)
     app.router.add_post("/api/v1/load-control/binding", configure_binding)
     app.router.add_post("/api/v1/load-control/config", configure_limits)
@@ -49,6 +55,13 @@ def _qualification_service(request: web.Request):
     service = request.app.get(LOAD_CONTROL_QUALIFICATION_SERVICE_KEY)
     if service is None:
         raise web.HTTPServiceUnavailable(text="load-control qualification service is unavailable")
+    return service
+
+
+def _stage3a_service(request: web.Request):
+    service = request.app.get(LOAD_CONTROL_STAGE3A_SERVICE_KEY)
+    if service is None:
+        raise web.HTTPServiceUnavailable(text="Stage-3A SAFE test service is unavailable")
     return service
 
 
@@ -139,6 +152,26 @@ def _qualification_json(status: QualificationStatus) -> dict:
         ),
         "location": status.location,
         "last_error": status.last_error,
+    }
+
+
+def _stage3a_status_json(status: Stage3AStatus) -> dict:
+    return {
+        "state": status.state.value,
+        "selected_source_id": status.selected_source_id,
+        "sample_cycle_id": status.sample_cycle_id,
+        "command_sequence": status.command_sequence,
+        "ack_result": status.ack_result,
+        "rejection_reason": status.rejection_reason,
+        "admissible": status.admissible,
+    }
+
+
+def _stage3a_source_json(item) -> dict:
+    return {
+        "device_id": item.id,
+        "name": item.name,
+        "poll_interval_s": item.poll_interval_s,
     }
 
 
@@ -242,6 +275,34 @@ async def get_lan_diagnostic_log(request: web.Request) -> web.Response:
             "events": [_diagnostic_event_json(item) for item in events],
         }
     )
+
+
+async def get_safe_test_sources(request: web.Request) -> web.Response:
+    return web.json_response(
+        [_stage3a_source_json(item) for item in _stage3a_service(request).sources()]
+    )
+
+
+async def get_safe_test_status(request: web.Request) -> web.Response:
+    return web.json_response(_stage3a_status_json(_stage3a_service(request).status()))
+
+
+async def select_safe_test_source(request: web.Request) -> web.Response:
+    body = await _body(request)
+    device_id = _required_text(body, "emonio_device_id")
+    try:
+        status = await _stage3a_service(request).select_source(device_id)
+    except Stage3AError as exc:
+        raise web.HTTPConflict(text=str(exc)) from exc
+    return web.json_response(_stage3a_status_json(status))
+
+
+async def run_safe_test(request: web.Request) -> web.Response:
+    try:
+        status = await _stage3a_service(request).run_safe_test()
+    except Stage3AError as exc:
+        raise web.HTTPConflict(text=str(exc)) from exc
+    return web.json_response(_stage3a_status_json(status))
 
 
 async def get_recent_evidence(request: web.Request) -> web.Response:
