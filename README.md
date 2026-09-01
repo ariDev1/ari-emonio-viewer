@@ -3,7 +3,7 @@
 Engineering viewer for Emonio P3 electrical measurements on Linux.
 
 The trusted field baseline is **v0.4.14**.
-The `testing` branch is **v0.4.19 Testing**. Tested device firmware: `3.0.79-release`.
+The `testing` branch is **v0.4.20 Testing**. Tested device firmware: `3.0.79-release`.
 
 ## Measurement architecture
 
@@ -95,7 +95,7 @@ Default server binding: `127.0.0.1`.
 ./tools/ari-emonio-acceptance.sh
 ```
 
-Latest v0.4.19 automated acceptance evidence:
+Latest completed automated acceptance evidence before v0.4.20 changes: **v0.4.19**.
 
 ```text
 Unit tests:          249 PASS
