@@ -25,6 +25,7 @@ from .model import (
     ThreePhasePower,
 )
 from .session import MockAckMode, MockActuatorSession
+from .state_machine import TripReason
 from .supervisor import EnableRejected, LoadControlSupervisor, SupervisorDecision
 
 
@@ -44,8 +45,9 @@ class LoadControlCommandError(RuntimeError):
 class LoadControlService:
     """Stage-1 owner for deterministic Viewer-side load-control supervision.
 
-    This service contains no network actuator implementation. It uses only
-    MockActuatorDiscovery and MockActuatorSession.
+    Stage 1 contains no mDNS implementation, no real WebSocket actuator
+    client, and no physical output path. The only actuator path is the
+    deterministic in-process mock session.
     """
 
     def __init__(
@@ -76,6 +78,7 @@ class LoadControlService:
         self._stop_sentinel = object()
         self._started = False
         self._last_service_error: str | None = None
+        self._last_calculation: dict[str, Any] | None = None
 
     @property
     def viewer_session_id(self) -> str:
@@ -175,9 +178,16 @@ class LoadControlService:
 
     def _require_disabled(self) -> None:
         if self._mode() is not ControlMode.DISABLED:
-            raise LoadControlCommandError("load-control configuration can change only while DISABLED")
+            raise LoadControlCommandError(
+                "load-control configuration can change only while DISABLED"
+            )
 
-    async def configure_binding(self, *, emonio_device_id: str, actuator_node_id: str) -> None:
+    async def configure_binding(
+        self,
+        *,
+        emonio_device_id: str,
+        actuator_node_id: str,
+    ) -> None:
         self._require_disabled()
         if not isinstance(emonio_device_id, str) or not emonio_device_id:
             raise LoadControlCommandError("emonio_device_id is required")
@@ -218,7 +228,9 @@ class LoadControlService:
                 operator_limit_c=float(operator_limit_c),
             )
         except (TypeError, ValueError) as exc:
-            raise LoadControlCommandError(str(exc) or "invalid load-control limits") from exc
+            raise LoadControlCommandError(
+                str(exc) or "invalid load-control limits"
+            ) from exc
         self._config_store.replace(updated)
         self._config = updated
         await self._rebuild_supervisor_and_session()
@@ -246,7 +258,9 @@ class LoadControlService:
                 ack_timeout_s=float(ack_timeout_s),
             )
         except (TypeError, ValueError) as exc:
-            raise LoadControlCommandError(str(exc) or "invalid load-control timing") from exc
+            raise LoadControlCommandError(
+                str(exc) or "invalid load-control timing"
+            ) from exc
         self._timing = timing
         await self._rebuild_supervisor_and_session()
         self._append_evidence(
@@ -270,6 +284,7 @@ class LoadControlService:
             await old_session.disconnect()
         self._session = None
         self._hello = None
+        self._last_calculation = None
         if self._timing is None:
             self._supervisor = None
         else:
@@ -283,12 +298,13 @@ class LoadControlService:
             source = self._config.bound_emonio_device_id
             sample = None if source is None else self._latest_samples.get(source)
             if sample is not None:
+                now_ns = time.monotonic_ns()
                 decision = self._supervisor.observe_sample(
                     sample,
-                    now_monotonic_ns=time.monotonic_ns(),
+                    now_monotonic_ns=now_ns,
                     now_utc=datetime.now(timezone.utc),
                 )
-                await self._apply_decision(decision, now_monotonic_ns=time.monotonic_ns())
+                await self._apply_decision(decision, now_monotonic_ns=now_ns)
 
     async def _connect_bound_mock(self) -> None:
         bound = self._config.bound_actuator_node_id
@@ -312,15 +328,21 @@ class LoadControlService:
                 self._hello,
                 now_monotonic_ns=time.monotonic_ns(),
             )
-            await self._apply_decision(decision, now_monotonic_ns=time.monotonic_ns())
+            await self._apply_decision(
+                decision,
+                now_monotonic_ns=time.monotonic_ns(),
+            )
 
     async def enable(self) -> None:
         if self._supervisor is None:
-            raise LoadControlCommandError("control timing is not qualified for this Viewer session")
+            raise LoadControlCommandError(
+                "control timing is not qualified for this Viewer session"
+            )
+        now_ns = time.monotonic_ns()
         try:
             self._supervisor.enable(
                 evidence_healthy=self._evidence.healthy,
-                now_monotonic_ns=time.monotonic_ns(),
+                now_monotonic_ns=now_ns,
             )
         except EnableRejected as exc:
             self._append_evidence(
@@ -328,16 +350,44 @@ class LoadControlService:
                 required=False,
             )
             raise LoadControlCommandError(str(exc)) from exc
-        self._append_evidence({"event": "CONTROL_ENABLE_ACCEPTED"}, required=True)
+        try:
+            self._append_evidence(
+                {"event": "CONTROL_ENABLE_ACCEPTED"},
+                required=True,
+            )
+        except EvidenceWriteError as exc:
+            decision = self._trip_evidence_failure(now_monotonic_ns=now_ns)
+            await self._apply_decision(decision, now_monotonic_ns=now_ns)
+            raise LoadControlCommandError(
+                "control evidence write failed; control was tripped"
+            ) from exc
 
     async def disable(self) -> None:
         if self._supervisor is None:
             return
+        now_ns = time.monotonic_ns()
         decision = self._supervisor.disable(
             now_utc=datetime.now(timezone.utc),
-            now_monotonic_ns=time.monotonic_ns(),
+            now_monotonic_ns=now_ns,
         )
-        await self._apply_decision(decision, now_monotonic_ns=time.monotonic_ns())
+        await self._apply_decision(decision, now_monotonic_ns=now_ns)
+
+    def _trip_evidence_failure(
+        self,
+        *,
+        now_monotonic_ns: int,
+    ) -> SupervisorDecision:
+        if self._supervisor is None:
+            return SupervisorDecision(
+                event="CONTROL_EVIDENCE_WRITE_ERROR",
+                reason=TripReason.EVIDENCE_WRITE_FAILED.value,
+            )
+        self._last_service_error = "required control evidence could not be written"
+        return self._supervisor._trip_with_safe(  # package-internal safety transition
+            TripReason.EVIDENCE_WRITE_FAILED,
+            now_utc=datetime.now(timezone.utc),
+            now_monotonic_ns=now_monotonic_ns,
+        )
 
     async def _apply_decision(
         self,
@@ -371,7 +421,7 @@ class LoadControlService:
                     }
                 )
             if decision.calculation is not None:
-                event_payload["calculation"] = {
+                self._last_calculation = {
                     phase: {
                         "error": getattr(decision.calculation, phase).error,
                         "raw_request": getattr(decision.calculation, phase).raw_request,
@@ -381,19 +431,35 @@ class LoadControlService:
                     }
                     for phase in ("a", "b", "c")
                 }
+                event_payload["calculation"] = self._last_calculation
 
         required_before_send = bool(
             command is not None
             and command.control_enabled
-            and any(value > 0.0 for value in (command.p_load_request.a, command.p_load_request.b, command.p_load_request.c))
+            and any(
+                value > 0.0
+                for value in (
+                    command.p_load_request.a,
+                    command.p_load_request.b,
+                    command.p_load_request.c,
+                )
+            )
         )
         if event_payload is not None:
             try:
-                self._append_evidence(event_payload, required=required_before_send)
+                self._append_evidence(
+                    event_payload,
+                    required=required_before_send,
+                )
             except EvidenceWriteError:
                 if required_before_send:
-                    self._last_service_error = "required control evidence could not be written"
-                    await self.disable()
+                    trip = self._trip_evidence_failure(
+                        now_monotonic_ns=now_monotonic_ns,
+                    )
+                    await self._apply_decision(
+                        trip,
+                        now_monotonic_ns=now_monotonic_ns,
+                    )
                     return
 
         if command is None:
@@ -409,7 +475,18 @@ class LoadControlService:
                     )
             return
 
-        await self._session.send_command(command)
+        try:
+            await self._session.send_command(command)
+        except (ConnectionError, ValueError) as exc:
+            self._last_service_error = str(exc) or type(exc).__name__
+            if self._supervisor is not None:
+                lost = self._supervisor.session_lost()
+                self._append_evidence(
+                    {"event": lost.event or "ACTUATOR_CONNECTION_LOST", "reason": lost.reason},
+                    required=False,
+                )
+            return
+
         self._append_evidence(
             {
                 "event": "CONTROL_COMMAND_SENT",
@@ -437,7 +514,10 @@ class LoadControlService:
             required=False,
         )
         if ack_decision.command is not None:
-            await self._apply_decision(ack_decision, now_monotonic_ns=now_monotonic_ns)
+            await self._apply_decision(
+                ack_decision,
+                now_monotonic_ns=now_monotonic_ns,
+            )
 
     def _append_evidence(self, event: dict[str, Any], *, required: bool) -> None:
         try:
@@ -451,10 +531,25 @@ class LoadControlService:
     def _power_json(value: ThreePhasePower) -> dict[str, float]:
         return {"a": value.a, "b": value.b, "c": value.c}
 
+    @staticmethod
+    def _sample_power(sample: MeasurementSample | None, field: str) -> dict[str, float] | None:
+        if sample is None:
+            return None
+        return {
+            "a": float(getattr(sample.phase_a.measurement, field)),
+            "b": float(getattr(sample.phase_b.measurement, field)),
+            "c": float(getattr(sample.phase_c.measurement, field)),
+        }
+
     def status(self) -> dict[str, Any]:
         supervisor = self._supervisor
         acknowledged = None if supervisor is None else supervisor.acknowledged_p
         outstanding = None if supervisor is None else supervisor.outstanding_command
+        source = self._config.bound_emonio_device_id
+        source_sample = None if source is None else self._latest_samples.get(source)
+        last_sent = None
+        if self._session is not None and self._session.sent_commands:
+            last_sent = self._session.sent_commands[-1]
         return {
             "stage": "STAGE_1_MOCK_ONLY",
             "mock_only": True,
@@ -463,9 +558,17 @@ class LoadControlService:
             "session_state": (
                 SessionState.UNBOUND.value
                 if self._config.bound_actuator_node_id is None
-                else (SessionState.UNAVAILABLE.value if supervisor is None else supervisor.session_state.value)
+                else (
+                    SessionState.UNAVAILABLE.value
+                    if supervisor is None
+                    else supervisor.session_state.value
+                )
             ),
-            "safe_state": SafeState.SAFE_UNCONFIRMED.value if supervisor is None else supervisor.safe_state.value,
+            "safe_state": (
+                SafeState.SAFE_UNCONFIRMED.value
+                if supervisor is None
+                else supervisor.safe_state.value
+            ),
             "trip_reason": None if supervisor is None else supervisor.trip_reason,
             "config": {
                 "bound_emonio_device_id": self._config.bound_emonio_device_id,
@@ -482,11 +585,27 @@ class LoadControlService:
                 "ack_timeout_s": self._timing.ack_timeout_s,
                 "persistent": False,
             },
-            "actuator_boot_id": None if supervisor is None else supervisor.actuator_boot_id,
-            "acknowledged_p": None if acknowledged is None else self._power_json(acknowledged),
-            "outstanding_sequence": None if outstanding is None else outstanding.sequence,
-            "last_source_cycle_id": None if supervisor is None else supervisor.last_source_cycle_id,
-            "last_sample_age_s": None if supervisor is None else supervisor.last_sample_age_s,
+            "actuator_boot_id": (
+                None if supervisor is None else supervisor.actuator_boot_id
+            ),
+            "measured_p": self._sample_power(source_sample, "p"),
+            "measured_q": self._sample_power(source_sample, "q"),
+            "acknowledged_p": (
+                None if acknowledged is None else self._power_json(acknowledged)
+            ),
+            "last_requested_p": (
+                None if last_sent is None else self._power_json(last_sent.p_load_request)
+            ),
+            "last_calculation": self._last_calculation,
+            "outstanding_sequence": (
+                None if outstanding is None else outstanding.sequence
+            ),
+            "last_source_cycle_id": (
+                None if supervisor is None else supervisor.last_source_cycle_id
+            ),
+            "last_sample_age_s": (
+                None if supervisor is None else supervisor.last_sample_age_s
+            ),
             "evidence_healthy": self._evidence.healthy,
             "evidence_error": self._evidence.last_error,
             "last_service_error": self._last_service_error,
