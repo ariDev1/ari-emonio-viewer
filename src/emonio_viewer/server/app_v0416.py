@@ -6,7 +6,9 @@ from emonio_viewer import __version__
 from emonio_viewer.config.model import RuntimeConfig
 from emonio_viewer.load_control.lan_discovery import LanActuatorDiscoveryService
 from emonio_viewer.load_control.qualification import LoadControlQualificationService
+from emonio_viewer.load_control.qualified_channel import QualifiedActuatorChannel
 from emonio_viewer.load_control.service import LoadControlService
+from emonio_viewer.load_control.stage3a import Stage3ASafeCommandService
 from emonio_viewer.recording.recorder import RecordingManager
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
@@ -20,6 +22,7 @@ from .keys import (
     LAN_ACTUATOR_DISCOVERY_SERVICE_KEY,
     LOAD_CONTROL_QUALIFICATION_SERVICE_KEY,
     LOAD_CONTROL_SERVICE_KEY,
+    LOAD_CONTROL_STAGE3A_SERVICE_KEY,
     MODBUS_DEVICE_EVIDENCE_SERVICE_KEY,
     RECORDING_MANAGER_KEY,
     RUNTIME_CONFIG_KEY,
@@ -45,6 +48,8 @@ def create_app(
     load_control_service: LoadControlService | None = None,
     lan_discovery_service: LanActuatorDiscoveryService | None = None,
     qualification_service: LoadControlQualificationService | None = None,
+    qualified_channel: QualifiedActuatorChannel | None = None,
+    stage3a_service: Stage3ASafeCommandService | None = None,
 ) -> web.Application:
     app = web.Application(client_max_size=64 * 1024)
     app[RUNTIME_CONFIG_KEY] = config
@@ -75,12 +80,33 @@ def create_app(
         lan_discovery_service = LanActuatorDiscoveryService()
     app[LAN_ACTUATOR_DISCOVERY_SERVICE_KEY] = lan_discovery_service
 
+    if qualified_channel is None:
+        qualified_channel = QualifiedActuatorChannel()
+
     if qualification_service is None:
-        qualification_service = LoadControlQualificationService(lan_discovery_service)
+        qualification_service = LoadControlQualificationService(
+            lan_discovery_service,
+            qualified_channel=qualified_channel,
+        )
     app[LOAD_CONTROL_QUALIFICATION_SERVICE_KEY] = qualification_service
+
+    if stage3a_service is None:
+        stage3a_service = Stage3ASafeCommandService(
+            bus,
+            config,
+            qualified_channel,
+            diagnostic_log=qualification_service.diagnostic_log,
+        )
+    app[LOAD_CONTROL_STAGE3A_SERVICE_KEY] = stage3a_service
 
     async def start_load_control(_app: web.Application) -> None:
         await load_control_service.start()
+
+    async def start_stage3a(_app: web.Application) -> None:
+        await stage3a_service.start()
+
+    async def stop_stage3a(_app: web.Application) -> None:
+        await stage3a_service.close()
 
     async def stop_load_control(_app: web.Application) -> None:
         await load_control_service.close()
@@ -89,6 +115,8 @@ def create_app(
         await qualification_service.close()
 
     app.on_startup.append(start_load_control)
+    app.on_startup.append(start_stage3a)
+    app.on_cleanup.append(stop_stage3a)
     app.on_cleanup.append(stop_load_control_qualification)
     app.on_cleanup.append(stop_load_control)
 
