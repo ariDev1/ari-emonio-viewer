@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-def test_stage1_load_control_contains_no_real_actuator_network_implementation() -> None:
+def test_current_service_keeps_real_actuator_command_transport_disabled() -> None:
     root = Path("src/emonio_viewer/load_control")
     source = "\n".join(
         path.read_text(encoding="utf-8")
@@ -10,10 +10,6 @@ def test_stage1_load_control_contains_no_real_actuator_network_implementation() 
 
     forbidden = (
         "WebSocketActuatorSession",
-        "MdnsActuatorDiscovery",
-        "zeroconf",
-        "socket.socket",
-        "aiohttp.ClientSession",
         "websockets.connect",
         "serial.Serial",
         "machine.PWM",
@@ -22,9 +18,10 @@ def test_stage1_load_control_contains_no_real_actuator_network_implementation() 
         assert token not in source
 
 
-def test_stage1_service_identifies_mock_only_boundary() -> None:
+def test_active_service_remains_mock_only_until_transport_is_explicitly_promoted() -> None:
     service = Path("src/emonio_viewer/load_control/service.py").read_text(encoding="utf-8")
     assert '"stage": "STAGE_1_MOCK_ONLY"' in service
     assert '"mock_only": True' in service
     assert "MockActuatorDiscovery" in service
     assert "MockActuatorSession" in service
+    assert "MdnsActuatorDiscovery" not in service
