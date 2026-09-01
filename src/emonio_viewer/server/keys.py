@@ -6,6 +6,7 @@ from emonio_viewer.lifecycle.service import DeviceLifecycleService
 from emonio_viewer.load_control.lan_discovery import LanActuatorDiscoveryService
 from emonio_viewer.load_control.qualification import LoadControlQualificationService
 from emonio_viewer.load_control.service import LoadControlService
+from emonio_viewer.load_control.stage3a import Stage3ASafeCommandService
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
 from emonio_viewer.scope.service import ScopeService
@@ -26,4 +27,8 @@ LAN_ACTUATOR_DISCOVERY_SERVICE_KEY = web.AppKey("lan_actuator_discovery_service"
 LOAD_CONTROL_QUALIFICATION_SERVICE_KEY = web.AppKey(
     "load_control_qualification_service",
     LoadControlQualificationService,
+)
+LOAD_CONTROL_STAGE3A_SERVICE_KEY = web.AppKey(
+    "load_control_stage3a_service",
+    Stage3ASafeCommandService,
 )
