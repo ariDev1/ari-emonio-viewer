@@ -3,6 +3,7 @@ from aiohttp import web
 from emonio_viewer.config.model import RuntimeConfig
 from emonio_viewer.device_evidence.service import CtConfigurationService, ModbusDeviceEvidenceService
 from emonio_viewer.lifecycle.service import DeviceLifecycleService
+from emonio_viewer.load_control.service import LoadControlService
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
 from emonio_viewer.scope.service import ScopeService
@@ -18,3 +19,4 @@ DEVICE_LIFECYCLE_SERVICE_KEY = web.AppKey("device_lifecycle_service", DeviceLife
 CT_CONFIGURATION_SERVICE_KEY = web.AppKey("ct_configuration_service", CtConfigurationService)
 MODBUS_DEVICE_EVIDENCE_SERVICE_KEY = web.AppKey("modbus_device_evidence_service", ModbusDeviceEvidenceService)
 SCOPE_SERVICE_KEY = web.AppKey("scope_service", ScopeService)
+LOAD_CONTROL_SERVICE_KEY = web.AppKey("load_control_service", LoadControlService)
