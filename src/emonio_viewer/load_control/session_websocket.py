@@ -145,14 +145,22 @@ class WebSocketActuatorSession:
             await self._inbound.put(exc)
             self._disconnect_event.set()
 
+    def _unwrap_inbound(self, item: PostHelloFrame | Exception) -> PostHelloFrame:
+        if isinstance(item, Exception):
+            raise item
+        return item
+
     async def receive_frame(self, timeout_s: float) -> PostHelloFrame:
         timeout = _positive_seconds(timeout_s, "timeout_s")
         if self._receiver_task is None:
             raise ConnectionError("actuator receive loop is not running")
         item = await self._wait_for(self._inbound.get(), timeout)
-        if isinstance(item, Exception):
-            raise item
-        return item
+        return self._unwrap_inbound(item)
+
+    def receive_frame_nowait(self) -> PostHelloFrame:
+        if self._receiver_task is None:
+            raise ConnectionError("actuator receive loop is not running")
+        return self._unwrap_inbound(self._inbound.get_nowait())
 
     async def wait_for_disconnect(self) -> None:
         if self._receiver_task is None:
