@@ -4,12 +4,13 @@ from aiohttp import web
 
 from emonio_viewer.load_control.service import LoadControlCommandError
 
-from .keys import LOAD_CONTROL_SERVICE_KEY
+from .keys import LAN_ACTUATOR_DISCOVERY_SERVICE_KEY, LOAD_CONTROL_SERVICE_KEY
 
 
 def register_load_control_routes(app: web.Application) -> None:
     app.router.add_get("/api/v1/load-control/status", get_load_control_status)
     app.router.add_get("/api/v1/load-control/discovered-actuators", get_discovered_actuators)
+    app.router.add_post("/api/v1/load-control/lan-discovery/scan", scan_lan_actuators)
     app.router.add_get("/api/v1/load-control/evidence/recent", get_recent_evidence)
     app.router.add_post("/api/v1/load-control/binding", configure_binding)
     app.router.add_post("/api/v1/load-control/config", configure_limits)
@@ -22,6 +23,13 @@ def _service(request: web.Request):
     service = request.app.get(LOAD_CONTROL_SERVICE_KEY)
     if service is None:
         raise web.HTTPServiceUnavailable(text="load-control service is unavailable")
+    return service
+
+
+def _lan_discovery_service(request: web.Request):
+    service = request.app.get(LAN_ACTUATOR_DISCOVERY_SERVICE_KEY)
+    if service is None:
+        raise web.HTTPServiceUnavailable(text="LAN actuator discovery service is unavailable")
     return service
 
 
@@ -56,6 +64,16 @@ def _command_error(exc: LoadControlCommandError) -> web.HTTPConflict:
     )
 
 
+def _descriptor_json(item) -> dict:
+    return {
+        "node_id": item.node_id,
+        "location": item.location,
+        "device_class": item.device_class,
+        "capabilities": list(item.capabilities),
+        "p_max": {"a": item.p_max.a, "b": item.p_max.b, "c": item.p_max.c},
+    }
+
+
 async def get_load_control_status(request: web.Request) -> web.Response:
     return web.json_response(_service(request).status())
 
@@ -63,18 +81,19 @@ async def get_load_control_status(request: web.Request) -> web.Response:
 async def get_discovered_actuators(request: web.Request) -> web.Response:
     service = _service(request)
     visible = await service.refresh_discovery()
-    return web.json_response(
-        [
-            {
-                "node_id": item.node_id,
-                "location": item.location,
-                "device_class": item.device_class,
-                "capabilities": list(item.capabilities),
-                "p_max": {"a": item.p_max.a, "b": item.p_max.b, "c": item.p_max.c},
-            }
-            for item in visible
-        ]
-    )
+    return web.json_response([_descriptor_json(item) for item in visible])
+
+
+async def scan_lan_actuators(request: web.Request) -> web.Response:
+    body = await _body(request)
+    try:
+        visible = await _lan_discovery_service(request).scan(
+            discovery_window_s=_required_number(body, "discovery_window_s"),
+            resolve_timeout_s=_required_number(body, "resolve_timeout_s"),
+        )
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    return web.json_response([_descriptor_json(item) for item in visible])
 
 
 async def get_recent_evidence(request: web.Request) -> web.Response:
