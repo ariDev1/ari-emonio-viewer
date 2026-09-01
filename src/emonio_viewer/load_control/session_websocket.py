@@ -10,6 +10,9 @@ from .model import ActuatorDescriptor
 from .protocol import AckFrame, CommandFrame, HelloFrame, ProtocolError, decode_frame, encode_frame
 
 
+ACTUATOR_WEBSOCKET_HEARTBEAT_S = 2.0
+
+
 def _positive_seconds(value: float, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
@@ -70,7 +73,11 @@ class WebSocketActuatorSession:
         self._client = self._client_session_factory()
         try:
             self._websocket = await self._wait_for(
-                self._client.ws_connect(self.descriptor.location),
+                self._client.ws_connect(
+                    self.descriptor.location,
+                    autoping=True,
+                    heartbeat=ACTUATOR_WEBSOCKET_HEARTBEAT_S,
+                ),
                 self._connect_timeout_s,
             )
         except Exception:
