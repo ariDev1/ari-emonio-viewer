@@ -27,6 +27,13 @@ export function getDiscoveredActuators() {
   return requestJson("/api/v1/load-control/discovered-actuators");
 }
 
+export function scanLanActuators(values) {
+  return requestJson("/api/v1/load-control/lan-discovery/scan", {
+    method: "POST",
+    body: JSON.stringify(values),
+  });
+}
+
 export function getRecentLoadControlEvidence(limit = 20) {
   return requestJson(`/api/v1/load-control/evidence/recent?limit=${encodeURIComponent(limit)}`);
 }
