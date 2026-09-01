@@ -96,21 +96,24 @@
 
 .load-control-connection-controls label,
 .load-control-form-grid label,
-.load-control-real-actuator-label {
+.load-control-real-actuator-label,
+.load-control-safe-source-label {
   display: grid;
   gap: 4px;
   color: var(--muted, #9ca6b5);
   font-size: 0.72rem;
 }
 
-.load-control-real-actuator-label {
+.load-control-real-actuator-label,
+.load-control-safe-source-label {
   margin-top: 10px;
 }
 
 .load-control-connection-controls input,
 .load-control-form-grid input,
 .load-control-form-grid select,
-.load-control-real-actuator-label select {
+.load-control-real-actuator-label select,
+.load-control-safe-source-label select {
   min-width: 0;
   padding: 7px 8px;
   color: inherit;
@@ -148,6 +151,7 @@
 }
 
 .load-control-primary-status,
+.load-control-safe-status,
 .load-control-state-grid,
 .load-control-value-grid {
   display: grid;
@@ -157,6 +161,7 @@
 }
 
 .load-control-primary-status > div,
+.load-control-safe-status > div,
 .load-control-state-grid > div,
 .load-control-value-grid > div,
 .load-control-qualification-evidence > div {
@@ -167,6 +172,7 @@
 }
 
 .load-control-primary-status span,
+.load-control-safe-status span,
 .load-control-state-grid span,
 .load-control-value-grid span,
 .load-control-qualification-evidence span {
@@ -178,6 +184,7 @@
 }
 
 .load-control-primary-status strong,
+.load-control-safe-status strong,
 .load-control-state-grid strong,
 .load-control-value-grid strong,
 .load-control-qualification-evidence strong {
@@ -202,6 +209,25 @@
   margin-top: 0;
   font-family: var(--mono);
   font-size: 0.75rem;
+}
+
+.load-control-safe-test-section {
+  border-style: solid;
+}
+
+.load-control-safe-warning {
+  padding-left: 9px;
+  border-left: 2px solid var(--line, #313845);
+}
+
+.load-control-safe-status strong {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+
+#lc-safe-run {
+  font-weight: 800;
+  letter-spacing: 0.03em;
 }
 
 .load-control-diagnostic-log,
@@ -269,6 +295,7 @@
 
   .load-control-connection-controls,
   .load-control-primary-status,
+  .load-control-safe-status,
   .load-control-state-grid,
   .load-control-value-grid,
   .load-control-form-grid,
