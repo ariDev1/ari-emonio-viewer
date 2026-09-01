@@ -52,6 +52,12 @@ export function disconnectLanQualification() {
   });
 }
 
+export function getLanDiagnosticLog(afterSequence = 0, limit = 200) {
+  return requestJson(
+    `/api/v1/load-control/lan-diagnostics/log?after=${encodeURIComponent(afterSequence)}&limit=${encodeURIComponent(limit)}`,
+  );
+}
+
 export function getRecentLoadControlEvidence(limit = 20) {
   return requestJson(`/api/v1/load-control/evidence/recent?limit=${encodeURIComponent(limit)}`);
 }
