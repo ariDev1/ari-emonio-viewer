@@ -24,6 +24,7 @@ class MdnsDiscoveryBackend(Protocol):
         *,
         service_type: str,
         discovery_window_s: float,
+        resolve_timeout_s: float,
     ) -> tuple[MdnsResolvedService, ...]: ...
 
 
@@ -100,6 +101,7 @@ class MdnsActuatorDiscovery:
         self,
         *,
         discovery_window_s: float,
+        resolve_timeout_s: float,
         backend: MdnsDiscoveryBackend,
     ) -> None:
         if isinstance(discovery_window_s, bool) or not isinstance(discovery_window_s, (int, float)):
@@ -107,13 +109,20 @@ class MdnsActuatorDiscovery:
         window = float(discovery_window_s)
         if not math.isfinite(window) or window <= 0.0:
             raise ValueError("discovery_window_s must be finite and > 0")
+        if isinstance(resolve_timeout_s, bool) or not isinstance(resolve_timeout_s, (int, float)):
+            raise ValueError("resolve_timeout_s must be numeric")
+        resolve_timeout = float(resolve_timeout_s)
+        if not math.isfinite(resolve_timeout) or resolve_timeout <= 0.0:
+            raise ValueError("resolve_timeout_s must be finite and > 0")
         self._discovery_window_s = window
+        self._resolve_timeout_s = resolve_timeout
         self._backend = backend
 
     async def discover(self) -> tuple[ActuatorDescriptor, ...]:
         records = await self._backend.scan(
             service_type=LOAD_CONTROL_MDNS_SERVICE_TYPE,
             discovery_window_s=self._discovery_window_s,
+            resolve_timeout_s=self._resolve_timeout_s,
         )
         descriptors = tuple(
             parse_mdns_descriptor(
