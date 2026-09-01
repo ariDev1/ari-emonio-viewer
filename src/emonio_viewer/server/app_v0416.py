@@ -5,6 +5,7 @@ from aiohttp import web
 from emonio_viewer import __version__
 from emonio_viewer.config.model import RuntimeConfig
 from emonio_viewer.load_control.lan_discovery import LanActuatorDiscoveryService
+from emonio_viewer.load_control.qualification import LoadControlQualificationService
 from emonio_viewer.load_control.service import LoadControlService
 from emonio_viewer.recording.recorder import RecordingManager
 from emonio_viewer.runtime.events import RuntimeEventBus
@@ -17,6 +18,7 @@ from .keys import (
     DEVICE_LIFECYCLE_SERVICE_KEY,
     EVENT_BUS_KEY,
     LAN_ACTUATOR_DISCOVERY_SERVICE_KEY,
+    LOAD_CONTROL_QUALIFICATION_SERVICE_KEY,
     LOAD_CONTROL_SERVICE_KEY,
     MODBUS_DEVICE_EVIDENCE_SERVICE_KEY,
     RECORDING_MANAGER_KEY,
@@ -42,6 +44,7 @@ def create_app(
     lifecycle_service=None,
     load_control_service: LoadControlService | None = None,
     lan_discovery_service: LanActuatorDiscoveryService | None = None,
+    qualification_service: LoadControlQualificationService | None = None,
 ) -> web.Application:
     app = web.Application(client_max_size=64 * 1024)
     app[RUNTIME_CONFIG_KEY] = config
@@ -72,13 +75,21 @@ def create_app(
         lan_discovery_service = LanActuatorDiscoveryService()
     app[LAN_ACTUATOR_DISCOVERY_SERVICE_KEY] = lan_discovery_service
 
+    if qualification_service is None:
+        qualification_service = LoadControlQualificationService(lan_discovery_service)
+    app[LOAD_CONTROL_QUALIFICATION_SERVICE_KEY] = qualification_service
+
     async def start_load_control(_app: web.Application) -> None:
         await load_control_service.start()
 
     async def stop_load_control(_app: web.Application) -> None:
         await load_control_service.close()
 
+    async def stop_load_control_qualification(_app: web.Application) -> None:
+        await qualification_service.close()
+
     app.on_startup.append(start_load_control)
+    app.on_cleanup.append(stop_load_control_qualification)
     app.on_cleanup.append(stop_load_control)
 
     static_prefix = f"/static/{__version__}/"
