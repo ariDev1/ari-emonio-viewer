@@ -1,0 +1,145 @@
+import asyncio
+from dataclasses import dataclass
+
+from aiohttp import WSMsgType
+
+from emonio_viewer.load_control.model import ActuatorDescriptor, ThreePhasePower
+from emonio_viewer.load_control.protocol import (
+    AckFrame,
+    CommandFrame,
+    HelloFrame,
+    decode_frame,
+    encode_frame,
+)
+from emonio_viewer.load_control.session_websocket import WebSocketActuatorSession
+
+
+@dataclass
+class FakeMessage:
+    type: WSMsgType
+    data: str
+
+
+class FakeWebSocket:
+    def __init__(self, messages) -> None:
+        self.messages = list(messages)
+        self.sent = []
+        self.closed = False
+
+    async def receive(self):
+        return self.messages.pop(0)
+
+    async def send_str(self, text: str) -> None:
+        self.sent.append(text)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class FakeClientSession:
+    def __init__(self, websocket: FakeWebSocket) -> None:
+        self.websocket = websocket
+        self.locations = []
+        self.closed = False
+
+    async def ws_connect(self, location: str):
+        self.locations.append(location)
+        return self.websocket
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _descriptor() -> ActuatorDescriptor:
+    return ActuatorDescriptor(
+        node_id="ARI-LOAD-001",
+        location="ws://192.168.20.44:8765/control",
+        device_class="ARI_LOAD_ACTUATOR",
+        capabilities=("ACTIVE_LOAD_CONTROL",),
+        p_max=ThreePhasePower(1200.0, 1200.0, 1200.0),
+    )
+
+
+def _hello() -> HelloFrame:
+    return HelloFrame(
+        protocol_version=1,
+        node_id="ARI-LOAD-001",
+        boot_id="BOOT-001",
+        device_class="ARI_LOAD_ACTUATOR",
+        capabilities=("ACTIVE_LOAD_CONTROL",),
+        p_max=ThreePhasePower(1200.0, 1200.0, 1200.0),
+    )
+
+
+def _command() -> CommandFrame:
+    return CommandFrame(
+        protocol_version=1,
+        viewer_session_id="VIEWER-001",
+        node_id="ARI-LOAD-001",
+        boot_id="BOOT-001",
+        sequence=7,
+        emonio_device_id="emonio-example",
+        measurement_cycle_id=42,
+        measurement_utc="2026-09-01T12:00:00+00:00",
+        command_utc="2026-09-01T12:00:00.100000+00:00",
+        control_enabled=True,
+        p_reserve=30.0,
+        measured_p=ThreePhasePower(-420.0, 30.0, 30.0),
+        measured_q=ThreePhasePower(10.0, 20.0, 30.0),
+        p_load_request=ThreePhasePower(450.0, 0.0, 0.0),
+        q_comp_request=ThreePhasePower(0.0, 0.0, 0.0),
+    )
+
+
+def test_websocket_session_uses_explicit_timeouts_and_protocol_frames() -> None:
+    async def scenario() -> None:
+        hello = _hello()
+        command = _command()
+        ack = AckFrame(
+            protocol_version=1,
+            viewer_session_id=command.viewer_session_id,
+            node_id=command.node_id,
+            boot_id=command.boot_id,
+            sequence=command.sequence,
+            ack_utc="2026-09-01T12:00:00.200000+00:00",
+            applied_p=command.p_load_request,
+            result="APPLIED",
+        )
+        websocket = FakeWebSocket(
+            [
+                FakeMessage(WSMsgType.TEXT, encode_frame(hello)),
+                FakeMessage(WSMsgType.TEXT, encode_frame(ack)),
+            ]
+        )
+        client = FakeClientSession(websocket)
+        observed_timeouts = []
+
+        async def fake_wait_for(awaitable, timeout):
+            observed_timeouts.append(timeout)
+            return await awaitable
+
+        session = WebSocketActuatorSession(
+            _descriptor(),
+            connect_timeout_s=0.25,
+            receive_timeout_s=0.15,
+            client_session_factory=lambda: client,
+            wait_for=fake_wait_for,
+        )
+
+        received_hello = await session.connect()
+        assert received_hello == hello
+        assert client.locations == ["ws://192.168.20.44:8765/control"]
+
+        await session.send_command(command)
+        assert decode_frame(websocket.sent[0]) == command
+
+        received_ack = await session.receive_ack()
+        assert received_ack == ack
+        assert observed_timeouts == [0.25, 0.15, 0.15]
+
+        await session.disconnect()
+        assert websocket.closed is True
+        assert client.closed is True
+        assert session.connected is False
+
+    asyncio.run(scenario())
