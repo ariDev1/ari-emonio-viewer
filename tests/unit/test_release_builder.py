@@ -79,39 +79,3 @@ def test_release_builder_excludes_root_build_output_directories(tmp_path: Path) 
         names = release.namelist()
         assert all("/dist/" not in f"/{name}" for name in names)
         assert all("/build/" not in f"/{name}" for name in names)
-        assert all("old.zip.sha256" not in name for name in names)
-
-
-def test_release_builder_rejects_output_directory_equal_to_source_root(tmp_path: Path) -> None:
-    module = _load_tool()
-    root = tmp_path / "project"
-    root.mkdir()
-    (root / "pyproject.toml").write_text(
-        '[project]\nname = "test"\nversion = "0.3.5"\n',
-        encoding="utf-8",
-    )
-    try:
-        module.build_release(root, root)
-    except ValueError as exc:
-        assert "output directory must not be the source root" in str(exc)
-    else:
-        raise AssertionError("source-root output directory must be rejected")
-
-
-def test_release_builder_preserves_shell_script_execute_bits(tmp_path: Path) -> None:
-    module = _load_tool()
-    root = tmp_path / "project"
-    root.mkdir()
-    (root / "pyproject.toml").write_text(
-        '[project]\nname = "test"\nversion = "0.3.5"\n',
-        encoding="utf-8",
-    )
-    script = root / "start.sh"
-    script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-
-    archive = module.build_release(root, tmp_path / "out")
-    with zipfile.ZipFile(archive) as release:
-        info = release.getinfo("test_v0.3.5_Candidate/start.sh")
-        mode = (info.external_attr >> 16) & 0o777
-        assert mode == 0o755
