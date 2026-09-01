@@ -52,6 +52,13 @@ def _qualification_service(request: web.Request):
     return service
 
 
+def _optional_diagnostic_log(request: web.Request):
+    service = request.app.get(LOAD_CONTROL_QUALIFICATION_SERVICE_KEY)
+    if service is None:
+        return None
+    return getattr(service, "diagnostic_log", None)
+
+
 async def _body(request: web.Request) -> dict:
     try:
         body = await request.json()
@@ -158,33 +165,36 @@ async def scan_lan_actuators(request: web.Request) -> web.Response:
     body = await _body(request)
     discovery_window_s = _required_number(body, "discovery_window_s")
     resolve_timeout_s = _required_number(body, "resolve_timeout_s")
-    diagnostic_log = _qualification_service(request).diagnostic_log
-    diagnostic_log.append(
-        "LAN_SCAN_STARTED",
-        discovery_window_s=discovery_window_s,
-        resolve_timeout_s=resolve_timeout_s,
-    )
+    diagnostic_log = _optional_diagnostic_log(request)
+    if diagnostic_log is not None:
+        diagnostic_log.append(
+            "LAN_SCAN_STARTED",
+            discovery_window_s=discovery_window_s,
+            resolve_timeout_s=resolve_timeout_s,
+        )
     try:
         visible = await _lan_discovery_service(request).scan(
             discovery_window_s=discovery_window_s,
             resolve_timeout_s=resolve_timeout_s,
         )
     except ValueError as exc:
-        diagnostic_log.append("LAN_SCAN_FAILED", reason=str(exc))
+        if diagnostic_log is not None:
+            diagnostic_log.append("LAN_SCAN_FAILED", reason=str(exc))
         raise web.HTTPBadRequest(text=str(exc)) from exc
 
-    for item in visible:
-        diagnostic_log.append(
-            "ACTUATOR_DISCOVERED",
-            node_id=item.node_id,
-            location=item.location,
-            device_class=item.device_class,
-            capabilities=",".join(item.capabilities),
-            p_max_a_w=item.p_max.a,
-            p_max_b_w=item.p_max.b,
-            p_max_c_w=item.p_max.c,
-        )
-    diagnostic_log.append("LAN_SCAN_COMPLETE", count=len(visible))
+    if diagnostic_log is not None:
+        for item in visible:
+            diagnostic_log.append(
+                "ACTUATOR_DISCOVERED",
+                node_id=item.node_id,
+                location=item.location,
+                device_class=item.device_class,
+                capabilities=",".join(item.capabilities),
+                p_max_a_w=item.p_max.a,
+                p_max_b_w=item.p_max.b,
+                p_max_c_w=item.p_max.c,
+            )
+        diagnostic_log.append("LAN_SCAN_COMPLETE", count=len(visible))
     return web.json_response([_descriptor_json(item) for item in visible])
 
 
