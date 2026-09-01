@@ -1,14 +1,20 @@
 from pathlib import Path
 
 
-def test_load_control_ui_is_explicitly_mock_only_and_has_no_direct_phase_command_inputs() -> None:
+def test_load_control_ui_keeps_command_transport_mock_only_and_exposes_read_only_lan_scan() -> None:
     ui = Path("frontend/js/load-control-ui.js").read_text(encoding="utf-8")
     api = Path("frontend/js/load-control-api.js").read_text(encoding="utf-8")
 
-    assert "STAGE 1 · MOCK ACTUATOR ONLY" in ui
-    assert "No mDNS, real WebSocket actuator, ESP32, PWM, or physical power-stage output is active." in ui
+    assert "STAGE 1 · MOCK CONTROL + READ-ONLY LAN DISCOVERY" in ui
+    assert "Control command transport remains mock-only." in ui
     assert "ENABLE EXTERNAL CONTROL" in ui
     assert "SAFE_UNCONFIRMED" in ui
+    assert "SCAN LAN" in ui
+    assert 'id="lc-lan-discovery-window"' in ui
+    assert 'id="lc-lan-resolve-timeout"' in ui
+    assert 'id="lc-scan-lan"' in ui
+    assert 'id="lc-lan-results"' in ui
+    assert "/api/v1/load-control/lan-discovery/scan" in api
     assert "/api/v1/load-control/enable" in api
     assert "/api/v1/load-control/disable" in api
     assert "/api/v1/load-control/command" not in api
@@ -31,6 +37,7 @@ def test_active_v0416_app_injects_load_control_assets_and_routes() -> None:
     assert "load-control-ui.js" in app
     assert "register_load_control_routes(app)" in app
     assert '"/api/v1/load-control/status"' in api
+    assert '"/api/v1/load-control/lan-discovery/scan"' in api
     assert '"/api/v1/load-control/binding"' in api
     assert '"/api/v1/load-control/config"' in api
     assert '"/api/v1/load-control/timing"' in api
