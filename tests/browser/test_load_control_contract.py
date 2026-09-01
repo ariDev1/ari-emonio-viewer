@@ -11,9 +11,13 @@ def test_load_control_ui_prioritizes_real_stage2_connection_and_copyable_diagnos
     assert "Qualification" in ui
     assert "Diagnostic log" in ui
     assert "DEVELOPMENT / MOCK CONTROL" in ui
-    assert ui.index("Actuator connection") < ui.index("Qualification")
-    assert ui.index("Qualification") < ui.index("Diagnostic log")
-    assert ui.index("Diagnostic log") < ui.index("DEVELOPMENT / MOCK CONTROL")
+    connection_heading = "<h3>Actuator connection</h3>"
+    qualification_heading = "<h3>Qualification</h3>"
+    diagnostic_heading = "<h3>Diagnostic log</h3>"
+    development_summary = "<summary>DEVELOPMENT / MOCK CONTROL</summary>"
+    assert ui.index(connection_heading) < ui.index(qualification_heading)
+    assert ui.index(qualification_heading) < ui.index(diagnostic_heading)
+    assert ui.index(diagnostic_heading) < ui.index(development_summary)
 
     assert 'id="lc-lan-discovery-window"' in ui
     assert 'id="lc-lan-resolve-timeout"' in ui
