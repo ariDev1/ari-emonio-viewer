@@ -98,7 +98,7 @@ def test_stage3a_safe_test_sources_status_select_and_run_routes() -> None:
         status, payload = await _request(
             app,
             "GET",
-            "/api/v1/load-control/safe-test/sources",
+            "/api/v1/load-control/lan-safe-test/sources",
         )
         assert status == 200
         assert payload == [
@@ -112,7 +112,7 @@ def test_stage3a_safe_test_sources_status_select_and_run_routes() -> None:
         status, payload = await _request(
             app,
             "GET",
-            "/api/v1/load-control/safe-test/status",
+            "/api/v1/load-control/lan-safe-test/status",
         )
         assert status == 200
         assert payload == {
@@ -128,7 +128,7 @@ def test_stage3a_safe_test_sources_status_select_and_run_routes() -> None:
         status, payload = await _request(
             app,
             "POST",
-            "/api/v1/load-control/safe-test/source",
+            "/api/v1/load-control/lan-safe-test/source",
             {"emonio_device_id": "emonio-example"},
         )
         assert status == 200
@@ -140,7 +140,7 @@ def test_stage3a_safe_test_sources_status_select_and_run_routes() -> None:
         status, payload = await _request(
             app,
             "POST",
-            "/api/v1/load-control/safe-test/run",
+            "/api/v1/load-control/lan-safe-test/send",
             {},
         )
         assert status == 200
@@ -166,17 +166,17 @@ def test_stage3a_safe_test_routes_fail_closed_for_invalid_requests() -> None:
         status, payload = await _request(
             app,
             "POST",
-            "/api/v1/load-control/safe-test/source",
+            "/api/v1/load-control/lan-safe-test/source",
             {},
         )
         assert status == 400
-        assert "emonio_device_id is required" in payload
+        assert "request body must contain exactly emonio_device_id" in payload
 
         service.select_error = Stage3AError("SOURCE_NOT_AVAILABLE")
         status, payload = await _request(
             app,
             "POST",
-            "/api/v1/load-control/safe-test/source",
+            "/api/v1/load-control/lan-safe-test/source",
             {"emonio_device_id": "missing"},
         )
         assert status == 409
@@ -186,7 +186,7 @@ def test_stage3a_safe_test_routes_fail_closed_for_invalid_requests() -> None:
         status, payload = await _request(
             app,
             "POST",
-            "/api/v1/load-control/safe-test/run",
+            "/api/v1/load-control/lan-safe-test/send",
             {},
         )
         assert status == 409
@@ -196,7 +196,7 @@ def test_stage3a_safe_test_routes_fail_closed_for_invalid_requests() -> None:
         status, payload = await _request(
             _app(),
             "GET",
-            "/api/v1/load-control/safe-test/status",
+            "/api/v1/load-control/lan-safe-test/status",
         )
         assert status == 503
         assert "Stage-3A SAFE test service is unavailable" in payload
@@ -225,7 +225,7 @@ def test_stage3a_rejected_exchange_is_a_reported_test_result_not_an_http_transpo
         status, payload = await _request(
             _app(service),
             "POST",
-            "/api/v1/load-control/safe-test/run",
+            "/api/v1/load-control/lan-safe-test/send",
             {},
         )
 
