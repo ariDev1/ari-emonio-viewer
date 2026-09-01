@@ -130,6 +130,7 @@ class WebSocketActuatorSession:
             while self.connected:
                 message = await self._websocket.receive()
                 if message.type in {WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR}:
+                    await self._inbound.put(ConnectionError("actuator WebSocket disconnected"))
                     self._disconnect_event.set()
                     return
                 if message.type is not WSMsgType.TEXT or not isinstance(message.data, str):
