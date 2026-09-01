@@ -5,7 +5,7 @@ import pytest
 
 from emonio_viewer.load_control.diagnostic_log import LoadControlDiagnosticLog
 from emonio_viewer.load_control.model import ActuatorDescriptor, ThreePhasePower
-from emonio_viewer.load_control.protocol import HelloFrame, ProtocolError
+from emonio_viewer.load_control.protocol import AckFrame, CommandFrame, HelloFrame, ProtocolError
 from emonio_viewer.load_control.qualification import (
     LoadControlQualificationError,
     LoadControlQualificationService,
@@ -27,6 +27,7 @@ class FakeSession:
         receive_error: Exception | None,
         observe_state=None,
         open_gate: asyncio.Event | None = None,
+        frames=(),
     ) -> None:
         self.descriptor = descriptor
         self.hello = hello
@@ -35,6 +36,9 @@ class FakeSession:
         self.open_gate = open_gate
         self.connected = False
         self.sent = []
+        self.frames = list(frames)
+        self.frame_timeouts = []
+        self.receive_loop_starts = 0
         self.disconnect_calls = 0
         self.disconnect_event = asyncio.Event()
 
@@ -52,6 +56,16 @@ class FakeSession:
             raise self.receive_error
         assert self.hello is not None
         return self.hello
+
+    def start_receive_loop(self) -> None:
+        self.receive_loop_starts += 1
+
+    async def send_command(self, command: CommandFrame) -> None:
+        self.sent.append(command)
+
+    async def receive_frame(self, timeout_s: float):
+        self.frame_timeouts.append(timeout_s)
+        return self.frames.pop(0)
 
     async def wait_for_disconnect(self) -> None:
         await self.disconnect_event.wait()
@@ -87,6 +101,7 @@ class FakeSessionFactory:
             receive_error=spec.get("receive_error"),
             observe_state=observe,
             open_gate=spec.get("open_gate"),
+            frames=spec.get("frames", ()),
         )
         session.connect_timeout_s = connect_timeout_s
         session.receive_timeout_s = receive_timeout_s
@@ -112,6 +127,40 @@ def _hello(boot_id: str = "BOOT-001") -> HelloFrame:
         device_class="ARI_LOAD_ACTUATOR",
         capabilities=("ACTIVE_LOAD_CONTROL",),
         p_max=ThreePhasePower(1000.0, 1000.0, 1000.0),
+    )
+
+
+def _command() -> CommandFrame:
+    return CommandFrame(
+        protocol_version=1,
+        viewer_session_id="VIEWER-001",
+        node_id="ARI-LOAD-001",
+        boot_id="BOOT-001",
+        sequence=1,
+        emonio_device_id="emonio-example",
+        measurement_cycle_id=42,
+        measurement_utc="2026-09-01T12:00:00+00:00",
+        command_utc="2026-09-01T12:00:00.100000+00:00",
+        control_enabled=False,
+        p_reserve=0.0,
+        measured_p=ThreePhasePower(-100.0, 20.0, 30.0),
+        measured_q=ThreePhasePower(1.0, 2.0, 3.0),
+        p_load_request=ThreePhasePower(0.0, 0.0, 0.0),
+        q_comp_request=ThreePhasePower(0.0, 0.0, 0.0),
+    )
+
+
+def _ack() -> AckFrame:
+    command = _command()
+    return AckFrame(
+        protocol_version=1,
+        viewer_session_id=command.viewer_session_id,
+        node_id=command.node_id,
+        boot_id=command.boot_id,
+        sequence=command.sequence,
+        ack_utc="2026-09-01T12:00:00.200000+00:00",
+        applied_p=ThreePhasePower(0.0, 0.0, 0.0),
+        result="APPLIED",
     )
 
 
@@ -182,9 +231,50 @@ def test_stage2_service_uses_required_state_order_and_timeouts() -> None:
         assert status.boot_id == "BOOT-001"
         assert factory.created[0].connect_timeout_s == 3.0
         assert factory.created[0].receive_timeout_s == 2.0
+        assert factory.created[0].receive_loop_starts == 1
         assert factory.created[0].sent == []
+        assert service.qualified_hello() == _hello()
 
         await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_stage2_qualified_transport_is_closed_until_hello_is_qualified() -> None:
+    async def scenario() -> None:
+        factory = FakeSessionFactory({"hello": _hello()})
+        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+
+        assert service.qualified_hello() is None
+        with pytest.raises(LoadControlQualificationError, match="not HELLO-qualified"):
+            await service.send_qualified_command(_command())
+        with pytest.raises(LoadControlQualificationError, match="not HELLO-qualified"):
+            await service.receive_qualified_frame(0.5)
+
+        assert factory.created == []
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_stage2_qualified_transport_delegates_only_after_qualification() -> None:
+    async def scenario() -> None:
+        factory = FakeSessionFactory({"hello": _hello(), "frames": (_ack(),)})
+        service = _service(FakeLanDiscoveryService(_descriptor()), factory)
+
+        await service.connect("ARI-LOAD-001")
+        command = _command()
+        await service.send_qualified_command(command)
+        frame = await service.receive_qualified_frame(0.75)
+
+        assert factory.created[0].sent == [command]
+        assert factory.created[0].frame_timeouts == [0.75]
+        assert frame == _ack()
+
+        await service.disconnect()
+        assert service.qualified_hello() is None
+        with pytest.raises(LoadControlQualificationError, match="not HELLO-qualified"):
+            await service.send_qualified_command(command)
 
     asyncio.run(scenario())
 
@@ -208,6 +298,7 @@ def test_stage2_service_rejects_transport_or_hello_failure_without_sending(error
         assert status.hello_qualified is False
         assert status.node_id is None
         assert status.boot_id is None
+        assert factory.created[0].receive_loop_starts == 0
         assert factory.created[0].sent == []
 
         await service.close()
@@ -251,6 +342,7 @@ def test_stage2_service_rejects_second_connect_while_first_is_connecting() -> No
         first = await first_task
         assert first.state is QualificationState.QUALIFIED
         assert first.boot_id == "BOOT-001"
+        assert factory.created[0].receive_loop_starts == 1
         assert factory.created[0].sent == []
 
         await service.close()
@@ -319,6 +411,7 @@ def test_stage2_reconnect_requires_new_hello_and_accepts_new_boot_instance() -> 
         assert second.state is QualificationState.QUALIFIED
         assert second.boot_id == "BOOT-002"
         assert len(factory.created) == 2
+        assert all(session.receive_loop_starts == 1 for session in factory.created)
         assert all(session.sent == [] for session in factory.created)
 
         await service.close()
@@ -344,6 +437,7 @@ def test_stage2_remote_disconnect_invalidates_qualification() -> None:
         assert status.hello_qualified is False
         assert status.node_id is None
         assert status.boot_id is None
+        assert service.qualified_hello() is None
         assert factory.created[0].sent == []
 
         await service.close()
