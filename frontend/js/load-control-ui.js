@@ -4,6 +4,7 @@ import {
   getDiscoveredActuators,
   getLoadControlStatus,
   getRecentLoadControlEvidence,
+  scanLanActuators,
   setLoadControlBinding,
   setLoadControlLimits,
   setLoadControlTiming,
@@ -12,6 +13,7 @@ import {
 const state = {
   status: null,
   visible: false,
+  lanResults: [],
 };
 
 function element(id) {
@@ -54,13 +56,13 @@ function createUi() {
   panel.innerHTML = `
     <div class="load-control-panel-header">
       <div>
-        <span class="eyebrow">STAGE 1 · MOCK ACTUATOR ONLY</span>
+        <span class="eyebrow">STAGE 1 · MOCK CONTROL + READ-ONLY LAN DISCOVERY</span>
         <h2>External Load Control</h2>
       </div>
       <button id="load-control-close" type="button">CLOSE</button>
     </div>
     <p class="load-control-stage-note">
-      Viewer supervisory test mode. No mDNS, real WebSocket actuator, ESP32, PWM, or physical power-stage output is active.
+      Control command transport remains mock-only. LAN discovery is read-only and cannot bind, enable, or send actuator commands.
     </p>
 
     <section class="load-control-state-grid" aria-label="Load control state">
@@ -83,6 +85,24 @@ function createUi() {
         </label>
       </div>
       <div class="load-control-actions"><button id="lc-save-binding" type="button">SAVE BINDING</button></div>
+    </section>
+
+    <section class="load-control-section">
+      <div class="load-control-section-header"><h3>LAN actuator discovery</h3><span>read-only mDNS</span></div>
+      <p class="load-control-section-note">
+        This scan only locates compatible actuator advertisements. It does not change the control binding and it does not open a control connection.
+      </p>
+      <div class="load-control-form-grid">
+        <label>Discovery window / s
+          <input id="lc-lan-discovery-window" type="number" min="0" step="any" placeholder="required">
+        </label>
+        <label>Resolve timeout / s
+          <input id="lc-lan-resolve-timeout" type="number" min="0" step="any" placeholder="required">
+        </label>
+      </div>
+      <div class="load-control-actions"><button id="lc-scan-lan" type="button">SCAN LAN</button></div>
+      <div id="lc-lan-scan-status" class="load-control-status-text" aria-live="polite"></div>
+      <div id="lc-lan-results" class="load-control-lan-results">No LAN scan run.</div>
     </section>
 
     <section class="load-control-section">
@@ -139,6 +159,7 @@ function createUi() {
   toggle.addEventListener("click", () => setVisible(!state.visible));
   element("load-control-close").addEventListener("click", () => setVisible(false));
   element("lc-save-binding").addEventListener("click", saveBinding);
+  element("lc-scan-lan").addEventListener("click", runLanScan);
   element("lc-save-limits").addEventListener("click", saveLimits);
   element("lc-save-timing").addEventListener("click", saveTiming);
   element("lc-enable").addEventListener("click", runEnable);
@@ -164,10 +185,58 @@ function setMessage(message, isError = false) {
   target.dataset.error = isError ? "true" : "false";
 }
 
+function setLanMessage(message, isError = false) {
+  const target = element("lc-lan-scan-status");
+  if (!target) return;
+  target.textContent = message || "";
+  target.dataset.error = isError ? "true" : "false";
+}
+
 function setInputIfIdle(id, value) {
   const input = element(id);
   if (!input || document.activeElement === input || value == null) return;
   input.value = String(value);
+}
+
+function positiveInputValue(id, label) {
+  const value = Number(element(id)?.value);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label} must be finite and greater than 0 s.`);
+  }
+  return value;
+}
+
+function renderLanResults(values) {
+  state.lanResults = Array.isArray(values) ? values : [];
+  const target = element("lc-lan-results");
+  if (!target) return;
+  target.replaceChildren();
+
+  if (!state.lanResults.length) {
+    target.textContent = "No compatible LAN actuator advertisement was found in this scan.";
+    return;
+  }
+
+  for (const item of state.lanResults) {
+    const card = document.createElement("div");
+    card.className = "load-control-lan-result";
+
+    const identity = document.createElement("strong");
+    identity.textContent = item.node_id || "UNKNOWN NODE";
+
+    const location = document.createElement("span");
+    location.textContent = item.location || "NO LOCATION";
+
+    const details = document.createElement("span");
+    const capabilities = Array.isArray(item.capabilities) ? item.capabilities.join(", ") : "—";
+    details.textContent = `${item.device_class || "UNKNOWN CLASS"} · ${capabilities}`;
+
+    const limits = document.createElement("span");
+    limits.textContent = `Physical max: ${powerTriplet(item.p_max)}`;
+
+    card.append(identity, location, details, limits);
+    target.append(card);
+  }
 }
 
 function renderStatus(status) {
@@ -251,6 +320,26 @@ async function refreshAll() {
     if (state.visible) await refreshEvidence();
   } catch (error) {
     setMessage(error.message, true);
+  }
+}
+
+async function runLanScan() {
+  const button = element("lc-scan-lan");
+  try {
+    const discoveryWindow = positiveInputValue("lc-lan-discovery-window", "Discovery window");
+    const resolveTimeout = positiveInputValue("lc-lan-resolve-timeout", "Resolve timeout");
+    if (button) button.disabled = true;
+    setLanMessage("Scanning for _ari-emonio-load._tcp.local. advertisements...");
+    const values = await scanLanActuators({
+      discovery_window_s: discoveryWindow,
+      resolve_timeout_s: resolveTimeout,
+    });
+    renderLanResults(values);
+    setLanMessage(`LAN scan complete. ${values.length} compatible actuator advertisement(s) found.`);
+  } catch (error) {
+    setLanMessage(error.message, true);
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
