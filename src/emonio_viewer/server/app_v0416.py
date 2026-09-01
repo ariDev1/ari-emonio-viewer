@@ -4,6 +4,7 @@ from aiohttp import web
 
 from emonio_viewer import __version__
 from emonio_viewer.config.model import RuntimeConfig
+from emonio_viewer.load_control.lan_discovery import LanActuatorDiscoveryService
 from emonio_viewer.load_control.service import LoadControlService
 from emonio_viewer.recording.recorder import RecordingManager
 from emonio_viewer.runtime.events import RuntimeEventBus
@@ -15,6 +16,7 @@ from .keys import (
     DEVICE_CONNECTOR_KEY,
     DEVICE_LIFECYCLE_SERVICE_KEY,
     EVENT_BUS_KEY,
+    LAN_ACTUATOR_DISCOVERY_SERVICE_KEY,
     LOAD_CONTROL_SERVICE_KEY,
     MODBUS_DEVICE_EVIDENCE_SERVICE_KEY,
     RECORDING_MANAGER_KEY,
@@ -39,6 +41,7 @@ def create_app(
     scope_service=None,
     lifecycle_service=None,
     load_control_service: LoadControlService | None = None,
+    lan_discovery_service: LanActuatorDiscoveryService | None = None,
 ) -> web.Application:
     app = web.Application(client_max_size=64 * 1024)
     app[RUNTIME_CONFIG_KEY] = config
@@ -64,6 +67,10 @@ def create_app(
             evidence_path=project_root / "recordings" / "load-control-evidence.jsonl",
         )
     app[LOAD_CONTROL_SERVICE_KEY] = load_control_service
+
+    if lan_discovery_service is None:
+        lan_discovery_service = LanActuatorDiscoveryService()
+    app[LAN_ACTUATOR_DISCOVERY_SERVICE_KEY] = lan_discovery_service
 
     async def start_load_control(_app: web.Application) -> None:
         await load_control_service.start()
