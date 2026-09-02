@@ -71,6 +71,30 @@
   margin: 8px 0 0;
 }
 
+.load-control-readiness {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #313845);
+  background: var(--input, #0d1117);
+}
+
+.load-control-readiness span {
+  color: var(--muted, #9ca6b5);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.load-control-readiness strong {
+  font-size: 0.84rem;
+  letter-spacing: 0.04em;
+}
+
 .load-control-section,
 .load-control-engineering-tools,
 .load-control-development-tools {
@@ -174,6 +198,44 @@
   padding: 8px 10px;
   border: 1px solid var(--line, #313845);
   background: var(--input, #0d1117);
+}
+
+.load-control-primary-status > div,
+.load-control-readiness {
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.load-control-primary-status > div[data-tone="ok"],
+.load-control-readiness[data-tone="ok"] {
+  border-color: var(--ok, #86d98b);
+  background: rgb(134 217 139 / 0.08);
+}
+
+.load-control-primary-status > div[data-tone="ok"] strong,
+.load-control-readiness[data-tone="ok"] strong {
+  color: var(--ok, #86d98b);
+}
+
+.load-control-primary-status > div[data-tone="warn"],
+.load-control-readiness[data-tone="warn"] {
+  border-color: #d6a950;
+  background: rgb(214 169 80 / 0.09);
+}
+
+.load-control-primary-status > div[data-tone="warn"] strong,
+.load-control-readiness[data-tone="warn"] strong {
+  color: #edc778;
+}
+
+.load-control-primary-status > div[data-tone="error"],
+.load-control-readiness[data-tone="error"] {
+  border-color: var(--danger, #ff7a7a);
+  background: rgb(255 122 122 / 0.08);
+}
+
+.load-control-primary-status > div[data-tone="error"] strong,
+.load-control-readiness[data-tone="error"] strong {
+  color: var(--danger, #ff7a7a);
 }
 
 .load-control-primary-status span,
