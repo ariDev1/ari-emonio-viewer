@@ -64,7 +64,7 @@ function createUi() {
     <span class="utility-status-label">LOAD CTRL</span>
     <strong id="load-control-summary-mode">REAL DISABLED</strong>
     <span id="load-control-summary-session">IDLE</span>
-    <span id="load-control-summary-safe">HELLO NOT QUALIFIED</span>
+    <span id="load-control-summary-safe">DEVICE NOT READY</span>
   `;
   controls.append(toggle);
 
@@ -76,70 +76,46 @@ function createUi() {
   panel.innerHTML = `
     <div class="load-control-panel-header">
       <div>
-        <span class="eyebrow">STAGE 3A · SAFE COMMAND QUALIFICATION</span>
+        <span class="eyebrow">OPERATOR VIEW</span>
         <h2>External Load Control</h2>
       </div>
       <div class="load-control-header-actions">
-        <strong class="load-control-real-disabled">NONZERO REAL CONTROL DISABLED</strong>
+        <strong class="load-control-real-disabled">SIMULATION ONLY</strong>
         <button id="load-control-close" type="button">CLOSE</button>
       </div>
     </div>
     <p class="load-control-stage-note">
-      Stage 2 qualifies the real actuator connection. Stage 3A can then send one explicit SAFE zero-output protocol COMMAND and qualify its ACK. Real load control remains disabled.
+      Connect the actuator, select the Emonio source, and use the safe or simulated test action. NO PHYSICAL OUTPUT. NONZERO REAL CONTROL DISABLED.
     </p>
 
     <section class="load-control-section load-control-primary-section">
-      <div class="load-control-section-header"><h3>Actuator connection</h3><span>real LAN</span></div>
-      <p class="load-control-section-note">
-        SCAN LAN is read-only. A scan never selects, connects, binds, or enables an actuator.
-      </p>
-      <div class="load-control-connection-controls">
-        <label>Discovery window / s
-          <input id="lc-lan-discovery-window" type="number" min="0" step="any" value="5">
-        </label>
-        <label>Resolve timeout / s
-          <input id="lc-lan-resolve-timeout" type="number" min="0" step="any" value="5">
-        </label>
-      </div>
+      <div class="load-control-section-header"><h3>Actuator</h3><span>LAN</span></div>
+      <p class="load-control-section-note">Find one compatible actuator, select it, and connect.</p>
       <div class="load-control-actions">
         <button id="lc-scan-lan" type="button">SCAN LAN</button>
       </div>
       <div id="lc-lan-scan-status" class="load-control-status-text" aria-live="polite">No LAN scan run.</div>
-      <label class="load-control-real-actuator-label">Discovered actuator
+      <label class="load-control-real-actuator-label">Actuator
         <select id="lc-real-actuator">
           <option value="">Choose discovered actuator</option>
         </select>
       </label>
       <div id="lc-selected-actuator" class="load-control-real-actuator-summary">No actuator selected.</div>
+      <div class="load-control-primary-status" aria-label="Actuator connection state">
+        <div><span>Connection</span><strong id="lc-ws-state">DISCONNECTED</strong></div>
+        <div><span>Device</span><strong id="lc-hello-state">NOT READY</strong></div>
+      </div>
       <div class="load-control-actions">
         <button id="lc-select-qualify" type="button" disabled>CONNECT / QUALIFY</button>
-      </div>
-    </section>
-
-    <section class="load-control-section load-control-primary-section load-control-qualification-section">
-      <div class="load-control-section-header"><h3>Qualification</h3><span>HELLO only</span></div>
-      <div class="load-control-primary-status" aria-label="Real actuator qualification state">
-        <div><span>WebSocket</span><strong id="lc-ws-state">DISCONNECTED</strong></div>
-        <div><span>HELLO</span><strong id="lc-hello-state">NOT QUALIFIED</strong></div>
-      </div>
-      <div class="load-control-qualification-evidence">
-        <div><span>Actuator instance</span><strong id="lc-qualification-identity">—</strong></div>
-        <div><span>Protocol / class / capability</span><strong id="lc-qualification-protocol">—</strong></div>
-        <div><span>Advertised test limit</span><strong id="lc-qualification-limits">—</strong></div>
-        <div><span>WebSocket locator</span><strong id="lc-qualification-location">—</strong></div>
-      </div>
-      <div id="lc-qualification-error" class="load-control-status-text" aria-live="polite"></div>
-      <div class="load-control-actions">
         <button id="lc-qualification-disconnect" type="button" disabled>DISCONNECT</button>
       </div>
+      <div id="lc-qualification-error" class="load-control-status-text" aria-live="polite"></div>
     </section>
 
     <section class="load-control-section load-control-primary-section load-control-safe-test-section">
-      <div class="load-control-section-header"><h3>SAFE command qualification</h3><span>one real COMMAND</span></div>
-      <p class="load-control-section-note load-control-safe-warning">
-        This test sends exactly one real protocol COMMAND only after explicit operator action: control_enabled=false · P request A/B/C = 0 W · Q request A/B/C = 0 var · No retry · No nonzero control.
-      </p>
-      <label class="load-control-safe-source-label">Emonio measurement source
+      <div class="load-control-section-header"><h3>Emonio source</h3><span>measurement</span></div>
+      <p class="load-control-section-note">Select the Emonio that provides the measurement provenance for this test session.</p>
+      <label class="load-control-safe-source-label">Emonio
         <select id="lc-safe-source">
           <option value="">Choose Emonio source</option>
         </select>
@@ -147,111 +123,158 @@ function createUi() {
       <div class="load-control-actions">
         <button id="lc-safe-select-source" type="button" disabled>SELECT SOURCE</button>
       </div>
-      <div class="load-control-safe-status" aria-label="SAFE command qualification state">
-        <div><span>SAFE test</span><strong id="lc-safe-state">IDLE</strong></div>
+      <div class="load-control-primary-status load-control-operator-status" aria-label="Selected Emonio source">
         <div><span>Selected source</span><strong id="lc-safe-source-state">—</strong></div>
-        <div><span>Sample cycle</span><strong id="lc-safe-cycle">—</strong></div>
-        <div><span>COMMAND sequence</span><strong id="lc-safe-sequence">—</strong></div>
-        <div><span>ACK result</span><strong id="lc-safe-ack">—</strong></div>
-        <div><span>Rejection</span><strong id="lc-safe-rejection">—</strong></div>
+      </div>
+    </section>
+
+    <section class="load-control-section load-control-primary-section load-control-safe-action-section">
+      <div class="load-control-section-header"><h3>Safe state</h3><span>0 W</span></div>
+      <p class="load-control-section-note">Use this action to confirm a zero simulated load. It is also the required reset after a 1 W test.</p>
+      <div class="load-control-primary-status load-control-operator-status" aria-label="Safe state">
+        <div><span>State</span><strong id="lc-safe-state">IDLE</strong></div>
       </div>
       <div class="load-control-actions">
-        <button id="lc-safe-run" type="button" disabled>SEND SAFE TEST COMMAND</button>
+        <button id="lc-safe-run" type="button" disabled>SET SAFE 0 W</button>
       </div>
       <div id="lc-safe-message" class="load-control-status-text" aria-live="polite">
-        Select an Emonio source explicitly. The SAFE test remains disabled until the actuator HELLO is qualified.
+        Select an Emonio source and connect the actuator first.
       </div>
     </section>
 
-    <section class="load-control-section load-control-primary-section load-control-diagnostic-section">
-      <div class="load-control-section-header"><h3>Diagnostic log</h3><span>real actuator only</span></div>
-      <p class="load-control-section-note">
-        This backend-owned log contains real LAN discovery, WebSocket/HELLO, and SAFE command qualification events. CLEAR VIEW does not delete the backend log.
-      </p>
-      <pre id="lc-diagnostic-log" class="load-control-diagnostic-log">No real actuator diagnostic events yet.</pre>
-      <div class="load-control-actions">
-        <button id="lc-copy-diagnostic-log" type="button">COPY LOG</button>
-        <button id="lc-clear-diagnostic-view" type="button">CLEAR VIEW</button>
-      </div>
-      <div id="lc-diagnostic-status" class="load-control-status-text" aria-live="polite"></div>
-    </section>
+    <div id="lc-simulated-operator-slot"></div>
 
-    <details id="lc-development-tools" class="load-control-development-tools">
-      <summary>DEVELOPMENT / MOCK CONTROL</summary>
+    <details id="lc-engineering-diagnostics" class="load-control-engineering-tools">
+      <summary>ENGINEERING DIAGNOSTICS</summary>
       <p class="load-control-section-note">
-        These controls belong to the deterministic Stage-1 mock path. They do not control the real LAN actuator.
+        Protocol evidence and development controls are available here. They are not required for normal operator use.
       </p>
 
-      <section class="load-control-state-grid" aria-label="Mock load control state">
-        <div><span>Mock control</span><strong id="lc-mode">DISABLED</strong></div>
-        <div><span>Mock session</span><strong id="lc-session">UNBOUND</strong></div>
-        <div><span>Safe state</span><strong id="lc-safe">SAFE_UNCONFIRMED</strong></div>
-        <div><span>Trip</span><strong id="lc-trip">—</strong></div>
-        <div><span>Source cycle</span><strong id="lc-cycle">—</strong></div>
-        <div><span>Evidence</span><strong id="lc-evidence-health">—</strong></div>
+      <section class="load-control-section">
+        <div class="load-control-section-header"><h3>LAN discovery timing</h3><span>s</span></div>
+        <div class="load-control-connection-controls">
+          <label>Discovery window / s
+            <input id="lc-lan-discovery-window" type="number" min="0" step="any" value="5">
+          </label>
+          <label>Resolve timeout / s
+            <input id="lc-lan-resolve-timeout" type="number" min="0" step="any" value="5">
+          </label>
+        </div>
+      </section>
+
+      <section class="load-control-section load-control-qualification-section">
+        <div class="load-control-section-header"><h3>Qualification evidence</h3><span>HELLO</span></div>
+        <div class="load-control-qualification-evidence">
+          <div><span>Actuator instance</span><strong id="lc-qualification-identity">—</strong></div>
+          <div><span>Protocol / class / capability</span><strong id="lc-qualification-protocol">—</strong></div>
+          <div><span>Advertised test limit</span><strong id="lc-qualification-limits">—</strong></div>
+          <div><span>WebSocket locator</span><strong id="lc-qualification-location">—</strong></div>
+        </div>
       </section>
 
       <section class="load-control-section">
-        <div class="load-control-section-header"><h3>Mock binding</h3><span>DISABLED only</span></div>
-        <div class="load-control-form-grid">
-          <label>Emonio control source
-            <input id="lc-source" type="text" autocomplete="off" spellcheck="false" placeholder="emonio device id">
-          </label>
-          <label>Mock actuator
-            <select id="lc-actuator"></select>
-          </label>
+        <div class="load-control-section-header"><h3>SAFE command evidence</h3><span>Stage 3A</span></div>
+        <p class="load-control-section-note load-control-safe-warning">
+          This path sends exactly one protocol COMMAND after explicit operator action: control_enabled=false · P request A/B/C = 0 W · Q request A/B/C = 0 var · No retry · No nonzero control.
+        </p>
+        <div class="load-control-safe-status" aria-label="SAFE command qualification evidence">
+          <div><span>Sample cycle</span><strong id="lc-safe-cycle">—</strong></div>
+          <div><span>COMMAND sequence</span><strong id="lc-safe-sequence">—</strong></div>
+          <div><span>ACK result</span><strong id="lc-safe-ack">—</strong></div>
+          <div><span>Rejection</span><strong id="lc-safe-rejection">—</strong></div>
         </div>
-        <div class="load-control-actions"><button id="lc-save-binding" type="button">SAVE MOCK BINDING</button></div>
       </section>
 
-      <section class="load-control-section">
-        <div class="load-control-section-header"><h3>Mock active-power target and limits</h3><span>W</span></div>
-        <div class="load-control-form-grid">
-          <label>Import reserve per phase
-            <input id="lc-reserve" type="number" min="0" step="any" placeholder="required">
-          </label>
-          <label>Phase A operator max
-            <input id="lc-limit-a" type="number" min="0" step="any" placeholder="required">
-          </label>
-          <label>Phase B operator max
-            <input id="lc-limit-b" type="number" min="0" step="any" placeholder="required">
-          </label>
-          <label>Phase C operator max
-            <input id="lc-limit-c" type="number" min="0" step="any" placeholder="required">
-          </label>
-        </div>
-        <div class="load-control-actions"><button id="lc-save-limits" type="button">SAVE MOCK TARGET / LIMITS</button></div>
-      </section>
-
-      <section class="load-control-section">
-        <div class="load-control-section-header"><h3>Mock volatile timing qualification</h3><span>not persisted</span></div>
-        <div class="load-control-form-grid">
-          <label>Maximum sample age / s
-            <input id="lc-sample-age-limit" type="number" min="0" step="any" placeholder="required each start">
-          </label>
-          <label>ACK timeout / s
-            <input id="lc-ack-timeout" type="number" min="0" step="any" placeholder="required each start">
-          </label>
-        </div>
-        <div class="load-control-actions"><button id="lc-save-timing" type="button">SET MOCK SESSION TIMING</button></div>
-      </section>
-
-      <section class="load-control-section">
-        <div class="load-control-section-header"><h3>Mock supervisor evidence</h3><span id="lc-session-id">—</span></div>
-        <div class="load-control-value-grid">
-          <div><span>Acknowledged load</span><strong id="lc-ack-p">—</strong></div>
-          <div><span>Outstanding command</span><strong id="lc-outstanding">—</strong></div>
-          <div><span>Actuator boot</span><strong id="lc-boot">—</strong></div>
-          <div><span>Sample age</span><strong id="lc-sample-age">—</strong></div>
-        </div>
+      <section class="load-control-section load-control-diagnostic-section">
+        <div class="load-control-section-header"><h3>Diagnostic log</h3><span>real actuator only</span></div>
+        <p class="load-control-section-note">
+          This backend-owned log contains real LAN discovery, WebSocket/HELLO, and SAFE command qualification events. CLEAR VIEW does not delete the backend log.
+        </p>
+        <pre id="lc-diagnostic-log" class="load-control-diagnostic-log">No real actuator diagnostic events yet.</pre>
         <div class="load-control-actions">
-          <button id="lc-enable" type="button">ENABLE MOCK CONTROL</button>
-          <button id="lc-disable" type="button">DISABLE MOCK CONTROL</button>
-          <button id="lc-refresh-evidence" type="button">REFRESH MOCK EVIDENCE</button>
+          <button id="lc-copy-diagnostic-log" type="button">COPY LOG</button>
+          <button id="lc-clear-diagnostic-view" type="button">CLEAR VIEW</button>
         </div>
-        <div id="lc-message" class="load-control-status-text" aria-live="polite"></div>
-        <pre id="lc-evidence" class="load-control-evidence">No mock control evidence loaded.</pre>
+        <div id="lc-diagnostic-status" class="load-control-status-text" aria-live="polite"></div>
       </section>
+
+      <details id="lc-development-tools" class="load-control-development-tools">
+        <summary>DEVELOPMENT / MOCK CONTROL</summary>
+        <p class="load-control-section-note">
+          These controls belong to the deterministic Stage-1 mock path. They do not control the real LAN actuator.
+        </p>
+
+        <section class="load-control-state-grid" aria-label="Mock load control state">
+          <div><span>Mock control</span><strong id="lc-mode">DISABLED</strong></div>
+          <div><span>Mock session</span><strong id="lc-session">UNBOUND</strong></div>
+          <div><span>Safe state</span><strong id="lc-safe">SAFE_UNCONFIRMED</strong></div>
+          <div><span>Trip</span><strong id="lc-trip">—</strong></div>
+          <div><span>Source cycle</span><strong id="lc-cycle">—</strong></div>
+          <div><span>Evidence</span><strong id="lc-evidence-health">—</strong></div>
+        </section>
+
+        <section class="load-control-section">
+          <div class="load-control-section-header"><h3>Mock binding</h3><span>DISABLED only</span></div>
+          <div class="load-control-form-grid">
+            <label>Emonio control source
+              <input id="lc-source" type="text" autocomplete="off" spellcheck="false" placeholder="emonio device id">
+            </label>
+            <label>Mock actuator
+              <select id="lc-actuator"></select>
+            </label>
+          </div>
+          <div class="load-control-actions"><button id="lc-save-binding" type="button">SAVE MOCK BINDING</button></div>
+        </section>
+
+        <section class="load-control-section">
+          <div class="load-control-section-header"><h3>Mock active-power target and limits</h3><span>W</span></div>
+          <div class="load-control-form-grid">
+            <label>Import reserve per phase
+              <input id="lc-reserve" type="number" min="0" step="any" placeholder="required">
+            </label>
+            <label>Phase A operator max
+              <input id="lc-limit-a" type="number" min="0" step="any" placeholder="required">
+            </label>
+            <label>Phase B operator max
+              <input id="lc-limit-b" type="number" min="0" step="any" placeholder="required">
+            </label>
+            <label>Phase C operator max
+              <input id="lc-limit-c" type="number" min="0" step="any" placeholder="required">
+            </label>
+          </div>
+          <div class="load-control-actions"><button id="lc-save-limits" type="button">SAVE MOCK TARGET / LIMITS</button></div>
+        </section>
+
+        <section class="load-control-section">
+          <div class="load-control-section-header"><h3>Mock volatile timing qualification</h3><span>not persisted</span></div>
+          <div class="load-control-form-grid">
+            <label>Maximum sample age / s
+              <input id="lc-sample-age-limit" type="number" min="0" step="any" placeholder="required each start">
+            </label>
+            <label>ACK timeout / s
+              <input id="lc-ack-timeout" type="number" min="0" step="any" placeholder="required each start">
+            </label>
+          </div>
+          <div class="load-control-actions"><button id="lc-save-timing" type="button">SET MOCK SESSION TIMING</button></div>
+        </section>
+
+        <section class="load-control-section">
+          <div class="load-control-section-header"><h3>Mock supervisor evidence</h3><span id="lc-session-id">—</span></div>
+          <div class="load-control-value-grid">
+            <div><span>Acknowledged load</span><strong id="lc-ack-p">—</strong></div>
+            <div><span>Outstanding command</span><strong id="lc-outstanding">—</strong></div>
+            <div><span>Actuator boot</span><strong id="lc-boot">—</strong></div>
+            <div><span>Sample age</span><strong id="lc-sample-age">—</strong></div>
+          </div>
+          <div class="load-control-actions">
+            <button id="lc-enable" type="button">ENABLE MOCK CONTROL</button>
+            <button id="lc-disable" type="button">DISABLE MOCK CONTROL</button>
+            <button id="lc-refresh-evidence" type="button">REFRESH MOCK EVIDENCE</button>
+          </div>
+          <div id="lc-message" class="load-control-status-text" aria-live="polite"></div>
+          <pre id="lc-evidence" class="load-control-evidence">No mock control evidence loaded.</pre>
+        </section>
+      </details>
     </details>
   `;
   document.body.append(panel);
@@ -338,13 +361,7 @@ function renderSelectedActuator() {
     target.textContent = "No actuator selected.";
     return;
   }
-  const capabilities = Array.isArray(item.capabilities) ? item.capabilities.join(", ") : "—";
-  target.textContent = [
-    `Node: ${item.node_id}`,
-    `WebSocket: ${item.location}`,
-    `${item.device_class} · ${capabilities}`,
-    `Advertised test limit: ${powerTriplet(item.p_max)}`,
-  ].join("\n");
+  target.textContent = `${item.node_id} · ${item.device_class}`;
 }
 
 function updateQualifyButton() {
@@ -396,10 +413,10 @@ function renderLanQualification(status) {
 
   element("lc-ws-state").textContent = connected ? "CONNECTED" : "DISCONNECTED";
   element("lc-hello-state").textContent = qualified
-    ? "QUALIFIED"
+    ? "READY"
     : status?.state === "REJECTED"
       ? "REJECTED"
-      : "NOT QUALIFIED";
+      : "NOT READY";
 
   const nodeId = status?.node_id || status?.selected_node_id || "";
   const bootId = status?.boot_id || "";
@@ -422,7 +439,7 @@ function renderLanQualification(status) {
 
   element("lc-qualification-disconnect").disabled = !connected;
   element("load-control-summary-session").textContent = status?.state || "IDLE";
-  element("load-control-summary-safe").textContent = qualified ? "HELLO QUALIFIED" : "HELLO NOT QUALIFIED";
+  element("load-control-summary-safe").textContent = qualified ? "DEVICE READY" : "DEVICE NOT READY";
   updateQualifyButton();
   updateSafeButtons();
 }
@@ -502,9 +519,9 @@ async function selectSafeSource() {
   const button = element("lc-safe-select-source");
   try {
     if (button) button.disabled = true;
-    setSafeMessage("Selecting volatile Emonio source. No COMMAND is sent.");
+    setSafeMessage("Selecting Emonio source. No load request is sent.");
     renderSafeStatus(await selectSafeTestSource(deviceId));
-    setSafeMessage("Emonio source selected for this Viewer session. No COMMAND was sent.");
+    setSafeMessage("Emonio source selected.");
   } catch (error) {
     setSafeMessage(error.message, true);
     await refreshSafeTestStatus().catch(() => {});
@@ -518,13 +535,13 @@ async function runSafeTest() {
   const button = element("lc-safe-run");
   try {
     if (button) button.disabled = true;
-    setSafeMessage("Waiting for the first valid post-request Emonio sample, then sending one SAFE 0 W COMMAND...");
+    setSafeMessage("Waiting for a fresh Emonio sample, then setting SAFE 0 W...");
     const status = await runSafeCommandTest();
     renderSafeStatus(status);
     if (status?.state === "PASSED") {
-      setSafeMessage(`SAFE test PASSED. ACK ${status.ack_result || "—"}; sequence ${status.command_sequence ?? "—"}.`);
+      setSafeMessage("SAFE 0 W confirmed.");
     } else {
-      setSafeMessage(`SAFE test ${status?.state || "REJECTED"}: ${status?.rejection_reason || "unknown reason"}.`, true);
+      setSafeMessage(`SAFE 0 W ${status?.state || "REJECTED"}: ${status?.rejection_reason || "unknown reason"}.`, true);
     }
   } catch (error) {
     setSafeMessage(error.message, true);
@@ -744,7 +761,7 @@ async function runLanQualification(nodeId) {
   const errorTarget = element("lc-qualification-error");
   try {
     if (button) button.disabled = true;
-    errorTarget.textContent = "Opening WebSocket and waiting for HELLO...";
+    errorTarget.textContent = "Connecting and checking actuator...";
     errorTarget.dataset.error = "false";
     renderLanQualification(await connectLanQualification(nodeId));
     await refreshSafeTestStatus().catch(() => {});
