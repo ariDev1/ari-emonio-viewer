@@ -10,12 +10,12 @@ def test_stage3b_frontend_exposes_only_fixed_1w_simulated_action() -> None:
     assert "runSimulatedCommandTest" in api
 
     assert 'id="lc-simulated-run"' in ui
-    assert "SEND 1 W SIMULATED TEST" in ui
-    assert "PHASE A" in ui
+    assert "TEST 1 W — PHASE A" in ui
     assert "NO PHYSICAL OUTPUT" in ui
     assert "ZERO RESET REQUIRED" in ui
     assert "safe_reset_required" in ui
     assert "runSimulatedCommandTest" in ui
+    assert "ENGINEERING DETAILS" in ui
 
 
 def test_stage3b_frontend_does_not_offer_operator_wattage_or_phase_inputs() -> None:
