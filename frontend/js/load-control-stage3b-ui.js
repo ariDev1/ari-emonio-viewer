@@ -21,6 +21,14 @@ function element(id) {
 }
 
 
+function setStatusTone(id, tone) {
+  const target = element(id);
+  const card = target?.parentElement;
+  if (!card) return;
+  card.dataset.tone = tone;
+}
+
+
 function createUi() {
   if (created) return true;
   const slot = element("lc-simulated-operator-slot");
@@ -91,14 +99,39 @@ function updateButton() {
 function render(status) {
   simulatedStatus = status || null;
   if (!createUi()) return;
-  element("lc-simulated-state").textContent = status?.state || "IDLE";
+
+  const simulatedState = status?.state || "IDLE";
+  const active = ACTIVE_STATES.has(simulatedState);
+  const rejected = simulatedState === "REJECTED";
+  const resetRequired = Boolean(status?.safe_reset_required);
+
+  element("lc-simulated-state").textContent = simulatedState;
   element("lc-simulated-request").textContent = powerTriplet(status?.fixed_request);
-  element("lc-simulated-reset").textContent = status?.safe_reset_required
+  element("lc-simulated-reset").textContent = resetRequired
     ? "ZERO RESET REQUIRED"
     : "NOT REQUIRED";
   element("lc-simulated-sequence").textContent = status?.command_sequence ?? "—";
   element("lc-simulated-ack").textContent = status?.ack_result || "—";
   element("lc-simulated-rejection").textContent = status?.rejection_reason || "—";
+
+  setStatusTone(
+    "lc-simulated-state",
+    rejected
+      ? "error"
+      : resetRequired || active
+        ? "warn"
+        : simulatedState === "PASSED"
+          ? "ok"
+          : "idle",
+  );
+  setStatusTone(
+    "lc-simulated-reset",
+    resetRequired
+      ? "warn"
+      : simulatedState === "PASSED"
+        ? "ok"
+        : "idle",
+  );
   updateButton();
 }
 
