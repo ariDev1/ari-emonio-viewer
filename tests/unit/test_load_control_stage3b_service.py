@@ -7,7 +7,8 @@ import pytest
 from emonio_viewer.config.model import DeviceConfig, RecordingConfig, RuntimeConfig, ViewerConfig
 from emonio_viewer.load_control.model import ThreePhasePower
 from emonio_viewer.load_control.protocol import AckFrame, HelloFrame
-from emonio_viewer.load_control.stage3a import Stage3AError, Stage3ASafeCommandService, Stage3AState
+from emonio_viewer.load_control.stage3a import Stage3AError, Stage3AState
+from emonio_viewer.load_control.stage3b import Stage3BExplicitCommandService
 from emonio_viewer.measurement.model import SampleQuality
 from emonio_viewer.runtime.events import RuntimeEventBus
 
@@ -115,9 +116,9 @@ def _ack(command, applied_p: ThreePhasePower) -> AckFrame:
     )
 
 
-def _service(bus: RuntimeEventBus, channel: FakeQualifiedChannel) -> Stage3ASafeCommandService:
+def _service(bus: RuntimeEventBus, channel: FakeQualifiedChannel) -> Stage3BExplicitCommandService:
     clock = FakeClock()
-    return Stage3ASafeCommandService(
+    return Stage3BExplicitCommandService(
         bus,
         _config(),
         channel,
