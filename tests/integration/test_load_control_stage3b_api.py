@@ -8,6 +8,7 @@ from emonio_viewer.load_control.model import ThreePhasePower
 from emonio_viewer.load_control.stage3a import Stage3AError, Stage3AState, Stage3AStatus
 from emonio_viewer.server.keys import LOAD_CONTROL_STAGE3A_SERVICE_KEY
 from emonio_viewer.server.load_control_api import register_load_control_routes
+from emonio_viewer.server.load_control_stage3b_api import register_load_control_stage3b_routes
 
 
 ONE_A = ThreePhasePower(1.0, 0.0, 0.0)
@@ -76,6 +77,7 @@ def _app(service=None):
     if service is not None:
         app[LOAD_CONTROL_STAGE3A_SERVICE_KEY] = service
     register_load_control_routes(app)
+    register_load_control_stage3b_routes(app)
     return app
 
 
