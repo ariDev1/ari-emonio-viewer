@@ -189,7 +189,7 @@ function createUi() {
       <span>Stage 4C · automatic physical control</span>
     </div>
     <p class="load-control-section-note load-control-zero-export-boundary">
-      Automatic physical PWM control is active when enabled. Canonical signed P is the only feedback input. Target is fixed at 0 W. No watts-to-duty calibration, operator-selected duty increment, Q or PF control, PID, or automatic reconnect is used. The qualified PWM range is OFF 0 % and active 25–75 %. A control fault requests one explicit OFF. If OFF cannot be confirmed, the state is SAFE_UNCONFIRMED.
+      Automatic physical PWM control is active when enabled. Canonical signed P is the only feedback input. Target is fixed at 0 W. No watts-to-duty calibration is used. No operator-selected duty increment is used. No Q or PF control is used. No PID is active. No automatic reconnect is used. The qualified PWM range is OFF 0 % and active 25–75 %. A control fault requests one explicit OFF. If OFF cannot be confirmed, the state is SAFE_UNCONFIRMED.
     </p>
     <div class="load-control-zero-export-config">
       <label>Emonio source
