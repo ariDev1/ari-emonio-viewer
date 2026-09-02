@@ -138,6 +138,9 @@ class Stage4BCharacterizationService:
         self._stop_sentinel = object()
         self._started = False
         self._active = False
+        self._abort_requested = False
+        self._session_done = asyncio.Event()
+        self._session_done.set()
         self._latest_cycle_by_source: dict[str, int] = {}
 
         self._state = CharacterizationState.IDLE
@@ -200,6 +203,10 @@ class Stage4BCharacterizationService:
             raise Stage4BCharacterizationError("SAMPLE_INVALID")
         return result
 
+    def _check_abort_requested(self) -> None:
+        if self._abort_requested:
+            raise Stage4BCharacterizationError("CHARACTERIZATION_ABORTED")
+
     def _reset_session(
         self,
         *,
@@ -244,7 +251,8 @@ class Stage4BCharacterizationService:
 
     async def close(self) -> None:
         if self._active:
-            raise Stage4BCharacterizationError("CHARACTERIZATION_ACTIVE")
+            self._abort_requested = True
+            await self._session_done.wait()
         if self._started:
             self._queue_private(self._stop_sentinel)
             if self._consumer_task is not None:
@@ -302,14 +310,18 @@ class Stage4BCharacterizationService:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + 2.0 * float(source.poll_interval_s)
         while True:
+            self._check_abort_requested()
             remaining = deadline - loop.time()
             if remaining <= 0.0:
                 raise Stage4BCharacterizationError("SAMPLE_STALE")
+            wait_s = min(remaining, _EVENT_QUEUE_WAIT_S)
             try:
-                event = await asyncio.wait_for(self._runtime_queue.get(), remaining)
-            except asyncio.TimeoutError as exc:
-                raise Stage4BCharacterizationError("SAMPLE_STALE") from exc
+                event = await asyncio.wait_for(self._runtime_queue.get(), wait_s)
+            except asyncio.TimeoutError:
+                self._check_abort_requested()
+                continue
 
+            self._check_abort_requested()
             if isinstance(event, DiagnosticEvent):
                 if (
                     event.device_id == source.id
@@ -388,6 +400,7 @@ class Stage4BCharacterizationService:
         self._measured_cycles_observed = 0
 
         for index in range(SETTLING_CYCLES_PER_POINT + MEASURED_CYCLES_PER_POINT):
+            self._check_abort_requested()
             self._state = (
                 CharacterizationState.SETTLING
                 if index < SETTLING_CYCLES_PER_POINT
@@ -473,6 +486,8 @@ class Stage4BCharacterizationService:
             phase=phase,
             point_count=point_count,
         )
+        self._abort_requested = False
+        self._session_done.clear()
         self._active = True
         reserved = False
         operation_error: str | None = None
@@ -486,6 +501,7 @@ class Stage4BCharacterizationService:
                 raise Stage4BCharacterizationError(str(exc)) from exc
             reserved = True
             self._drain_runtime_queue()
+            self._check_abort_requested()
 
             if mode == "MANUAL_CAPTURE":
                 self._state = CharacterizationState.CAPTURING
@@ -500,6 +516,7 @@ class Stage4BCharacterizationService:
                 self._points.append(point)
             else:
                 for point_index, duty in enumerate(sweep, start=1):
+                    self._check_abort_requested()
                     self._state = CharacterizationState.SWEEPING
                     self._point_index = point_index
                     self._current_requested_duty = duty
@@ -510,6 +527,7 @@ class Stage4BCharacterizationService:
                         )
                     except Stage3AError as exc:
                         raise Stage4BCharacterizationError(str(exc)) from exc
+                    self._check_abort_requested()
                     applied = self._qualified_active_pwm(
                         applied,
                         expected_requested=duty,
@@ -547,7 +565,9 @@ class Stage4BCharacterizationService:
                 self._state = CharacterizationState.ABORTED
                 self._last_error = operation_error or "CHARACTERIZATION_NOT_STARTED"
             self._active = False
+            self._abort_requested = False
             self._current_requested_duty = None
+            self._session_done.set()
 
         return self.status()
 
