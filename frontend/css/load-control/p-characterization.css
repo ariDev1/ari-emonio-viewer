@@ -1,0 +1,101 @@
+.load-control-p-characterization {
+  display: grid;
+  gap: 12px;
+}
+
+.load-control-p-characterization-boundary {
+  margin: 0;
+}
+
+.load-control-p-characterization-config {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.load-control-p-characterization-config label {
+  display: grid;
+  gap: 5px;
+}
+
+.load-control-p-characterization-config input,
+.load-control-p-characterization-config select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.load-control-p-characterization-actions {
+  flex-wrap: wrap;
+}
+
+.load-control-p-characterization-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.load-control-p-characterization-status > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.load-control-p-characterization-status span {
+  font-size: 0.78rem;
+  opacity: 0.76;
+}
+
+.load-control-p-characterization-status strong {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.load-control-p-characterization-results {
+  min-width: 0;
+}
+
+.load-control-p-characterization-empty {
+  opacity: 0.72;
+}
+
+.load-control-p-characterization-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.load-control-p-characterization-table {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.load-control-p-characterization-table th,
+.load-control-p-characterization-table td {
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid currentColor;
+}
+
+.load-control-p-characterization-table th {
+  font-size: 0.76rem;
+  opacity: 0.78;
+  white-space: nowrap;
+}
+
+.load-control-p-characterization-table td {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.load-control-p-characterization[data-state="SAFE_UNCONFIRMED"] #lc-pchar-safe,
+.load-control-p-characterization[data-state="ABORTED"] #lc-pchar-error {
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .load-control-p-characterization-config {
+    grid-template-columns: 1fr;
+  }
+}
