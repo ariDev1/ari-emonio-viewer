@@ -244,7 +244,7 @@ def test_manual_pwm_rejects_ack_identity_mismatch_and_does_not_retry() -> None:
                 sequence=command.sequence + 1,
                 result="APPLIED",
                 requested_duty_percent=25.0,
-                actual_duty_percent=25.0,
+                actual_duty_percent=100.0 * 163 / 653,
                 compare_ticks=163,
                 period_ticks=653,
             )
