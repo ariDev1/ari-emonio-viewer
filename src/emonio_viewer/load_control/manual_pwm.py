@@ -62,6 +62,27 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
         self._manual_pwm_actual_duty: float | None = None
         self._manual_pwm_compare_ticks: int | None = None
         self._manual_pwm_period_ticks: int | None = None
+        self._pwm_owner: str | None = None
+
+    @property
+    def pwm_owner(self) -> str | None:
+        return self._pwm_owner
+
+    def reserve_pwm_owner(self, owner: str) -> None:
+        if not isinstance(owner, str) or not owner.strip():
+            raise Stage3AError("PWM_OWNER_INVALID")
+        if self._active:
+            raise Stage3AError("CONTROL_COMMAND_ACTIVE")
+        if self._pwm_owner is not None:
+            raise Stage3AError("PWM_OWNER_RESERVED")
+        self._pwm_owner = owner
+
+    def release_pwm_owner(self, owner: str) -> None:
+        if self._pwm_owner != owner:
+            raise Stage3AError("PWM_OWNER_MISMATCH")
+        if self._active:
+            raise Stage3AError("CONTROL_COMMAND_ACTIVE")
+        self._pwm_owner = None
 
     @staticmethod
     def _valid_manual_duty(value: float) -> bool:
@@ -98,13 +119,13 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
             expose_result = False
         elif self._manual_pwm_boot_id is not None and self._manual_pwm_boot_id != hello.boot_id:
             state = ManualPwmState.READY
-            admissible = not self._active
+            admissible = not self._active and self._pwm_owner is None
             expose_result = False
         else:
             state = self._manual_pwm_state
             if state in {ManualPwmState.IDLE, ManualPwmState.DISCONNECTED, ManualPwmState.UNSUPPORTED}:
                 state = ManualPwmState.READY
-            admissible = not self._active
+            admissible = not self._active and self._pwm_owner is None
             expose_result = True
 
         return ManualPwmStatus(
@@ -234,9 +255,14 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
             )
             return self.manual_pwm_status()
 
-    async def run_manual_pwm(self, duty_percent: float) -> ManualPwmStatus:
+    async def _run_pwm(self, duty_percent: float, *, owner: str | None) -> ManualPwmStatus:
         if not self._valid_manual_duty(duty_percent):
             raise Stage3AError("PWM_DUTY_INVALID")
+        if owner is None:
+            if self._pwm_owner is not None:
+                raise Stage3AError("PWM_OWNER_RESERVED")
+        elif self._pwm_owner != owner:
+            raise Stage3AError("PWM_OWNER_MISMATCH")
         if self._active:
             raise Stage3AError("CONTROL_COMMAND_ACTIVE")
 
@@ -306,7 +332,14 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
 
         return self.manual_pwm_status()
 
+    async def run_manual_pwm(self, duty_percent: float) -> ManualPwmStatus:
+        return await self._run_pwm(duty_percent, owner=None)
+
+    async def run_reserved_pwm(self, duty_percent: float, *, owner: str) -> ManualPwmStatus:
+        return await self._run_pwm(duty_percent, owner=owner)
+
     async def close(self) -> None:
         await super().close()
         self._manual_pwm_state = ManualPwmState.IDLE
+        self._pwm_owner = None
         self._clear_manual_result()
