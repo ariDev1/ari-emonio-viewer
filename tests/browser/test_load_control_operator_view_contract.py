@@ -37,3 +37,29 @@ def test_stage3b_panel_defaults_to_simple_simulated_action() -> None:
     assert ui.index("COMMAND sequence") > engineering_index
     assert ui.index("ACK result") > engineering_index
     assert ui.index("Rejection") > engineering_index
+
+
+def test_operator_view_uses_semantic_readiness_colors_for_real_state_only() -> None:
+    ui = Path("frontend/js/load-control-ui.js").read_text(encoding="utf-8")
+    simulated_ui = Path("frontend/js/load-control-stage3b-ui.js").read_text(encoding="utf-8")
+    css = Path("frontend/css/load-control/load-control.css").read_text(encoding="utf-8")
+
+    assert 'id="lc-readiness"' in ui
+    assert 'id="lc-readiness-state"' in ui
+    assert "TEST SETUP" in ui
+    assert "function setStatusTone" in ui
+    assert "function renderOperatorReadiness" in ui
+
+    assert 'setStatusTone("lc-ws-state"' in ui
+    assert 'setStatusTone("lc-hello-state"' in ui
+    assert 'setStatusTone("lc-safe-source-state"' in ui
+    assert 'setStatusTone("lc-safe-state"' in ui
+
+    assert "function setStatusTone" in simulated_ui
+    assert 'setStatusTone("lc-simulated-state"' in simulated_ui
+    assert 'setStatusTone("lc-simulated-reset"' in simulated_ui
+
+    assert '[data-tone="ok"]' in css
+    assert '[data-tone="warn"]' in css
+    assert '[data-tone="error"]' in css
+    assert ".load-control-readiness" in css
