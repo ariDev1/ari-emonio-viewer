@@ -3,6 +3,7 @@ from aiohttp import web
 from emonio_viewer.config.model import RuntimeConfig
 from emonio_viewer.device_evidence.service import CtConfigurationService, ModbusDeviceEvidenceService
 from emonio_viewer.lifecycle.service import DeviceLifecycleService
+from emonio_viewer.load_control.automatic_observation import PControlObserverService
 from emonio_viewer.load_control.lan_discovery import LanActuatorDiscoveryService
 from emonio_viewer.load_control.qualification import LoadControlQualificationService
 from emonio_viewer.load_control.service import LoadControlService
@@ -31,4 +32,8 @@ LOAD_CONTROL_QUALIFICATION_SERVICE_KEY = web.AppKey(
 LOAD_CONTROL_STAGE3A_SERVICE_KEY = web.AppKey(
     "load_control_stage3a_service",
     Stage3ASafeCommandService,
+)
+P_CONTROL_OBSERVER_SERVICE_KEY = web.AppKey(
+    "p_control_observer_service",
+    PControlObserverService,
 )
