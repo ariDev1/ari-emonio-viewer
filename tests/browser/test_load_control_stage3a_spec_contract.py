@@ -6,7 +6,7 @@ def test_stage3a_frontend_uses_approved_operator_wording_and_routes() -> None:
     api = Path("frontend/js/load-control-api.js").read_text(encoding="utf-8")
 
     assert "NONZERO REAL CONTROL DISABLED" in ui
-    assert "SEND SAFE TEST COMMAND" in ui
+    assert "SET SAFE 0 W" in ui
     assert "P request A/B/C = 0 W" in ui
     assert "Q request A/B/C = 0 var" in ui
     assert "control_enabled=false" in ui
