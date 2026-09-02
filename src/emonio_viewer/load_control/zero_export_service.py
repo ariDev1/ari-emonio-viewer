@@ -472,18 +472,20 @@ class Stage4CZeroExportControllerService:
                     _EVENT_QUEUE_WAIT_S,
                 )
             except Empty:
-                if self._enabled and self._freshness_deadline_ns is not None:
-                    if self._monotonic_ns() > self._freshness_deadline_ns:
-                        await self._finish_safe(
-                            reason="SAMPLE_STALE",
-                            blocked_state=ZeroExportControllerState.BLOCKED_SAFE,
-                        )
+                async with self._operation_lock:
+                    if self._enabled and self._freshness_deadline_ns is not None:
+                        if self._monotonic_ns() > self._freshness_deadline_ns:
+                            await self._finish_safe(
+                                reason="SAMPLE_STALE",
+                                blocked_state=ZeroExportControllerState.BLOCKED_SAFE,
+                            )
                 continue
             if item is self._stop_sentinel:
                 return
-            if not self._enabled or self._settings is None:
-                continue
-            await self._handle_event(item)
+            async with self._operation_lock:
+                if not self._enabled or self._settings is None:
+                    continue
+                await self._handle_event(item)
 
     async def _handle_event(self, event: RuntimeEvent) -> None:
         assert self._settings is not None
