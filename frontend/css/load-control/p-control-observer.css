@@ -1,52 +1,79 @@
 .load-control-p-observer {
   display: grid;
-  gap: 12px;
+  gap: 8px;
+  padding: 10px 12px;
 }
 
 .load-control-p-observer-boundary {
   margin: 0;
+  font-size: 0.70rem;
+  line-height: 1.28;
 }
 
 .load-control-p-observer-config {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: 7px;
 }
 
 .load-control-p-observer-config label {
   display: grid;
-  gap: 5px;
+  gap: 3px;
+  color: var(--muted, #9ca6b5);
+  font-size: 0.72rem;
 }
 
 .load-control-p-observer-config input,
 .load-control-p-observer-config select {
   width: 100%;
+  min-width: 0;
+  min-height: 30px;
   box-sizing: border-box;
+  padding: 4px 6px;
+  color: inherit;
+  border: 1px solid var(--line, #313845);
+  background: var(--input, #0d1117);
+  font-size: 0.74rem;
 }
 
 .load-control-p-observer-actions {
   flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 0;
+}
+
+.load-control-p-observer-actions button {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 0.68rem;
 }
 
 .load-control-p-observer-status {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: 6px;
 }
 
 .load-control-p-observer-status > div {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.018);
 }
 
 .load-control-p-observer-status span {
-  font-size: 0.78rem;
-  opacity: 0.76;
+  font-size: 0.66rem;
+  line-height: 1.15;
+  opacity: 0.78;
 }
 
 .load-control-p-observer-status strong {
   overflow-wrap: anywhere;
+  font-size: 0.78rem;
+  line-height: 1.15;
 }
 
 .load-control-p-observer-proposal {
