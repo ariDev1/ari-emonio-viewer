@@ -35,9 +35,9 @@ def test_stage3b_panel_defaults_to_simple_simulated_action() -> None:
     assert '<details class="load-control-engineering-inline" open>' not in ui
 
     engineering_index = ui.index("ENGINEERING DETAILS")
-    assert ui.index("COMMAND sequence") > engineering_index
-    assert ui.index("ACK result") > engineering_index
-    assert ui.index("Rejection") > engineering_index
+    assert ui.index("COMMAND sequence", engineering_index) > engineering_index
+    assert ui.index("ACK result", engineering_index) > engineering_index
+    assert ui.index("Rejection", engineering_index) > engineering_index
 
 
 def test_operator_view_uses_semantic_readiness_colors_for_real_state_only() -> None:
