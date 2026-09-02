@@ -4,6 +4,7 @@ from aiohttp import web
 
 from emonio_viewer import __version__
 from emonio_viewer.config.model import RuntimeConfig
+from emonio_viewer.load_control.automatic_observation import PControlObserverService
 from emonio_viewer.load_control.lan_discovery import LanActuatorDiscoveryService
 from emonio_viewer.load_control.manual_pwm import Stage3BManualPwmCommandService
 from emonio_viewer.load_control.qualification import LoadControlQualificationService
@@ -25,6 +26,7 @@ from .keys import (
     LOAD_CONTROL_SERVICE_KEY,
     LOAD_CONTROL_STAGE3A_SERVICE_KEY,
     MODBUS_DEVICE_EVIDENCE_SERVICE_KEY,
+    P_CONTROL_OBSERVER_SERVICE_KEY,
     RECORDING_MANAGER_KEY,
     RUNTIME_CONFIG_KEY,
     RUNTIME_STORE_KEY,
@@ -32,6 +34,7 @@ from .keys import (
 )
 from .load_control_api import register_load_control_routes
 from .load_control_stage3b_api import register_load_control_stage3b_routes
+from .load_control_stage4a_api import register_load_control_stage4a_routes
 from .websocket import websocket_measurements
 
 
@@ -52,6 +55,7 @@ def create_app(
     qualification_service: LoadControlQualificationService | None = None,
     qualified_channel: QualifiedActuatorChannel | None = None,
     stage3a_service: Stage3ASafeCommandService | None = None,
+    p_control_observer_service: PControlObserverService | None = None,
 ) -> web.Application:
     app = web.Application(client_max_size=64 * 1024)
     app[RUNTIME_CONFIG_KEY] = config
@@ -101,11 +105,35 @@ def create_app(
         )
     app[LOAD_CONTROL_STAGE3A_SERVICE_KEY] = stage3a_service
 
+    if p_control_observer_service is None:
+        def qualification_status_provider():
+            return qualification_service.status()
+
+        def manual_pwm_status_provider():
+            getter = getattr(stage3a_service, "manual_pwm_status", None)
+            if not callable(getter):
+                return None
+            return getter()
+
+        p_control_observer_service = PControlObserverService(
+            bus,
+            config,
+            qualification_status=qualification_status_provider,
+            manual_pwm_status=manual_pwm_status_provider,
+        )
+    app[P_CONTROL_OBSERVER_SERVICE_KEY] = p_control_observer_service
+
     async def start_load_control(_app: web.Application) -> None:
         await load_control_service.start()
 
     async def start_stage3a(_app: web.Application) -> None:
         await stage3a_service.start()
+
+    async def start_p_control_observer(_app: web.Application) -> None:
+        await p_control_observer_service.start()
+
+    async def stop_p_control_observer(_app: web.Application) -> None:
+        await p_control_observer_service.close()
 
     async def stop_stage3a(_app: web.Application) -> None:
         await stage3a_service.close()
@@ -118,6 +146,8 @@ def create_app(
 
     app.on_startup.append(start_load_control)
     app.on_startup.append(start_stage3a)
+    app.on_startup.append(start_p_control_observer)
+    app.on_cleanup.append(stop_p_control_observer)
     app.on_cleanup.append(stop_stage3a)
     app.on_cleanup.append(stop_load_control_qualification)
     app.on_cleanup.append(stop_load_control)
@@ -159,4 +189,5 @@ def create_app(
     register_api_routes(app)
     register_load_control_routes(app)
     register_load_control_stage3b_routes(app)
+    register_load_control_stage4a_routes(app)
     return app
