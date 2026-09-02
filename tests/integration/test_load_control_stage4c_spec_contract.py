@@ -219,11 +219,11 @@ def test_stage4c_frontend_has_no_manual_pwm_hook_or_operator_duty_increment() ->
     for required in (
         "Canonical signed P is the only feedback input.",
         "Target is fixed at 0 W.",
-        "No watts-to-duty calibration.",
-        "No Q/PF control.",
-        "No PID.",
-        "No automatic reconnect.",
-        "no operator-selected duty increment",
+        "No watts-to-duty calibration is used.",
+        "No operator-selected duty increment is used.",
+        "No Q or PF control is used.",
+        "No PID is active.",
+        "No automatic reconnect is used.",
     ):
         assert required in ui_source
 
