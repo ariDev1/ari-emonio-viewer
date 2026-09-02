@@ -29,3 +29,21 @@ export function runSimulatedCommandTest() {
     body: "{}",
   });
 }
+
+export function getManualPwmStatus() {
+  return requestJson("/api/v1/load-control/lan-pwm/status");
+}
+
+export function applyManualPwmDuty(dutyPercent) {
+  return requestJson("/api/v1/load-control/lan-pwm/apply", {
+    method: "POST",
+    body: JSON.stringify({ duty_percent: dutyPercent }),
+  });
+}
+
+export function turnManualPwmOff() {
+  return requestJson("/api/v1/load-control/lan-pwm/off", {
+    method: "POST",
+    body: "{}",
+  });
+}
