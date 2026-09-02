@@ -72,6 +72,7 @@
 }
 
 .load-control-section,
+.load-control-engineering-tools,
 .load-control-development-tools {
   margin-top: 10px;
   border: 1px solid var(--line, #313845);
@@ -139,7 +140,7 @@
 }
 
 .load-control-real-actuator-summary {
-  min-height: 52px;
+  min-height: 1.2em;
   margin-top: 8px;
   padding: 9px 10px;
   white-space: pre-wrap;
@@ -158,6 +159,10 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin: 12px 0;
+}
+
+.load-control-operator-status {
+  grid-template-columns: 1fr;
 }
 
 .load-control-primary-status > div,
@@ -211,7 +216,9 @@
   font-size: 0.75rem;
 }
 
-.load-control-safe-test-section {
+.load-control-safe-test-section,
+.load-control-safe-action-section,
+.load-control-simulated-test-section {
   border-style: solid;
 }
 
@@ -225,7 +232,8 @@
   font-size: 0.75rem;
 }
 
-#lc-safe-run {
+#lc-safe-run,
+#lc-simulated-run {
   font-weight: 800;
   letter-spacing: 0.03em;
 }
@@ -251,13 +259,15 @@
   max-height: 220px;
 }
 
+.load-control-engineering-tools,
 .load-control-development-tools {
   padding: 0;
 }
 
-.load-control-development-tools > summary {
+.load-control-engineering-tools > summary,
+.load-control-development-tools > summary,
+.load-control-engineering-inline > summary {
   cursor: pointer;
-  padding: 11px 12px;
   color: var(--muted, #9ca6b5);
   font-family: var(--mono);
   font-size: 0.72rem;
@@ -266,21 +276,48 @@
   user-select: none;
 }
 
+.load-control-engineering-tools > summary,
+.load-control-development-tools > summary {
+  padding: 11px 12px;
+}
+
+.load-control-engineering-tools[open],
 .load-control-development-tools[open] {
   padding: 0 12px 12px;
 }
 
+.load-control-engineering-tools[open] > summary,
 .load-control-development-tools[open] > summary {
   margin: 0 -12px;
   border-bottom: 1px solid var(--line, #313845);
 }
 
+.load-control-engineering-tools > .load-control-section-note,
 .load-control-development-tools > .load-control-section-note {
   margin: 10px 0 0;
 }
 
+.load-control-engineering-tools .load-control-section,
 .load-control-development-tools .load-control-section {
   background: var(--input, #0d1117);
+}
+
+.load-control-engineering-inline {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line, #313845);
+}
+
+.load-control-engineering-inline > summary {
+  padding: 2px 0;
+}
+
+.load-control-engineering-inline[open] > summary {
+  margin-bottom: 8px;
+}
+
+#lc-simulated-operator-slot:empty {
+  display: none;
 }
 
 @media (max-width: 760px) {
