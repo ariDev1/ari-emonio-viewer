@@ -1,0 +1,72 @@
+.load-control-p-observer {
+  display: grid;
+  gap: 12px;
+}
+
+.load-control-p-observer-boundary {
+  margin: 0;
+}
+
+.load-control-p-observer-config {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.load-control-p-observer-config label {
+  display: grid;
+  gap: 5px;
+}
+
+.load-control-p-observer-config input,
+.load-control-p-observer-config select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.load-control-p-observer-actions {
+  flex-wrap: wrap;
+}
+
+.load-control-p-observer-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.load-control-p-observer-status > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.load-control-p-observer-status span {
+  font-size: 0.78rem;
+  opacity: 0.76;
+}
+
+.load-control-p-observer-status strong {
+  overflow-wrap: anywhere;
+}
+
+.load-control-p-observer-proposal {
+  grid-column: span 2;
+}
+
+.load-control-p-observer[data-state="BLOCKED"] #lc-pobs-state,
+.load-control-p-observer[data-state="BLOCKED"] #lc-pobs-reason {
+  font-weight: 700;
+}
+
+.load-control-p-observer[data-state="TARGET_BAND"] #lc-pobs-proposed,
+.load-control-p-observer[data-state="OBSERVING"] #lc-pobs-proposed,
+.load-control-p-observer[data-state="LIMIT_LOW"] #lc-pobs-proposed,
+.load-control-p-observer[data-state="LIMIT_HIGH"] #lc-pobs-proposed {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 720px) {
+  .load-control-p-observer-proposal {
+    grid-column: auto;
+  }
+}
