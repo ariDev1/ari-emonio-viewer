@@ -16,10 +16,16 @@ from .protocol import (
     decode_frame,
     encode_frame,
 )
+from .pwm_protocol import (
+    PwmAckFrame,
+    PwmCommandFrame,
+    decode_pwm_frame,
+    encode_pwm_frame,
+)
 
 
 ACTUATOR_WEBSOCKET_HEARTBEAT_S = 2.0
-PostHelloFrame = AckFrame | StatusFrame
+PostHelloFrame = AckFrame | StatusFrame | PwmAckFrame
 
 
 def _positive_seconds(value: float, name: str) -> float:
@@ -29,6 +35,16 @@ def _positive_seconds(value: float, name: str) -> float:
     if not math.isfinite(seconds) or seconds <= 0.0:
         raise ValueError(f"{name} must be finite and > 0")
     return seconds
+
+
+def _decode_post_hello_frame(text: str):
+    try:
+        return decode_frame(text)
+    except ProtocolError as base_error:
+        try:
+            return decode_pwm_frame(text)
+        except ProtocolError:
+            raise base_error
 
 
 class WebSocketActuatorSession:
@@ -135,8 +151,8 @@ class WebSocketActuatorSession:
                     return
                 if message.type is not WSMsgType.TEXT or not isinstance(message.data, str):
                     raise ProtocolError("actuator WebSocket frame must be text")
-                frame = decode_frame(message.data)
-                if not isinstance(frame, (AckFrame, StatusFrame)):
+                frame = _decode_post_hello_frame(message.data)
+                if not isinstance(frame, (AckFrame, StatusFrame, PwmAckFrame)):
                     raise ProtocolError("unexpected post-HELLO frame")
                 await self._inbound.put(frame)
         except asyncio.CancelledError:
@@ -167,16 +183,25 @@ class WebSocketActuatorSession:
             raise ConnectionError("actuator receive loop is not running")
         await self._disconnect_event.wait()
 
+    def _validate_command_identity(self, node_id: str, boot_id: str) -> None:
+        if not self.connected or self._hello is None:
+            raise ConnectionError("actuator WebSocket is not connected")
+        if node_id != self._hello.node_id:
+            raise ValueError("command node_id does not match session HELLO")
+        if boot_id != self._hello.boot_id:
+            raise ValueError("command boot_id does not match session HELLO")
+
     async def send_command(self, command: CommandFrame) -> None:
         if not isinstance(command, CommandFrame):
             raise ValueError("command must be CommandFrame")
-        if not self.connected or self._hello is None:
-            raise ConnectionError("actuator WebSocket is not connected")
-        if command.node_id != self._hello.node_id:
-            raise ValueError("command node_id does not match session HELLO")
-        if command.boot_id != self._hello.boot_id:
-            raise ValueError("command boot_id does not match session HELLO")
+        self._validate_command_identity(command.node_id, command.boot_id)
         await self._websocket.send_str(encode_frame(command))
+
+    async def send_pwm_command(self, command: PwmCommandFrame) -> None:
+        if not isinstance(command, PwmCommandFrame):
+            raise ValueError("command must be PwmCommandFrame")
+        self._validate_command_identity(command.node_id, command.boot_id)
+        await self._websocket.send_str(encode_pwm_frame(command))
 
     async def receive_ack(self) -> AckFrame:
         frame = await self.receive_frame(self._receive_timeout_s)
