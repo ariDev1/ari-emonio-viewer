@@ -23,32 +23,40 @@ function element(id) {
 
 function createUi() {
   if (created) return true;
-  const safeSection = document.querySelector(".load-control-safe-test-section");
-  if (!safeSection) return false;
+  const slot = element("lc-simulated-operator-slot");
+  if (!slot) return false;
 
   const section = document.createElement("section");
   section.className = "load-control-section load-control-primary-section load-control-simulated-test-section";
   section.innerHTML = `
-    <div class="load-control-section-header"><h3>SIMULATED nonzero qualification</h3><span>one explicit COMMAND</span></div>
+    <div class="load-control-section-header"><h3>Simulated test</h3><span>1 W</span></div>
     <p class="load-control-section-note load-control-safe-warning">
-      NO PHYSICAL OUTPUT. This test sends one fixed simulated protocol COMMAND after explicit operator action: control_enabled=true · P request A=1 W, B=0 W, C=0 W · Q request A/B/C=0 var · No retry. Measured Emonio P/Q is provenance only. NONZERO REAL CONTROL DISABLED.
+      NO PHYSICAL OUTPUT. This action requests a fixed simulated load of A=1 W, B=0 W, C=0 W. After the test, SAFE 0 W is required.
     </p>
-    <div class="load-control-safe-status" aria-label="Stage 3B simulated command qualification state">
-      <div><span>Stage 3B</span><strong id="lc-simulated-state">IDLE</strong></div>
-      <div><span>Fixed request</span><strong id="lc-simulated-request">A 1.0 W · B 0.0 W · C 0.0 W</strong></div>
+    <div class="load-control-primary-status load-control-operator-status" aria-label="Simulated test state">
+      <div><span>State</span><strong id="lc-simulated-state">IDLE</strong></div>
+      <div><span>Request</span><strong id="lc-simulated-request">A 1.0 W · B 0.0 W · C 0.0 W</strong></div>
       <div><span>Reset</span><strong id="lc-simulated-reset">NOT REQUIRED</strong></div>
-      <div><span>COMMAND sequence</span><strong id="lc-simulated-sequence">—</strong></div>
-      <div><span>ACK result</span><strong id="lc-simulated-ack">—</strong></div>
-      <div><span>Rejection</span><strong id="lc-simulated-rejection">—</strong></div>
     </div>
     <div class="load-control-actions">
-      <button id="lc-simulated-run" type="button" disabled>SEND 1 W SIMULATED TEST — PHASE A</button>
+      <button id="lc-simulated-run" type="button" disabled>TEST 1 W — PHASE A</button>
     </div>
     <div id="lc-simulated-message" class="load-control-status-text" aria-live="polite">
-      Select an Emonio source and qualify the actuator first. The request value is fixed and cannot be edited.
+      Connect the actuator and select the Emonio source first.
     </div>
+    <details class="load-control-engineering-inline">
+      <summary>ENGINEERING DETAILS</summary>
+      <p class="load-control-section-note">
+        Fixed protocol request: control_enabled=true · P request A=1 W, B=0 W, C=0 W · Q request A/B/C=0 var · No retry · Measured Emonio P/Q is provenance only · NONZERO REAL CONTROL DISABLED.
+      </p>
+      <div class="load-control-safe-status" aria-label="Stage 3B simulated command evidence">
+        <div><span>COMMAND sequence</span><strong id="lc-simulated-sequence">—</strong></div>
+        <div><span>ACK result</span><strong id="lc-simulated-ack">—</strong></div>
+        <div><span>Rejection</span><strong id="lc-simulated-rejection">—</strong></div>
+      </div>
+    </details>
   `;
-  safeSection.insertAdjacentElement("afterend", section);
+  slot.append(section);
   element("lc-simulated-run").addEventListener("click", runSimulatedTest);
   created = true;
   return true;
@@ -110,13 +118,13 @@ async function runSimulatedTest() {
   const button = element("lc-simulated-run");
   try {
     if (button) button.disabled = true;
-    setMessage("Waiting for the first valid post-request Emonio sample, then sending one fixed simulated 1 W Phase A COMMAND...");
+    setMessage("Waiting for a fresh Emonio sample, then applying the fixed simulated 1 W Phase A test...");
     const status = await runSimulatedCommandTest();
     render(status);
     if (status?.safe_reset_required) {
-      setMessage("Simulated 1 W command completed or was attempted. ZERO RESET REQUIRED. Use SEND SAFE TEST COMMAND to confirm 0 W before another nonzero test.");
+      setMessage("1 W simulated test finished. SAFE 0 W is required before another 1 W test.");
     } else if (status?.state === "REJECTED") {
-      setMessage(`Stage 3B REJECTED: ${status?.rejection_reason || "unknown reason"}.`, true);
+      setMessage(`Simulated test rejected: ${status?.rejection_reason || "unknown reason"}.`, true);
     }
   } catch (error) {
     setMessage(error.message, true);
