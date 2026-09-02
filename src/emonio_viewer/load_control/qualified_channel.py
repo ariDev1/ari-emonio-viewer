@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from .protocol import AckFrame, CommandFrame, HelloFrame, StatusFrame
+from .pwm_protocol import PwmAckFrame, PwmCommandFrame
 
 
 class QualifiedActuatorChannelError(RuntimeError):
@@ -67,10 +68,16 @@ class QualifiedActuatorChannel:
         session = self._qualified_session()
         await session.send_command(command)
 
-    async def receive(self, timeout_s: float) -> AckFrame | StatusFrame:
+    async def send_pwm(self, command: PwmCommandFrame) -> None:
+        if not isinstance(command, PwmCommandFrame):
+            raise ValueError("command must be PwmCommandFrame")
+        session = self._qualified_session()
+        await session.send_pwm_command(command)
+
+    async def receive(self, timeout_s: float) -> AckFrame | StatusFrame | PwmAckFrame:
         session = self._qualified_session()
         return await session.receive_frame(timeout_s)
 
-    def receive_nowait(self) -> AckFrame | StatusFrame:
+    def receive_nowait(self) -> AckFrame | StatusFrame | PwmAckFrame:
         session = self._qualified_session()
         return session.receive_frame_nowait()
