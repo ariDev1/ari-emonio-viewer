@@ -1,0 +1,103 @@
+.load-control-zero-export {
+  display: grid;
+  gap: 14px;
+}
+
+.load-control-zero-export-boundary {
+  margin: 0;
+  max-width: 1120px;
+}
+
+.load-control-zero-export-config {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(170px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.load-control-zero-export-config label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.load-control-zero-export-config select,
+.load-control-zero-export-config input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.load-control-zero-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.load-control-zero-export-status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.load-control-zero-export-status > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.load-control-zero-export-status span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.load-control-zero-export-status strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.load-control-zero-export-safe {
+  border-style: dashed !important;
+}
+
+.load-control-zero-export[data-state="CONTROLLING"],
+.load-control-zero-export[data-state="WAITING_FOR_SAMPLE"],
+.load-control-zero-export[data-state="SETTLING"] {
+  box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.14);
+}
+
+.load-control-zero-export[data-state="TARGET_BAND"] {
+  box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.22);
+}
+
+.load-control-zero-export[data-state="BLOCKED_SAFE"],
+.load-control-zero-export[data-state="SAFE_UNCONFIRMED"] {
+  box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.34);
+}
+
+@media (max-width: 1050px) {
+  .load-control-zero-export-status {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .load-control-zero-export-config,
+  .load-control-zero-export-status {
+    grid-template-columns: 1fr;
+  }
+
+  .load-control-zero-export-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
