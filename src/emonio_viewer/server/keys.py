@@ -9,6 +9,7 @@ from emonio_viewer.load_control.lan_discovery import LanActuatorDiscoveryService
 from emonio_viewer.load_control.qualification import LoadControlQualificationService
 from emonio_viewer.load_control.service import LoadControlService
 from emonio_viewer.load_control.stage3a import Stage3ASafeCommandService
+from emonio_viewer.load_control.zero_export_service import Stage4CZeroExportControllerService
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
 from emonio_viewer.scope.service import ScopeService
@@ -41,4 +42,8 @@ P_CONTROL_OBSERVER_SERVICE_KEY = web.AppKey(
 CHARACTERIZATION_SERVICE_KEY = web.AppKey(
     "characterization_service",
     Stage4BCharacterizationService,
+)
+ZERO_EXPORT_CONTROLLER_SERVICE_KEY = web.AppKey(
+    "zero_export_controller_service",
+    Stage4CZeroExportControllerService,
 )
