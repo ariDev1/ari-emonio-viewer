@@ -87,6 +87,10 @@ function createUi() {
     <p class="load-control-stage-note">
       Connect the actuator, select the Emonio source, and use the safe or simulated test action. NO PHYSICAL OUTPUT. NONZERO REAL CONTROL DISABLED.
     </p>
+    <div id="lc-readiness" class="load-control-readiness" data-tone="idle" role="status" aria-live="polite">
+      <span>TEST SETUP</span>
+      <strong id="lc-readiness-state">NOT READY</strong>
+    </div>
 
     <section class="load-control-section load-control-primary-section">
       <div class="load-control-section-header"><h3>Actuator</h3><span>LAN</span></div>
@@ -349,6 +353,45 @@ function positiveInputValue(id, label) {
   return value;
 }
 
+function setStatusTone(id, tone) {
+  const target = element(id);
+  const card = target?.parentElement;
+  if (!card) return;
+  card.dataset.tone = tone;
+}
+
+function renderOperatorReadiness() {
+  const target = element("lc-readiness");
+  const value = element("lc-readiness-state");
+  if (!target || !value) return;
+
+  const connected = Boolean(state.qualification?.connected);
+  const qualified = Boolean(state.qualification?.hello_qualified);
+  const sourceSelected = Boolean(state.safeStatus?.selected_source_id);
+  const qualificationRejected = state.qualification?.state === "REJECTED";
+  const setupStarted = Boolean(
+    state.selectedNodeId
+      || state.qualification?.selected_node_id
+      || state.qualification?.node_id
+      || connected
+      || sourceSelected,
+  );
+
+  if (qualificationRejected) {
+    target.dataset.tone = "error";
+    value.textContent = "FAULT";
+  } else if (qualified && sourceSelected) {
+    target.dataset.tone = "ok";
+    value.textContent = "READY";
+  } else if (setupStarted) {
+    target.dataset.tone = "warn";
+    value.textContent = "INCOMPLETE";
+  } else {
+    target.dataset.tone = "idle";
+    value.textContent = "NOT READY";
+  }
+}
+
 function selectedDescriptor() {
   return state.lanResults.find((item) => item.node_id === state.selectedNodeId) || null;
 }
@@ -398,25 +441,52 @@ function renderLanResults(values) {
   }
   renderSelectedActuator();
   updateQualifyButton();
+  renderOperatorReadiness();
 }
 
 function onRealActuatorSelection() {
   state.selectedNodeId = element("lc-real-actuator")?.value || "";
   renderSelectedActuator();
   updateQualifyButton();
+  renderOperatorReadiness();
 }
 
 function renderLanQualification(status) {
   state.qualification = status || null;
   const connected = Boolean(status?.connected);
   const qualified = Boolean(status?.hello_qualified);
+  const rejected = status?.state === "REJECTED";
+  const hasSelectedActuator = Boolean(
+    state.selectedNodeId || status?.selected_node_id || status?.node_id,
+  );
 
   element("lc-ws-state").textContent = connected ? "CONNECTED" : "DISCONNECTED";
   element("lc-hello-state").textContent = qualified
     ? "READY"
-    : status?.state === "REJECTED"
+    : rejected
       ? "REJECTED"
       : "NOT READY";
+
+  setStatusTone(
+    "lc-ws-state",
+    connected
+      ? "ok"
+      : rejected
+        ? "error"
+        : hasSelectedActuator
+          ? "warn"
+          : "idle",
+  );
+  setStatusTone(
+    "lc-hello-state",
+    qualified
+      ? "ok"
+      : rejected
+        ? "error"
+        : connected || hasSelectedActuator
+          ? "warn"
+          : "idle",
+  );
 
   const nodeId = status?.node_id || status?.selected_node_id || "";
   const bootId = status?.boot_id || "";
@@ -442,6 +512,7 @@ function renderLanQualification(status) {
   element("load-control-summary-safe").textContent = qualified ? "DEVICE READY" : "DEVICE NOT READY";
   updateQualifyButton();
   updateSafeButtons();
+  renderOperatorReadiness();
 }
 
 function renderSafeSources(values) {
@@ -477,13 +548,28 @@ function renderSafeSources(values) {
 function renderSafeStatus(status) {
   state.safeStatus = status || null;
   const safeState = status?.state || "IDLE";
+  const sourceSelected = Boolean(status?.selected_source_id);
+
   element("lc-safe-state").textContent = safeState;
   element("lc-safe-source-state").textContent = status?.selected_source_id || "—";
   element("lc-safe-cycle").textContent = status?.sample_cycle_id ?? "—";
   element("lc-safe-sequence").textContent = status?.command_sequence ?? "—";
   element("lc-safe-ack").textContent = status?.ack_result || "—";
   element("lc-safe-rejection").textContent = status?.rejection_reason || "—";
+
+  setStatusTone("lc-safe-source-state", sourceSelected ? "ok" : "idle");
+  setStatusTone(
+    "lc-safe-state",
+    safeState === "PASSED"
+      ? "ok"
+      : safeState === "REJECTED"
+        ? "error"
+        : SAFE_ACTIVE_STATES.has(safeState)
+          ? "warn"
+          : "idle",
+  );
   updateSafeButtons();
+  renderOperatorReadiness();
 }
 
 function updateSafeButtons() {
