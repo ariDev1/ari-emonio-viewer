@@ -5,6 +5,7 @@ from aiohttp import web
 from emonio_viewer import __version__
 from emonio_viewer.config.model import RuntimeConfig
 from emonio_viewer.load_control.automatic_observation import PControlObserverService
+from emonio_viewer.load_control.characterization_service import Stage4BCharacterizationService
 from emonio_viewer.load_control.lan_discovery import LanActuatorDiscoveryService
 from emonio_viewer.load_control.manual_pwm import Stage3BManualPwmCommandService
 from emonio_viewer.load_control.qualification import LoadControlQualificationService
@@ -17,6 +18,7 @@ from emonio_viewer.runtime.store import RuntimeStore
 
 from .api_v0416 import register_api_routes
 from .keys import (
+    CHARACTERIZATION_SERVICE_KEY,
     CT_CONFIGURATION_SERVICE_KEY,
     DEVICE_CONNECTOR_KEY,
     DEVICE_LIFECYCLE_SERVICE_KEY,
@@ -35,6 +37,9 @@ from .keys import (
 from .load_control_api import register_load_control_routes
 from .load_control_stage3b_api import register_load_control_stage3b_routes
 from .load_control_stage4a_api import register_load_control_stage4a_routes
+from .load_control_stage4b_characterization_api import (
+    register_load_control_stage4b_characterization_routes,
+)
 from .websocket import websocket_measurements
 
 
@@ -56,6 +61,7 @@ def create_app(
     qualified_channel: QualifiedActuatorChannel | None = None,
     stage3a_service: Stage3ASafeCommandService | None = None,
     p_control_observer_service: PControlObserverService | None = None,
+    characterization_service: Stage4BCharacterizationService | None = None,
 ) -> web.Application:
     app = web.Application(client_max_size=64 * 1024)
     app[RUNTIME_CONFIG_KEY] = config
@@ -123,6 +129,14 @@ def create_app(
         )
     app[P_CONTROL_OBSERVER_SERVICE_KEY] = p_control_observer_service
 
+    if characterization_service is None:
+        characterization_service = Stage4BCharacterizationService(
+            bus,
+            config,
+            manual_pwm=stage3a_service,
+        )
+    app[CHARACTERIZATION_SERVICE_KEY] = characterization_service
+
     async def start_load_control(_app: web.Application) -> None:
         await load_control_service.start()
 
@@ -131,6 +145,12 @@ def create_app(
 
     async def start_p_control_observer(_app: web.Application) -> None:
         await p_control_observer_service.start()
+
+    async def start_characterization(_app: web.Application) -> None:
+        await characterization_service.start()
+
+    async def stop_characterization(_app: web.Application) -> None:
+        await characterization_service.close()
 
     async def stop_p_control_observer(_app: web.Application) -> None:
         await p_control_observer_service.close()
@@ -147,6 +167,8 @@ def create_app(
     app.on_startup.append(start_load_control)
     app.on_startup.append(start_stage3a)
     app.on_startup.append(start_p_control_observer)
+    app.on_startup.append(start_characterization)
+    app.on_cleanup.append(stop_characterization)
     app.on_cleanup.append(stop_p_control_observer)
     app.on_cleanup.append(stop_stage3a)
     app.on_cleanup.append(stop_load_control_qualification)
@@ -192,4 +214,5 @@ def create_app(
     register_load_control_routes(app)
     register_load_control_stage3b_routes(app)
     register_load_control_stage4a_routes(app)
+    register_load_control_stage4b_characterization_routes(app)
     return app
