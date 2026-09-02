@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -50,14 +51,14 @@ def test_operator_view_uses_semantic_readiness_colors_for_real_state_only() -> N
     assert "function setStatusTone" in ui
     assert "function renderOperatorReadiness" in ui
 
-    assert 'setStatusTone("lc-ws-state"' in ui
-    assert 'setStatusTone("lc-hello-state"' in ui
-    assert 'setStatusTone("lc-safe-source-state"' in ui
-    assert 'setStatusTone("lc-safe-state"' in ui
+    assert re.search(r'setStatusTone\(\s*"lc-ws-state"', ui)
+    assert re.search(r'setStatusTone\(\s*"lc-hello-state"', ui)
+    assert re.search(r'setStatusTone\(\s*"lc-safe-source-state"', ui)
+    assert re.search(r'setStatusTone\(\s*"lc-safe-state"', ui)
 
     assert "function setStatusTone" in simulated_ui
-    assert 'setStatusTone("lc-simulated-state"' in simulated_ui
-    assert 'setStatusTone("lc-simulated-reset"' in simulated_ui
+    assert re.search(r'setStatusTone\(\s*"lc-simulated-state"', simulated_ui)
+    assert re.search(r'setStatusTone\(\s*"lc-simulated-reset"', simulated_ui)
 
     assert '[data-tone="ok"]' in css
     assert '[data-tone="warn"]' in css
