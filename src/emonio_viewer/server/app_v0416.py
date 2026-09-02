@@ -12,6 +12,7 @@ from emonio_viewer.load_control.qualification import LoadControlQualificationSer
 from emonio_viewer.load_control.qualified_channel import QualifiedActuatorChannel
 from emonio_viewer.load_control.service import LoadControlService
 from emonio_viewer.load_control.stage3a import Stage3ASafeCommandService
+from emonio_viewer.load_control.zero_export_service import Stage4CZeroExportControllerService
 from emonio_viewer.recording.recorder import RecordingManager
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
@@ -33,6 +34,7 @@ from .keys import (
     RUNTIME_CONFIG_KEY,
     RUNTIME_STORE_KEY,
     SCOPE_SERVICE_KEY,
+    ZERO_EXPORT_CONTROLLER_SERVICE_KEY,
 )
 from .load_control_api import register_load_control_routes
 from .load_control_stage3b_api import register_load_control_stage3b_routes
@@ -40,6 +42,7 @@ from .load_control_stage4a_api import register_load_control_stage4a_routes
 from .load_control_stage4b_characterization_api import (
     register_load_control_stage4b_characterization_routes,
 )
+from .load_control_stage4c_api import register_load_control_stage4c_routes
 from .websocket import websocket_measurements
 
 
@@ -62,6 +65,7 @@ def create_app(
     stage3a_service: Stage3ASafeCommandService | None = None,
     p_control_observer_service: PControlObserverService | None = None,
     characterization_service: Stage4BCharacterizationService | None = None,
+    zero_export_controller_service: Stage4CZeroExportControllerService | None = None,
 ) -> web.Application:
     app = web.Application(client_max_size=64 * 1024)
     app[RUNTIME_CONFIG_KEY] = config
@@ -137,6 +141,14 @@ def create_app(
         )
     app[CHARACTERIZATION_SERVICE_KEY] = characterization_service
 
+    if zero_export_controller_service is None:
+        zero_export_controller_service = Stage4CZeroExportControllerService(
+            bus,
+            config,
+            manual_pwm=stage3a_service,
+        )
+    app[ZERO_EXPORT_CONTROLLER_SERVICE_KEY] = zero_export_controller_service
+
     async def start_load_control(_app: web.Application) -> None:
         await load_control_service.start()
 
@@ -148,6 +160,12 @@ def create_app(
 
     async def start_characterization(_app: web.Application) -> None:
         await characterization_service.start()
+
+    async def start_zero_export_controller(_app: web.Application) -> None:
+        await zero_export_controller_service.start()
+
+    async def stop_zero_export_controller(_app: web.Application) -> None:
+        await zero_export_controller_service.close()
 
     async def stop_characterization(_app: web.Application) -> None:
         await characterization_service.close()
@@ -168,6 +186,8 @@ def create_app(
     app.on_startup.append(start_stage3a)
     app.on_startup.append(start_p_control_observer)
     app.on_startup.append(start_characterization)
+    app.on_startup.append(start_zero_export_controller)
+    app.on_cleanup.append(stop_zero_export_controller)
     app.on_cleanup.append(stop_characterization)
     app.on_cleanup.append(stop_p_control_observer)
     app.on_cleanup.append(stop_stage3a)
@@ -217,4 +237,5 @@ def create_app(
     register_load_control_stage3b_routes(app)
     register_load_control_stage4a_routes(app)
     register_load_control_stage4b_characterization_routes(app)
+    register_load_control_stage4c_routes(app)
     return app
