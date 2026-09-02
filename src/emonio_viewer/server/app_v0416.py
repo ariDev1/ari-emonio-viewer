@@ -9,6 +9,7 @@ from emonio_viewer.load_control.qualification import LoadControlQualificationSer
 from emonio_viewer.load_control.qualified_channel import QualifiedActuatorChannel
 from emonio_viewer.load_control.service import LoadControlService
 from emonio_viewer.load_control.stage3a import Stage3ASafeCommandService
+from emonio_viewer.load_control.stage3b import Stage3BExplicitCommandService
 from emonio_viewer.recording.recorder import RecordingManager
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
@@ -30,6 +31,7 @@ from .keys import (
     SCOPE_SERVICE_KEY,
 )
 from .load_control_api import register_load_control_routes
+from .load_control_stage3b_api import register_load_control_stage3b_routes
 from .websocket import websocket_measurements
 
 
@@ -91,7 +93,7 @@ def create_app(
     app[LOAD_CONTROL_QUALIFICATION_SERVICE_KEY] = qualification_service
 
     if stage3a_service is None:
-        stage3a_service = Stage3ASafeCommandService(
+        stage3a_service = Stage3BExplicitCommandService(
             bus,
             config,
             qualified_channel,
@@ -134,6 +136,7 @@ def create_app(
         load_control_css = f'<link rel="stylesheet" href="{static_prefix}css/load-control/load-control.css">'
         monitor_script = f'<script type="module" src="{static_prefix}js/recording-monitor-ui.js"></script>'
         load_control_script = f'<script type="module" src="{static_prefix}js/load-control-ui.js"></script>'
+        load_control_stage3b_script = f'<script type="module" src="{static_prefix}js/load-control-stage3b-ui.js"></script>'
         source = source.replace(
             "</head>",
             f"  {monitor_css}\n  {load_control_css}\n</head>",
@@ -141,7 +144,7 @@ def create_app(
         )
         source = source.replace(
             "</body>",
-            f"  {monitor_script}\n  {load_control_script}\n</body>",
+            f"  {monitor_script}\n  {load_control_script}\n  {load_control_stage3b_script}\n</body>",
             1,
         )
         return web.Response(
@@ -155,4 +158,5 @@ def create_app(
     app.router.add_get("/ws/v1/measurements", websocket_measurements)
     register_api_routes(app)
     register_load_control_routes(app)
+    register_load_control_stage3b_routes(app)
     return app
