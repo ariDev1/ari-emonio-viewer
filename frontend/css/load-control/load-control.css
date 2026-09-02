@@ -280,7 +280,8 @@
 
 .load-control-safe-test-section,
 .load-control-safe-action-section,
-.load-control-simulated-test-section {
+.load-control-simulated-test-section,
+.load-control-pwm-section {
   border-style: solid;
 }
 
@@ -295,9 +296,44 @@
 }
 
 #lc-safe-run,
-#lc-simulated-run {
+#lc-simulated-run,
+#lc-pwm-apply,
+#lc-pwm-off {
   font-weight: 800;
   letter-spacing: 0.03em;
+}
+
+.load-control-pwm-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 12px;
+}
+
+.load-control-pwm-control label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted, #9ca6b5);
+  font-size: 0.72rem;
+}
+
+.load-control-pwm-control .load-control-actions {
+  margin-top: 0;
+}
+
+.load-control-pwm-input {
+  min-width: 0;
+  width: 100%;
+  padding: 8px 9px;
+  color: inherit;
+  border: 1px solid var(--line, #313845);
+  background: var(--input, #0d1117);
+  font-family: var(--mono);
+}
+
+.load-control-pwm-input:disabled {
+  opacity: 0.55;
 }
 
 .load-control-diagnostic-log,
@@ -398,7 +434,8 @@
   .load-control-state-grid,
   .load-control-value-grid,
   .load-control-form-grid,
-  .load-control-qualification-evidence > div {
+  .load-control-qualification-evidence > div,
+  .load-control-pwm-control {
     grid-template-columns: 1fr;
   }
 }
