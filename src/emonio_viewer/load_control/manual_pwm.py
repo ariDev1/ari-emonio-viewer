@@ -259,47 +259,52 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
                 or current_hello.node_id != hello.node_id
                 or current_hello.boot_id != hello.boot_id
             ):
-                return self._manual_reject("ACTUATOR_DISCONNECTED")
+                self._manual_reject("ACTUATOR_DISCONNECTED")
+            else:
+                sequence = self._next_sequence
+                self._next_sequence += 1
+                self._clear_manual_result()
+                self._manual_pwm_boot_id = hello.boot_id
+                self._manual_pwm_sequence = sequence
+                self._manual_pwm_requested_duty = float(duty_percent)
 
-            sequence = self._next_sequence
-            self._next_sequence += 1
-            self._clear_manual_result()
-            self._manual_pwm_boot_id = hello.boot_id
-            self._manual_pwm_sequence = sequence
-            self._manual_pwm_requested_duty = float(duty_percent)
-
-            command = PwmCommandFrame(
-                protocol_version=LOAD_CONTROL_PROTOCOL_VERSION,
-                viewer_session_id=self._viewer_session_id,
-                node_id=hello.node_id,
-                boot_id=hello.boot_id,
-                sequence=sequence,
-                duty_percent=float(duty_percent),
-            )
-
-            self._ack_wait_active = True
-            try:
-                try:
-                    await self._channel.send_pwm(command)
-                except (ConnectionError, QualifiedActuatorChannelError):
-                    return self._manual_reject("ACTUATOR_DISCONNECTED")
-                except Exception:
-                    return self._manual_reject("PWM_COMMAND_SEND_FAILED")
-
-                self._manual_pwm_state = ManualPwmState.COMMAND_SENT
-                self._diagnostic_log.append(
-                    "PWM_COMMAND_SENT",
-                    node_id=command.node_id,
-                    boot_id=command.boot_id,
-                    viewer_session_id=command.viewer_session_id,
-                    sequence=command.sequence,
-                    requested_duty_percent=command.duty_percent,
+                command = PwmCommandFrame(
+                    protocol_version=LOAD_CONTROL_PROTOCOL_VERSION,
+                    viewer_session_id=self._viewer_session_id,
+                    node_id=hello.node_id,
+                    boot_id=hello.boot_id,
+                    sequence=sequence,
+                    duty_percent=float(duty_percent),
                 )
-                return await self._wait_for_pwm_ack(command)
-            finally:
-                self._ack_wait_active = False
+
+                self._ack_wait_active = True
+                try:
+                    sent = False
+                    try:
+                        await self._channel.send_pwm(command)
+                        sent = True
+                    except (ConnectionError, QualifiedActuatorChannelError):
+                        self._manual_reject("ACTUATOR_DISCONNECTED")
+                    except Exception:
+                        self._manual_reject("PWM_COMMAND_SEND_FAILED")
+
+                    if sent:
+                        self._manual_pwm_state = ManualPwmState.COMMAND_SENT
+                        self._diagnostic_log.append(
+                            "PWM_COMMAND_SENT",
+                            node_id=command.node_id,
+                            boot_id=command.boot_id,
+                            viewer_session_id=command.viewer_session_id,
+                            sequence=command.sequence,
+                            requested_duty_percent=command.duty_percent,
+                        )
+                        await self._wait_for_pwm_ack(command)
+                finally:
+                    self._ack_wait_active = False
         finally:
             self._active = False
+
+        return self.manual_pwm_status()
 
     async def close(self) -> None:
         await super().close()
