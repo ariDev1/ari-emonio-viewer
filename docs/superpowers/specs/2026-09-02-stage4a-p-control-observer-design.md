@@ -98,7 +98,7 @@ Stage 4A must not infer that a specific watt error equals a specific duty value.
 
 ## 5. Architecture
 
-Stage 4A uses the existing `RuntimeEventBus` as a read-only observation boundary.
+Stage 4A uses the existing `RuntimeEventBus` as a read-only measurement observation boundary.
 
 The data path is:
 
@@ -113,7 +113,7 @@ canonical signed phase P
         ↓
 P target and deadband decision
         ↓
-last Viewer-confirmed requested PWM duty
+read-only snapshot of last qualified manual PWM ACK evidence
         ↓
 deterministic next-duty proposal
         ↓
@@ -129,6 +129,26 @@ Stage 4A must not read Modbus directly.
 Stage 4A must not write to `RuntimeStore`.
 
 Stage 4A must not change a `MeasurementSample`.
+
+### 5.1 Actuator transport ownership
+
+Stage 4A must not become a second owner or consumer of the actuator WebSocket channel.
+
+Stage 4A must not:
+
+- call `QualifiedActuatorChannel.receive()`
+- call `QualifiedActuatorChannel.receive_nowait()`
+- call `QualifiedActuatorChannel.send()`
+- call `QualifiedActuatorChannel.send_pwm()`
+- drain actuator frames
+- allocate actuator command sequence numbers
+- bind or clear the qualified actuator channel
+
+The existing qualification and manual PWM services keep transport ownership.
+
+Stage 4A receives actuator evidence only through a narrow read-only status interface from the existing qualified manual PWM and qualification state.
+
+This prevents two services from competing for one actuator frame stream.
 
 ## 6. Control scope
 
@@ -177,6 +197,12 @@ Stage 4A must not silently replace invalid values with defaults.
 
 Stage 4A parameters are session control parameters. They must not modify Emonio configuration.
 
+All Stage 4A configuration changes are allowed only while the observer is `DISABLED`.
+
+An attempt to change source, phase, target, deadband, or duty step while observation is active must be rejected without changing the existing configuration.
+
+A new enable action establishes a new measurement-cycle observation boundary.
+
 ## 8. Duty evidence and operating window
 
 The control baseline is the last requested PWM duty that received a qualified `PWM_ACK` for the currently qualified actuator instance.
@@ -200,9 +226,11 @@ They are not declared as permanent hardware limits.
 
 Stage 4A must not propose an active duty below 25 % or above 75 %.
 
-The requested duty is the control setpoint evidence.
+The requested duty from the qualified manual PWM ACK is the control setpoint evidence.
 
 The actual duty from the PWM ACK remains engineering evidence and must be displayed separately when available.
+
+Stage 4A must not treat an unacknowledged manual request as confirmed duty.
 
 ## 9. Calculation
 
@@ -303,6 +331,18 @@ The observer must not calculate 35 % from an unapplied 30 % proposal.
 
 Only a new qualified PWM ACK may change the confirmed duty baseline.
 
+### 10.1 New manual ACK during observation
+
+When the operator applies a new manual duty and a new qualified PWM ACK changes the confirmed duty baseline:
+
+- the previous Stage 4A proposal becomes invalid
+- Stage 4A must not calculate from a measurement that could belong to the previous duty state
+- on the first selected-source sample where Stage 4A detects the changed confirmed-duty baseline, Stage 4A records the new baseline and does not calculate a proposal from that sample
+- Stage 4A then enters `WAITING_FOR_SAMPLE`
+- the next continuous valid selected-source measurement cycle may be used for the next calculation
+
+This rule gives a deterministic causal boundary without making Stage 4A consume actuator frames or modify the manual PWM service transport behavior.
+
 ## 11. Measurement admissibility
 
 A sample is admissible only when all required conditions pass.
@@ -329,7 +369,7 @@ They must not change the Stage 4A state or proposal.
 
 ## 12. Freshness and timing
 
-Stage 4A has no independent control clock.
+Stage 4A has no independent control calculation clock.
 
 One canonical Emonio sample can produce at most one Stage 4A calculation.
 
@@ -350,6 +390,8 @@ The initial Stage 4A freshness limit is:
 ```text
 2 × selected Emonio poll interval
 ```
+
+A deadline check may use monotonic time only to detect that the expected new measurement did not arrive. The deadline check must not calculate a new duty proposal.
 
 If no admissible new sample arrives inside this interval, the observer enters `BLOCKED` with reason `SAMPLE_STALE`.
 
@@ -375,9 +417,9 @@ No proposed duty is valid.
 
 ### 13.2 WAITING_FOR_SAMPLE
 
-The operator enabled observation and all static configuration checks passed.
+The operator enabled observation and all enable gates passed, or a new qualified manual PWM ACK changed the confirmed-duty baseline during observation.
 
-The observer waits for the first admissible new canonical measurement cycle.
+The observer waits for an admissible new canonical measurement cycle.
 
 ### 13.3 OBSERVING
 
@@ -403,7 +445,7 @@ The proposed duty is 75 %.
 
 ### 13.7 BLOCKED
 
-Required control evidence is missing, stale, invalid, discontinuous, or no longer bound to the current actuator instance.
+Required runtime control evidence became missing, stale, invalid, discontinuous, or no longer bound to the current actuator instance after observation was enabled.
 
 In `BLOCKED`:
 
@@ -417,26 +459,45 @@ The UI must display `—`, not `0 %`.
 
 `—` means no valid control proposal exists.
 
-## 14. Block reasons
+`BLOCKED` is latched for the current observer session.
 
-Stage 4A uses explicit deterministic block reasons.
+New measurements, actuator reconnection, or later valid evidence must not automatically resume calculations.
 
-Required reasons include:
+The operator must explicitly disable Stage 4A and enable it again after the cause is corrected.
+
+This prevents hidden observer restart after a fault boundary.
+
+## 14. Reason codes
+
+Stage 4A uses explicit deterministic reason codes.
+
+### 14.1 Enable rejection reasons
+
+If an enable gate fails, the observer remains `DISABLED`, no proposal is valid, and one exact rejection reason is reported.
+
+Required enable rejection reasons include:
 
 - `SOURCE_NOT_AVAILABLE`
 - `PHASE_NOT_SELECTED`
 - `PARAMETER_INVALID`
-- `WAITING_FOR_NEW_SAMPLE`
-- `SAMPLE_NOT_VALID`
-- `SAMPLE_STALE`
-- `SAMPLE_SEQUENCE_GAP`
-- `ACQUISITION_FAILURE`
 - `ACTUATOR_NOT_QUALIFIED`
 - `PWM_DUTY_CONTROL_NOT_SUPPORTED`
 - `CONFIRMED_DUTY_UNKNOWN`
 - `CONFIRMED_DUTY_OUTSIDE_QUALIFIED_WINDOW`
+
+### 14.2 Runtime block reasons
+
+After a successful enable, required runtime block reasons include:
+
+- `SAMPLE_NOT_VALID`
+- `SAMPLE_STALE`
+- `SAMPLE_SEQUENCE_GAP`
+- `ACQUISITION_FAILURE`
 - `ACTUATOR_BOOT_CHANGED`
 - `ACTUATOR_DISCONNECTED`
+- `PWM_DUTY_CONTROL_NOT_SUPPORTED`
+- `CONFIRMED_DUTY_UNKNOWN`
+- `CONFIRMED_DUTY_OUTSIDE_QUALIFIED_WINDOW`
 
 The implementation may add a more specific reason only when it preserves the same fail-closed meaning and is covered by tests.
 
@@ -444,22 +505,24 @@ The implementation may add a more specific reason only when it preserves the sam
 
 Stage 4A does not send a command when the actuator disconnects.
 
-On actuator disconnect:
+On actuator disconnect after observation is enabled:
 
 - the current proposal becomes invalid
-- state becomes `BLOCKED`
+- state becomes latched `BLOCKED`
 - reason becomes `ACTUATOR_DISCONNECTED`
 - previous confirmed duty must not be reused after reconnection without new current-instance evidence
 
-On boot ID change:
+On boot ID change after observation is enabled:
 
 - previous PWM ACK evidence becomes obsolete
 - the current proposal becomes invalid
-- state becomes `BLOCKED`
+- state becomes latched `BLOCKED`
 - reason becomes `ACTUATOR_BOOT_CHANGED`
-- a new qualified manual PWM ACK is required before Stage 4A can produce another proposal
+- a new qualified manual PWM ACK is required before a later Stage 4A enable can produce another proposal
 
 There is no automatic reconnect.
+
+There is no automatic observer restart.
 
 There is no automatic command replay.
 
@@ -469,6 +532,7 @@ When the operator disables Stage 4A observation:
 
 - state becomes `DISABLED`
 - proposed duty becomes null
+- runtime block latch is cleared
 - Stage 4A sends no actuator command
 - Stage 4A does not modify the physical PWM output
 - the existing manual PWM mode remains available
@@ -493,6 +557,8 @@ Stage 4A must not add:
 
 The operator may read the proposal and manually apply the proposed duty through the existing manual PWM control.
 
+The observer reads the resulting qualified manual PWM status. It does not intercept the ACK.
+
 ## 18. User interface
 
 Stage 4A adds a separate `P CONTROL OBSERVER` section in the external load-control panel.
@@ -500,7 +566,7 @@ Stage 4A adds a separate `P CONTROL OBSERVER` section in the external load-contr
 The section must show at least:
 
 - observer state
-- block reason when blocked
+- rejection or block reason when present
 - selected Emonio source
 - selected phase
 - measurement cycle ID
@@ -510,6 +576,7 @@ The section must show at least:
 - sample age
 - P target
 - P deadband
+- duty step
 - confirmed requested duty
 - confirmed actual duty when available
 - decision: `INCREASE`, `HOLD`, `DECREASE`, `LIMIT_LOW`, or `LIMIT_HIGH`
@@ -535,6 +602,13 @@ The preferred API module is a new dedicated load-control API file.
 The preferred frontend files are dedicated Stage 4A JavaScript and structured load-control CSS changes.
 
 `app_v0416.py` may receive minimal wiring for the new service and routes.
+
+The observer may receive read-only callables or narrow status providers for:
+
+- current qualification status
+- current manual PWM status
+
+The observer must not receive actuator transport ownership.
 
 No protected scientific path requires modification.
 
@@ -590,7 +664,7 @@ At minimum, tests must prove:
 7. stale measurement blocks the observer
 8. acquisition failure blocks the observer
 9. cycle sequence gap blocks the observer
-10. unknown confirmed duty blocks the observer
+10. unknown confirmed duty rejects enable or blocks an active session as applicable
 11. old-boot duty evidence is rejected
 12. disconnect blocks the observer
 13. active duty below 25 % is never proposed
@@ -601,9 +675,14 @@ At minimum, tests must prove:
 18. target-band calculation holds the confirmed duty
 19. one sample causes at most one calculation
 20. Stage 4A sends no `PWM_COMMAND`
-21. existing manual PWM tests remain unchanged and pass
-22. protected scientific path gate remains pass
-23. launcher remains `emonio_viewer.main_v0416:main`
+21. Stage 4A never consumes actuator channel frames
+22. Stage 4A never allocates actuator command sequence numbers
+23. configuration changes while active are rejected without mutation
+24. `BLOCKED` does not automatically recover
+25. a changed qualified manual duty invalidates the old proposal and requires a later measurement cycle
+26. existing manual PWM tests remain unchanged and pass
+27. protected scientific path gate remains pass
+28. launcher remains `emonio_viewer.main_v0416:main`
 
 Automated test success is not field evidence.
 
@@ -618,6 +697,8 @@ operator applies manual 25 %
         ↓
 qualified PWM ACK confirms 25 %
         ↓
+operator enables Stage 4A
+        ↓
 new canonical Emonio sample arrives
         ↓
 Stage 4A calculates proposed next duty
@@ -628,7 +709,9 @@ operator may manually apply the proposal
         ↓
 new qualified PWM ACK establishes the next confirmed duty baseline
         ↓
-next Emonio sample evaluates the real electrical response
+first selected-source sample detects the changed duty baseline and is not used for a proposal
+        ↓
+following continuous valid Emonio sample evaluates the electrical response
 ```
 
 Field acceptance must confirm that:
@@ -636,6 +719,7 @@ Field acceptance must confirm that:
 - measured P shown by Stage 4A matches the canonical Viewer P for the selected phase
 - proposed duty follows the exact approved calculation
 - the proposal does not advance without a new qualified manual PWM ACK
+- a new qualified manual PWM ACK invalidates the old proposal and establishes a new causal measurement boundary
 - Q changes do not change the proposal when P and all control inputs are unchanged
 - no Stage 4A path sends an automatic `PWM_COMMAND`
 
@@ -656,6 +740,7 @@ Stage 4A does not implement:
 - PF control
 - automatic negative-P reaction with physical output
 - automatic actuator reconnect
+- automatic observer restart after a block
 - automatic command retry
 - automatic command replay
 - persistent automatic-control enable
