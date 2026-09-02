@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from enum import Enum
 import math
-from queue import Empty, Full, Queue
+from queue import Empty, Queue
 import time
 from typing import Callable
 
@@ -196,12 +196,7 @@ def calculate_p_control_proposal(
 
 
 class PControlObserverService:
-    """Observe canonical P and calculate a manual-only PWM duty proposal.
-
-    This service has no actuator transport reference and no command authority.
-    It reads actuator qualification and qualified manual-PWM evidence only
-    through immutable status-provider callables.
-    """
+    """Calculate P-only duty proposals without actuator command authority."""
 
     def __init__(
         self,
@@ -258,7 +253,9 @@ class PControlObserverService:
         matches = tuple(
             item
             for item in self._config.devices
-            if item.enabled and item.id == device_id and _valid_poll_interval(item.poll_interval_s)
+            if item.enabled
+            and item.id == device_id
+            and _valid_poll_interval(item.poll_interval_s)
         )
         return matches[0] if len(matches) == 1 else None
 
@@ -292,23 +289,22 @@ class PControlObserverService:
         except ValueError as exc:
             raise PControlObserverError("PARAMETER_INVALID") from exc
 
-        new_settings = PControlObserverSettings(
+        settings = PControlObserverSettings(
             source_id=source_id,
             phase=phase,
             p_target_w=target,
             p_deadband_w=deadband,
             duty_step_percent=step,
         )
-        self._settings = new_settings
+        self._settings = settings
         self._reason = None
         return self.status()
 
     def _current_pwm_evidence(self, *, active: bool) -> _ConfirmedPwmEvidence:
         qualification = self._qualification_status()
         if not qualification.connected or not qualification.hello_qualified:
-            raise PControlObserverError(
-                "ACTUATOR_DISCONNECTED" if active else "ACTUATOR_NOT_QUALIFIED"
-            )
+            reason = "ACTUATOR_DISCONNECTED" if active else "ACTUATOR_NOT_QUALIFIED"
+            raise PControlObserverError(reason)
 
         baseline = self._baseline
         if (
@@ -325,7 +321,6 @@ class PControlObserverService:
         manual = self._manual_pwm_status()
         if manual is None:
             raise PControlObserverError("CONFIRMED_DUTY_UNKNOWN")
-
         if (
             active
             and baseline is not None
@@ -333,7 +328,6 @@ class PControlObserverService:
             and manual.boot_id != baseline.boot_id
         ):
             raise PControlObserverError("ACTUATOR_BOOT_CHANGED")
-
         if (
             manual.ack_result != "APPLIED"
             or manual.command_sequence is None
@@ -348,7 +342,9 @@ class PControlObserverService:
         try:
             requested = _validated_confirmed_duty(manual.requested_duty_percent)
         except ValueError as exc:
-            raise PControlObserverError("CONFIRMED_DUTY_OUTSIDE_QUALIFIED_WINDOW") from exc
+            raise PControlObserverError(
+                "CONFIRMED_DUTY_OUTSIDE_QUALIFIED_WINDOW"
+            ) from exc
 
         actual: float | None = None
         if manual.actual_duty_percent is not None:
@@ -381,34 +377,19 @@ class PControlObserverService:
         self._started = True
         self._consumer_task = asyncio.create_task(self._consume_events())
 
-    def _queue_private(self, item: object) -> None:
-        subscriber = self._subscriber
-        if subscriber is None:
-            return
-        while True:
-            try:
-                subscriber.put_nowait(item)  # type: ignore[arg-type]
-                return
-            except Full:
-                try:
-                    subscriber.get_nowait()
-                except Empty:
-                    continue
-
     async def close(self) -> None:
-        if self._started:
-            self._queue_private(self._stop_sentinel)
+        if self._started and self._subscriber is not None:
+            await asyncio.to_thread(self._subscriber.put, self._stop_sentinel)  # type: ignore[arg-type]
             if self._consumer_task is not None:
                 await self._consumer_task
-            if self._subscriber is not None:
-                self._bus.unsubscribe(self._subscriber)
+            self._bus.unsubscribe(self._subscriber)
         self._subscriber = None
         self._consumer_task = None
         self._started = False
         self._freshness_deadline_ns = None
+        self._baseline = None
         self._state = PControlObserverState.DISABLED
         self._reason = None
-        self._baseline = None
         self._clear_sample_result()
 
     async def enable(self) -> PControlObserverStatus:
@@ -472,11 +453,12 @@ class PControlObserverService:
 
     def status(self) -> PControlObserverStatus:
         baseline = self._baseline
-        sample_age_s: float | None = None
+        age: float | None = None
         if self._sample_finished_monotonic_ns is not None:
-            sample_age_s = max(
+            age = max(
                 0.0,
-                (self._monotonic_ns() - self._sample_finished_monotonic_ns) / 1_000_000_000.0,
+                (self._monotonic_ns() - self._sample_finished_monotonic_ns)
+                / 1_000_000_000.0,
             )
         return PControlObserverStatus(
             state=self._state,
@@ -487,7 +469,7 @@ class PControlObserverService:
             measured_p_w=self._measured_p_w,
             measured_q_var=self._measured_q_var,
             sample_quality=self._sample_quality,
-            sample_age_s=sample_age_s,
+            sample_age_s=age,
             p_target_w=self._settings.p_target_w,
             p_deadband_w=self._settings.p_deadband_w,
             duty_step_percent=self._settings.duty_step_percent,
@@ -525,7 +507,10 @@ class PControlObserverService:
         self._diagnostic_log.append("P_OBSERVER_BLOCKED", reason=reason)
 
     def _check_deadline(self) -> None:
-        if self._state in {PControlObserverState.DISABLED, PControlObserverState.BLOCKED}:
+        if self._state in {
+            PControlObserverState.DISABLED,
+            PControlObserverState.BLOCKED,
+        }:
             return
         deadline = self._freshness_deadline_ns
         if deadline is None or self._monotonic_ns() <= deadline:
@@ -557,12 +542,14 @@ class PControlObserverService:
     def _handle_runtime_event(self, event: RuntimeEvent) -> None:
         if isinstance(event, MeasurementSample):
             self._handle_measurement(event)
-            return
-        if isinstance(event, RuntimeDiagnosticEvent):
+        elif isinstance(event, RuntimeDiagnosticEvent):
             self._handle_runtime_diagnostic(event)
 
     def _handle_runtime_diagnostic(self, event: RuntimeDiagnosticEvent) -> None:
-        if self._state in {PControlObserverState.DISABLED, PControlObserverState.BLOCKED}:
+        if self._state in {
+            PControlObserverState.DISABLED,
+            PControlObserverState.BLOCKED,
+        }:
             return
         if event.device_id != self._settings.source_id:
             return
@@ -578,7 +565,10 @@ class PControlObserverService:
         if cycle_id > previous_latest:
             self._latest_cycle_by_source[device_id] = cycle_id
 
-        if self._state in {PControlObserverState.DISABLED, PControlObserverState.BLOCKED}:
+        if self._state in {
+            PControlObserverState.DISABLED,
+            PControlObserverState.BLOCKED,
+        }:
             return
         if device_id != self._settings.source_id:
             self._diagnostic_log.append(
@@ -602,8 +592,6 @@ class PControlObserverService:
                 return
             if sample.timing.cycle_started_monotonic_ns <= self._enable_monotonic_ns:
                 self._enable_boundary_cycle = cycle_id
-                self._enable_monotonic_ns = sample.timing.cycle_finished_monotonic_ns
-                self._freshness_deadline_ns = self._monotonic_ns() + self._freshness_ns()
                 return
 
         if sample.quality is not SampleQuality.VALID:
@@ -681,6 +669,7 @@ class PControlObserverService:
         self._decision = proposal.decision
         self._proposed_duty_percent = proposal.proposed_duty_percent
         self._reason = None
+
         if proposal.decision is PControlDecision.HOLD:
             self._state = PControlObserverState.TARGET_BAND
         elif proposal.decision is PControlDecision.LIMIT_LOW:
@@ -689,7 +678,10 @@ class PControlObserverService:
             self._state = PControlObserverState.LIMIT_HIGH
         else:
             self._state = PControlObserverState.OBSERVING
-        self._freshness_deadline_ns = sample.timing.cycle_finished_monotonic_ns + self._freshness_ns()
+
+        self._freshness_deadline_ns = (
+            sample.timing.cycle_finished_monotonic_ns + self._freshness_ns()
+        )
         self._diagnostic_log.append(
             "P_OBSERVER_PROPOSAL_CALCULATED",
             emonio_device_id=device_id,
