@@ -1,25 +1,28 @@
 .load-control-zero-export {
   display: grid;
-  gap: 14px;
+  gap: 8px;
+  padding: 10px 12px;
 }
 
 .load-control-zero-export-boundary {
   margin: 0;
   max-width: 1120px;
+  font-size: 0.70rem;
+  line-height: 1.28;
 }
 
 .load-control-zero-export-config {
   display: grid;
-  grid-template-columns: repeat(3, minmax(170px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
   align-items: end;
 }
 
 .load-control-zero-export-config label {
   display: grid;
-  gap: 6px;
+  gap: 3px;
   min-width: 0;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   color: var(--muted);
 }
 
@@ -27,41 +30,57 @@
 .load-control-zero-export-config input {
   width: 100%;
   min-width: 0;
+  min-height: 30px;
   box-sizing: border-box;
+  padding: 4px 6px;
+  color: inherit;
+  border: 1px solid var(--line, #313845);
+  background: var(--input, #0d1117);
+  font-size: 0.74rem;
 }
 
 .load-control-zero-export-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+  margin-top: 0;
+}
+
+.load-control-zero-export-actions button {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 0.68rem;
 }
 
 .load-control-zero-export-status {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .load-control-zero-export-status > div {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
-  padding: 10px 12px;
+  padding: 7px 9px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.018);
 }
 
 .load-control-zero-export-status span {
   color: var(--muted);
-  font-size: 0.72rem;
-  letter-spacing: 0.03em;
+  font-size: 0.66rem;
+  line-height: 1.15;
+  letter-spacing: 0.025em;
   text-transform: uppercase;
 }
 
 .load-control-zero-export-status strong {
   min-width: 0;
   overflow-wrap: anywhere;
+  font-size: 0.78rem;
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
 }
 
@@ -86,7 +105,7 @@
 
 @media (max-width: 1050px) {
   .load-control-zero-export-status {
-    grid-template-columns: repeat(2, minmax(160px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
