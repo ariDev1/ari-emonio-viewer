@@ -206,23 +206,21 @@ def create_app(
         source = source.replace('"/static/', f'"{static_prefix}')
         monitor_css = f'<link rel="stylesheet" href="{static_prefix}css/recording-monitor.css">'
         load_control_css = f'<link rel="stylesheet" href="{static_prefix}css/load-control/load-control.css">'
-        p_control_observer_css = f'<link rel="stylesheet" href="{static_prefix}css/load-control/p-control-observer.css">'
         p_characterization_css = f'<link rel="stylesheet" href="{static_prefix}css/load-control/p-characterization.css">'
         zero_export_controller_css = f'<link rel="stylesheet" href="{static_prefix}css/load-control/zero-export-controller.css">'
         monitor_script = f'<script type="module" src="{static_prefix}js/recording-monitor-ui.js"></script>'
         load_control_script = f'<script type="module" src="{static_prefix}js/load-control-ui.js"></script>'
         load_control_stage3b_script = f'<script type="module" src="{static_prefix}js/load-control-stage3b-ui.js"></script>'
-        load_control_stage4a_script = f'<script type="module" src="{static_prefix}js/load-control-stage4a-ui.js"></script>'
         load_control_stage4b_characterization_script = f'<script type="module" src="{static_prefix}js/load-control-stage4b-characterization-ui.js"></script>'
         load_control_stage4c_script = f'<script type="module" src="{static_prefix}js/load-control-stage4c-ui.js"></script>'
         source = source.replace(
             "</head>",
-            f"  {monitor_css}\n  {load_control_css}\n  {p_control_observer_css}\n  {p_characterization_css}\n  {zero_export_controller_css}\n</head>",
+            f"  {monitor_css}\n  {load_control_css}\n  {p_characterization_css}\n  {zero_export_controller_css}\n</head>",
             1,
         )
         source = source.replace(
             "</body>",
-            f"  {monitor_script}\n  {load_control_script}\n  {load_control_stage3b_script}\n  {load_control_stage4a_script}\n  {load_control_stage4b_characterization_script}\n  {load_control_stage4c_script}\n</body>",
+            f"  {monitor_script}\n  {load_control_script}\n  {load_control_stage3b_script}\n  {load_control_stage4b_characterization_script}\n  {load_control_stage4c_script}\n</body>",
             1,
         )
         return web.Response(
