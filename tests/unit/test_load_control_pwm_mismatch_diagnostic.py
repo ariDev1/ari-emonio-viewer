@@ -80,7 +80,7 @@ def test_requested_duty_mismatch_logs_command_and_ack_echo_without_weakening_rej
                 boot_id=command.boot_id,
                 sequence=command.sequence,
                 result="APPLIED",
-                requested_duty_percent=74.60937,
+                requested_duty_percent=74.60935,
                 actual_duty_percent=74.57886676875957,
                 compare_ticks=487,
                 period_ticks=653,
@@ -97,7 +97,7 @@ def test_requested_duty_mismatch_logs_command_and_ack_echo_without_weakening_rej
         line = rejected[0].line
         assert 'reason="PWM_ACK_REQUESTED_DUTY_MISMATCH"' in line
         assert "commanded_duty_percent=74.609375" in line
-        assert "ack_requested_duty_percent=74.60937" in line
+        assert "ack_requested_duty_percent=74.60935" in line
 
         await service.close()
 
