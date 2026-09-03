@@ -146,6 +146,7 @@ def create_app(
             bus,
             config,
             manual_pwm=stage3a_service,
+            diagnostic_log=qualification_service.diagnostic_log,
         )
     app[ZERO_EXPORT_CONTROLLER_SERVICE_KEY] = zero_export_controller_service
 
