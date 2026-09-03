@@ -12,6 +12,7 @@ from emonio_viewer.config.model import DeviceConfig, RuntimeConfig
 from emonio_viewer.measurement.model import MeasurementSample, SampleQuality
 from emonio_viewer.runtime.events import DiagnosticEvent, RuntimeEvent, RuntimeEventBus
 
+from .diagnostic_log import LoadControlDiagnosticLog
 from .manual_pwm import ManualPwmState, ManualPwmStatus
 from .stage3a import Stage3AError
 from .zero_export import (
@@ -32,7 +33,9 @@ class ZeroExportControllerState(str, Enum):
     SETTLING = "SETTLING"
     CONTROLLING = "CONTROLLING"
     TARGET_BAND = "TARGET_BAND"
+    LIMIT_LOW = "LIMIT_LOW"
     LIMIT_HIGH = "LIMIT_HIGH"
+    RESOLUTION_LIMIT = "RESOLUTION_LIMIT"
     SAFE_OFF = "SAFE_OFF"
     BLOCKED_SAFE = "BLOCKED_SAFE"
     SAFE_UNCONFIRMED = "SAFE_UNCONFIRMED"
@@ -85,6 +88,8 @@ class ZeroExportControllerStatus:
     command_sequence: int | None
     confirmed_requested_duty_percent: float | None
     confirmed_actual_duty_percent: float | None
+    confirmed_compare_ticks: int | None
+    confirmed_period_ticks: int | None
     safe_confirmed: bool | None
 
 
@@ -106,9 +111,11 @@ def _valid_poll_interval(value: float) -> bool:
 class Stage4CZeroExportControllerService:
     """Bounded automatic zero-export controller.
 
-    Canonical phase P is the only feedback input. The service does not read
-    Modbus, alter acquisition, estimate load watts, or use Q/PF. All physical
-    PWM commands use the existing reserved manual PWM command/ACK path.
+    Canonical phase P is the only measurement feedback input. The service does
+    not read Modbus, alter acquisition, estimate load watts, or use Q/PF. All
+    physical PWM commands use the existing reserved manual PWM command/ACK
+    path. Actuator compare-tick evidence is used only to detect when two
+    different requested duties produce the same physical PWM state.
     """
 
     def __init__(
@@ -118,6 +125,7 @@ class Stage4CZeroExportControllerService:
         *,
         manual_pwm: _ManualPwmInterface,
         monotonic_ns: Callable[[], int] = time.monotonic_ns,
+        diagnostic_log: LoadControlDiagnosticLog | None = None,
     ) -> None:
         if not isinstance(bus, RuntimeEventBus):
             raise ValueError("bus must be RuntimeEventBus")
@@ -133,11 +141,14 @@ class Stage4CZeroExportControllerService:
                 raise ValueError(f"manual_pwm must provide {name}")
         if not callable(monotonic_ns):
             raise ValueError("monotonic_ns must be callable")
+        if diagnostic_log is not None and not isinstance(diagnostic_log, LoadControlDiagnosticLog):
+            raise ValueError("diagnostic_log must be LoadControlDiagnosticLog")
 
         self._bus = bus
         self._config = config
         self._manual_pwm = manual_pwm
         self._monotonic_ns = monotonic_ns
+        self._diagnostic_log = diagnostic_log or LoadControlDiagnosticLog()
         self._subscriber: Queue[RuntimeEvent] | None = None
         self._consumer_task: asyncio.Task[None] | None = None
         self._stop_sentinel = object()
@@ -159,7 +170,10 @@ class Stage4CZeroExportControllerService:
         self._command_sequence: int | None = None
         self._confirmed_requested_duty: float | None = None
         self._confirmed_actual_duty: float | None = None
+        self._confirmed_compare_ticks: int | None = None
+        self._confirmed_period_ticks: int | None = None
         self._safe_confirmed: bool | None = None
+        self._resolution_limit_direction: ZeroExportAction | None = None
 
         self._causal_after_ns: int | None = None
         self._settling_pending = False
@@ -186,6 +200,8 @@ class Stage4CZeroExportControllerService:
             command_sequence=self._command_sequence,
             confirmed_requested_duty_percent=self._confirmed_requested_duty,
             confirmed_actual_duty_percent=self._confirmed_actual_duty,
+            confirmed_compare_ticks=self._confirmed_compare_ticks,
+            confirmed_period_ticks=self._confirmed_period_ticks,
             safe_confirmed=self._safe_confirmed,
         )
 
@@ -255,6 +271,7 @@ class Stage4CZeroExportControllerService:
         self._causal_after_ns = None
         self._last_post_ack_cycle = None
         self._settling_pending = False
+        self._resolution_limit_direction = None
 
     def _freshness_ns(self) -> int:
         assert self._settings is not None
@@ -307,12 +324,33 @@ class Stage4CZeroExportControllerService:
                  or (requested > 0.0 and actual > 0.0 and status.compare_ticks is not None and status.compare_ticks > 0))
         )
 
+    @staticmethod
+    def _same_physical_pwm_state(before: ManualPwmStatus, after: ManualPwmStatus) -> bool:
+        before_actual = _finite(before.actual_duty_percent)
+        after_actual = _finite(after.actual_duty_percent)
+        return bool(
+            before.compare_ticks is not None
+            and after.compare_ticks is not None
+            and before.compare_ticks > 0
+            and after.compare_ticks > 0
+            and before.compare_ticks == after.compare_ticks
+            and before.period_ticks is not None
+            and after.period_ticks is not None
+            and before.period_ticks > 0
+            and before.period_ticks == after.period_ticks
+            and before_actual is not None
+            and after_actual is not None
+            and math.isclose(before_actual, after_actual, rel_tol=0.0, abs_tol=1e-12)
+        )
+
     def _apply_ack_evidence(self, status: ManualPwmStatus) -> None:
         self._actuator_node_id = status.node_id
         self._actuator_boot_id = status.boot_id
         self._command_sequence = status.command_sequence
         self._confirmed_requested_duty = _finite(status.requested_duty_percent)
         self._confirmed_actual_duty = _finite(status.actual_duty_percent)
+        self._confirmed_compare_ticks = status.compare_ticks
+        self._confirmed_period_ticks = status.period_ticks
 
     async def enable(self) -> ZeroExportControllerStatus:
         async with self._operation_lock:
@@ -334,6 +372,9 @@ class Stage4CZeroExportControllerService:
             self._sample_cycle_id = None
             self._measured_p_w = None
             self._sample_quality = None
+            self._confirmed_compare_ticks = None
+            self._confirmed_period_ticks = None
+            self._resolution_limit_direction = None
             try:
                 self._manual_pwm.reserve_pwm_owner(ZERO_EXPORT_PWM_OWNER)
                 self._owner_reserved = True
@@ -365,6 +406,15 @@ class Stage4CZeroExportControllerService:
             self._safe_confirmed = True
             self._enabled = True
             self._arm_after_ack()
+            self._diagnostic_log.append(
+                "ZERO_EXPORT_ENABLED",
+                source_id=self._settings.source_id,
+                phase=self._settings.phase,
+                p_deadband_w=self._settings.p_deadband_w,
+                node_id=self._actuator_node_id,
+                boot_id=self._actuator_boot_id,
+                sequence=self._command_sequence,
+            )
             return self.status()
 
     def _release_owner_best_effort(self) -> None:
@@ -379,6 +429,7 @@ class Stage4CZeroExportControllerService:
     async def _finish_safe(self, *, reason: str, blocked_state: ZeroExportControllerState) -> None:
         current = self._manual_pwm.manual_pwm_status()
         same, actuator_reason = self._same_pinned_actuator(current)
+        self._resolution_limit_direction = None
         if not same:
             self._enabled = False
             self._safe_confirmed = False
@@ -386,6 +437,12 @@ class Stage4CZeroExportControllerService:
             self._reason = actuator_reason or reason
             self._freshness_deadline_ns = None
             self._release_owner_best_effort()
+            self._diagnostic_log.append(
+                "ZERO_EXPORT_SAFE_BLOCK",
+                reason=self._reason,
+                state=self._state.value,
+                safe_confirmed=False,
+            )
             return
 
         safe = False
@@ -410,6 +467,15 @@ class Stage4CZeroExportControllerService:
         else:
             self._state = ZeroExportControllerState.SAFE_UNCONFIRMED
             self._reason = "SAFE_OFF_UNCONFIRMED"
+        self._diagnostic_log.append(
+            "ZERO_EXPORT_SAFE_BLOCK",
+            reason=self._reason,
+            state=self._state.value,
+            safe_confirmed=self._safe_confirmed,
+            node_id=self._actuator_node_id,
+            boot_id=self._actuator_boot_id,
+            sequence=self._command_sequence,
+        )
 
     async def disable(self) -> ZeroExportControllerStatus:
         async with self._operation_lock:
@@ -459,7 +525,15 @@ class Stage4CZeroExportControllerService:
             self._causal_after_ns = None
             self._last_post_ack_cycle = None
             self._settling_pending = False
+            self._resolution_limit_direction = None
             self._release_owner_best_effort()
+            self._diagnostic_log.append(
+                "ZERO_EXPORT_DISABLED",
+                safe_confirmed=True,
+                node_id=self._actuator_node_id,
+                boot_id=self._actuator_boot_id,
+                sequence=self._command_sequence,
+            )
             return self.status()
 
     async def _consume_events(self) -> None:
@@ -512,6 +586,7 @@ class Stage4CZeroExportControllerService:
             self._state = ZeroExportControllerState.SAFE_UNCONFIRMED
             self._reason = actuator_reason
             self._freshness_deadline_ns = None
+            self._resolution_limit_direction = None
             self._release_owner_best_effort()
             return
 
@@ -566,6 +641,34 @@ class Stage4CZeroExportControllerService:
         self._sample_cycle_id = cycle
         self._measured_p_w = measured_p
         self._sample_quality = sample.quality.value
+
+        if self._resolution_limit_direction is not None:
+            same_direction = bool(
+                (self._resolution_limit_direction is ZeroExportAction.INCREASE
+                 and measured_p < -self._settings.p_deadband_w)
+                or
+                (self._resolution_limit_direction is ZeroExportAction.DECREASE
+                 and measured_p > self._settings.p_deadband_w)
+            )
+            if same_direction:
+                if self._state is not ZeroExportControllerState.RESOLUTION_LIMIT:
+                    self._diagnostic_log.append(
+                        "ZERO_EXPORT_RESOLUTION_LIMIT",
+                        cycle_id=cycle,
+                        measured_p_w=measured_p,
+                        direction=self._resolution_limit_direction.value,
+                        requested_duty_percent=self._confirmed_requested_duty,
+                        actual_duty_percent=self._confirmed_actual_duty,
+                        compare_ticks=self._confirmed_compare_ticks,
+                        period_ticks=self._confirmed_period_ticks,
+                    )
+                self._action = ZeroExportAction.RESOLUTION_LIMIT
+                self._state = ZeroExportControllerState.RESOLUTION_LIMIT
+                self._reason = "PWM_RESOLUTION_LIMIT"
+                return
+            self._resolution_limit_direction = None
+            self._reason = None
+
         decision = calculate_zero_export_step(
             measured_p_w=measured_p,
             p_deadband_w=self._settings.p_deadband_w,
@@ -576,10 +679,36 @@ class Stage4CZeroExportControllerService:
         self._action = decision.action
         self._lower_bracket = decision.lower_bracket_duty_percent
         self._upper_bracket = decision.upper_bracket_duty_percent
+        self._reason = (
+            "LOW_AUTHORITY_LIMIT"
+            if decision.action is ZeroExportAction.LIMIT_LOW
+            else None
+        )
+        self._diagnostic_log.append(
+            "ZERO_EXPORT_DECISION",
+            cycle_id=cycle,
+            measured_p_w=measured_p,
+            action=decision.action.value,
+            confirmed_requested_duty_percent=self._confirmed_requested_duty,
+            next_requested_duty_percent=decision.next_duty_percent,
+            lower_bracket_duty_percent=self._lower_bracket,
+            upper_bracket_duty_percent=self._upper_bracket,
+        )
 
         if decision.next_duty_percent == self._confirmed_requested_duty:
             if decision.action is ZeroExportAction.HOLD:
                 self._state = ZeroExportControllerState.TARGET_BAND
+            elif decision.action is ZeroExportAction.LIMIT_LOW:
+                if self._state is not ZeroExportControllerState.LIMIT_LOW:
+                    self._diagnostic_log.append(
+                        "ZERO_EXPORT_LIMIT_LOW",
+                        cycle_id=cycle,
+                        measured_p_w=measured_p,
+                        confirmed_requested_duty_percent=self._confirmed_requested_duty,
+                        upper_bracket_duty_percent=self._upper_bracket,
+                        safe_confirmed=self._safe_confirmed,
+                    )
+                self._state = ZeroExportControllerState.LIMIT_LOW
             elif decision.action is ZeroExportAction.LIMIT_HIGH:
                 self._state = ZeroExportControllerState.LIMIT_HIGH
             elif decision.action is ZeroExportAction.SAFE_OFF:
@@ -590,6 +719,7 @@ class Stage4CZeroExportControllerService:
 
         self._state = ZeroExportControllerState.CONTROLLING
         requested = decision.next_duty_percent
+        before_status = current
         try:
             status = await self._manual_pwm.run_reserved_pwm(
                 requested,
@@ -609,6 +739,7 @@ class Stage4CZeroExportControllerService:
             self._state = ZeroExportControllerState.SAFE_UNCONFIRMED
             self._reason = actuator_reason
             self._freshness_deadline_ns = None
+            self._resolution_limit_direction = None
             self._release_owner_best_effort()
             return
         if not self._qualified_command_ack(status, requested):
@@ -618,8 +749,42 @@ class Stage4CZeroExportControllerService:
             )
             return
 
+        physical_unchanged = bool(
+            requested != self._confirmed_requested_duty
+            and requested > 0.0
+            and self._same_physical_pwm_state(before_status, status)
+        )
         self._apply_ack_evidence(status)
         self._safe_confirmed = (requested == 0.0)
+
+        if physical_unchanged and decision.action in {ZeroExportAction.INCREASE, ZeroExportAction.DECREASE}:
+            self._resolution_limit_direction = decision.action
+            self._action = ZeroExportAction.RESOLUTION_LIMIT
+            self._reason = "PWM_RESOLUTION_LIMIT"
+            self._arm_after_ack()
+            self._state = ZeroExportControllerState.RESOLUTION_LIMIT
+            self._diagnostic_log.append(
+                "ZERO_EXPORT_RESOLUTION_LIMIT",
+                cycle_id=cycle,
+                measured_p_w=measured_p,
+                direction=decision.action.value,
+                requested_duty_percent=self._confirmed_requested_duty,
+                actual_duty_percent=self._confirmed_actual_duty,
+                compare_ticks=self._confirmed_compare_ticks,
+                period_ticks=self._confirmed_period_ticks,
+            )
+            return
+
+        self._resolution_limit_direction = None
+        if decision.action is ZeroExportAction.LIMIT_LOW:
+            self._diagnostic_log.append(
+                "ZERO_EXPORT_LIMIT_LOW",
+                cycle_id=cycle,
+                measured_p_w=measured_p,
+                confirmed_requested_duty_percent=self._confirmed_requested_duty,
+                upper_bracket_duty_percent=self._upper_bracket,
+                safe_confirmed=self._safe_confirmed,
+            )
         self._arm_after_ack()
 
     def _selected_p(self, sample: MeasurementSample) -> float | None:
