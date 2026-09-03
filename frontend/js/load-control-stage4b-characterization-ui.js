@@ -239,7 +239,7 @@ async function runAction(action, successMessage) {
 }
 
 function createUi() {
-  const slot = element("lc-simulated-operator-slot");
+  const slot = element("lc-characterization-slot");
   if (!slot || element("lc-pchar-state")) return;
 
   const section = document.createElement("section");
@@ -287,9 +287,7 @@ function createUi() {
     <div id="lc-pchar-message" class="load-control-status-text" aria-live="polite"></div>
   `;
 
-  const simulated = slot.querySelector(".load-control-simulated-test-section");
-  if (simulated) slot.insertBefore(section, simulated);
-  else slot.append(section);
+  slot.append(section);
 
   const updateControls = () => renderStatus(state.status || { state: "IDLE", points: [] });
   element("lc-pchar-source").addEventListener("change", updateControls);
