@@ -177,7 +177,7 @@ async function runAction(action, successMessage) {
 }
 
 function createUi() {
-  const slot = element("lc-simulated-operator-slot");
+  const slot = element("lc-zero-export-slot");
   if (!slot || element("lc-zec-state")) return;
 
   const section = document.createElement("section");
@@ -231,9 +231,7 @@ function createUi() {
     <div id="lc-zec-message" class="load-control-status-text" aria-live="polite"></div>
   `;
 
-  const observer = slot.querySelector(".load-control-p-observer");
-  if (observer) slot.insertBefore(section, observer);
-  else slot.prepend(section);
+  slot.append(section);
 
   const updateControls = () => renderStatus(state.status || { state: "DISABLED" });
   element("lc-zec-source").addEventListener("change", updateControls);
