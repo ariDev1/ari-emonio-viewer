@@ -8,8 +8,9 @@ CSS = ROOT / "frontend/css/load-control/p-characterization.css"
 APP = ROOT / "src/emonio_viewer/server/app_v0416.py"
 
 
-def test_stage4b_frontend_files_exist_and_expose_operator_controls() -> None:
+def test_stage4b_frontend_files_exist_and_expose_engineering_controls() -> None:
     source = UI.read_text(encoding="utf-8")
+    assert 'element("lc-characterization-slot")' in source
     for field_id in (
         "lc-pchar-source",
         "lc-pchar-phase",
@@ -27,6 +28,7 @@ def test_stage4b_frontend_files_exist_and_expose_operator_controls() -> None:
         "lc-pchar-results",
     ):
         assert field_id in source
+    assert 'element("lc-simulated-operator-slot")' not in source
 
 
 def test_stage4b_ui_states_exact_scientific_and_physical_boundaries() -> None:
@@ -46,11 +48,11 @@ def test_stage4b_ui_states_exact_scientific_and_physical_boundaries() -> None:
 
 def test_stage4b_uses_existing_source_list_and_explicit_sweep_points() -> None:
     source = UI.read_text(encoding="utf-8")
-    assert 'getSafeTestSources' in source
-    assert 'parseExplicitDuties' in source
-    assert 'RUN EXPLICIT SWEEP' in source
-    assert 'CAPTURE CURRENT DUTY' in source
-    assert 'duties: parseExplicitDuties' in source
+    assert "getSafeTestSources" in source
+    assert "parseExplicitDuties" in source
+    assert "RUN EXPLICIT SWEEP" in source
+    assert "CAPTURE CURRENT DUTY" in source
+    assert "duties: parseExplicitDuties" in source
 
 
 def test_stage4b_results_show_command_identity_and_signed_p_statistics() -> None:
@@ -86,11 +88,14 @@ def test_stage4b_api_client_exposes_characterization_routes_only() -> None:
         assert forbidden not in source
 
 
-def test_stage4b_uses_dedicated_structured_css_and_loads_after_stage4a() -> None:
+def test_stage4b_uses_dedicated_css_and_loads_as_collapsed_engineering_tool() -> None:
     css = CSS.read_text(encoding="utf-8")
     app = APP.read_text(encoding="utf-8")
     assert ".load-control-p-characterization" in css
     assert "p-characterization.css" in app
-    stage4a = app.index("load-control-stage4a-ui.js")
+    assert "load-control-stage4b-characterization-ui.js" in app
+    assert "load-control-stage4a-ui.js" not in app
+    stage3b = app.index("load-control-stage3b-ui.js")
     stage4b = app.index("load-control-stage4b-characterization-ui.js")
-    assert stage4a < stage4b
+    stage4c = app.index("load-control-stage4c-ui.js")
+    assert stage3b < stage4b < stage4c
