@@ -14,7 +14,9 @@ class ZeroExportAction(str, Enum):
     INCREASE = "INCREASE"
     HOLD = "HOLD"
     DECREASE = "DECREASE"
+    LIMIT_LOW = "LIMIT_LOW"
     LIMIT_HIGH = "LIMIT_HIGH"
+    RESOLUTION_LIMIT = "RESOLUTION_LIMIT"
     SAFE_OFF = "SAFE_OFF"
 
 
@@ -95,6 +97,13 @@ def calculate_zero_export_step(
         if upper is not None and confirmed >= upper:
             upper = None
         if confirmed == SAFE_OFF_DUTY_PERCENT:
+            if upper is not None and upper <= ACTIVE_DUTY_MIN_PERCENT:
+                return ZeroExportDecision(
+                    action=ZeroExportAction.LIMIT_LOW,
+                    next_duty_percent=SAFE_OFF_DUTY_PERCENT,
+                    lower_bracket_duty_percent=lower,
+                    upper_bracket_duty_percent=upper,
+                )
             return ZeroExportDecision(
                 action=ZeroExportAction.INCREASE,
                 next_duty_percent=ACTIVE_DUTY_MIN_PERCENT,
@@ -136,7 +145,7 @@ def calculate_zero_export_step(
 
     if confirmed <= ACTIVE_DUTY_MIN_PERCENT:
         return ZeroExportDecision(
-            action=ZeroExportAction.DECREASE,
+            action=ZeroExportAction.LIMIT_LOW,
             next_duty_percent=SAFE_OFF_DUTY_PERCENT,
             lower_bracket_duty_percent=lower,
             upper_bracket_duty_percent=upper,
