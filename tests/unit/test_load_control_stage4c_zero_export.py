@@ -73,7 +73,7 @@ def test_inside_deadband_holds_without_changing_bracket() -> None:
     assert decision.upper_bracket_duty_percent == 62.5
 
 
-def test_positive_p_at_minimum_active_duty_commands_explicit_off() -> None:
+def test_positive_p_at_minimum_active_duty_enters_low_authority_limit_and_commands_off() -> None:
     decision = calculate_zero_export_step(
         measured_p_w=5.0,
         p_deadband_w=2.0,
@@ -81,8 +81,10 @@ def test_positive_p_at_minimum_active_duty_commands_explicit_off() -> None:
         lower_bracket_duty_percent=None,
         upper_bracket_duty_percent=None,
     )
-    assert decision.action is ZeroExportAction.DECREASE
+    assert decision.action is ZeroExportAction.LIMIT_LOW
     assert decision.next_duty_percent == 0.0
+    assert decision.lower_bracket_duty_percent is None
+    assert decision.upper_bracket_duty_percent == 25.0
 
 
 def test_positive_p_while_off_stays_explicitly_off() -> None:
