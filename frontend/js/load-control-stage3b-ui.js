@@ -2,11 +2,8 @@ import { getLanQualificationStatus } from "./load-control-api.js";
 import {
   applyManualPwmDuty,
   getManualPwmStatus,
-  getSimulatedTestStatus,
-  runSimulatedCommandTest,
   turnManualPwmOff,
 } from "./load-control-stage3b-api.js";
-
 
 const PWM_DUTY_CONTROL_CAPABILITY = "PWM_DUTY_CONTROL";
 const ACTIVE_STATES = new Set([
@@ -16,16 +13,13 @@ const ACTIVE_STATES = new Set([
 ]);
 
 let pwmStatus = null;
-let simulatedStatus = null;
 let qualificationStatus = null;
 let created = false;
 let pwmRequestActive = false;
 
-
 function element(id) {
   return document.getElementById(id);
 }
-
 
 function setStatusTone(id, tone) {
   const target = element(id);
@@ -34,18 +28,23 @@ function setStatusTone(id, tone) {
   card.dataset.tone = tone;
 }
 
+function dutyText(value) {
+  if (value === null || value === undefined) return "—";
+  const duty = Number(value);
+  return Number.isFinite(duty) ? `${duty.toFixed(6)} %` : "—";
+}
 
 function createUi() {
   if (created) return true;
-  const slot = element("lc-simulated-operator-slot");
+  const slot = element("lc-manual-pwm-slot");
   if (!slot) return false;
 
   const pwmSection = document.createElement("section");
   pwmSection.className = "load-control-section load-control-primary-section load-control-pwm-section";
   pwmSection.innerHTML = `
-    <div class="load-control-section-header"><h3>Manual PWM duty</h3><span>QUALIFIED ACTUATOR</span></div>
+    <div class="load-control-section-header"><h3>Manual PWM duty</h3><span>ENGINEERING · QUALIFIED ACTUATOR</span></div>
     <p class="load-control-section-note">
-      Manual engineering control only. This control does not use Emonio measurements and does not convert watts to duty.
+      Manual engineering control only. This control does not use Emonio measurements and does not convert watts to duty. Do not use it while automatic zero-export control owns PWM authority.
     </p>
     <div class="load-control-pwm-control">
       <label>
@@ -77,45 +76,12 @@ function createUi() {
     </details>
   `;
 
-  const simulatedSection = document.createElement("section");
-  simulatedSection.className = "load-control-section load-control-primary-section load-control-simulated-test-section";
-  simulatedSection.innerHTML = `
-    <div class="load-control-section-header"><h3>Simulated test</h3><span>1 W</span></div>
-    <p class="load-control-section-note load-control-safe-warning">
-      NO PHYSICAL OUTPUT. This action requests a fixed simulated load of A=1 W, B=0 W, C=0 W. After the test, SAFE 0 W is required.
-    </p>
-    <div class="load-control-primary-status load-control-operator-status" aria-label="Simulated test state">
-      <div><span>State</span><strong id="lc-simulated-state">IDLE</strong></div>
-      <div><span>Request</span><strong id="lc-simulated-request">A 1.0 W · B 0.0 W · C 0.0 W</strong></div>
-      <div><span>Reset</span><strong id="lc-simulated-reset">NOT REQUIRED</strong></div>
-    </div>
-    <div class="load-control-actions">
-      <button id="lc-simulated-run" type="button" disabled>TEST 1 W — PHASE A</button>
-    </div>
-    <div id="lc-simulated-message" class="load-control-status-text" aria-live="polite">
-      Connect the actuator and select the Emonio source first.
-    </div>
-    <details class="load-control-engineering-inline">
-      <summary>ENGINEERING DETAILS</summary>
-      <p class="load-control-section-note">
-        Fixed protocol request: control_enabled=true · P request A=1 W, B=0 W, C=0 W · Q request A/B/C=0 var · No retry · Measured Emonio P/Q is provenance only · NONZERO REAL CONTROL DISABLED.
-      </p>
-      <div class="load-control-safe-status" aria-label="Stage 3B simulated command evidence">
-        <div><span>COMMAND sequence</span><strong id="lc-simulated-sequence">—</strong></div>
-        <div><span>ACK result</span><strong id="lc-simulated-ack">—</strong></div>
-        <div><span>Rejection</span><strong id="lc-simulated-rejection">—</strong></div>
-      </div>
-    </details>
-  `;
-
-  slot.append(pwmSection, simulatedSection);
+  slot.append(pwmSection);
   element("lc-pwm-apply").addEventListener("click", applyPwmDuty);
   element("lc-pwm-off").addEventListener("click", turnPwmOff);
-  element("lc-simulated-run").addEventListener("click", runSimulatedTest);
   created = true;
   return true;
 }
-
 
 function setPwmMessage(message, isError = false) {
   const target = element("lc-pwm-message");
@@ -124,34 +90,11 @@ function setPwmMessage(message, isError = false) {
   target.dataset.error = isError ? "true" : "false";
 }
 
-
-function setSimulatedMessage(message, isError = false) {
-  const target = element("lc-simulated-message");
-  if (!target) return;
-  target.textContent = message || "";
-  target.dataset.error = isError ? "true" : "false";
-}
-
-
-function powerTriplet(value) {
-  if (!value) return "A 1.0 W · B 0.0 W · C 0.0 W";
-  return `A ${Number(value.a).toFixed(1)} W · B ${Number(value.b).toFixed(1)} W · C ${Number(value.c).toFixed(1)} W`;
-}
-
-
-function dutyText(value) {
-  if (value === null || value === undefined) return "—";
-  const duty = Number(value);
-  return Number.isFinite(duty) ? `${duty.toFixed(6)} %` : "—";
-}
-
-
 function pwmQualified() {
   return Boolean(qualificationStatus?.connected)
     && Boolean(qualificationStatus?.hello_qualified)
     && Boolean(qualificationStatus?.capabilities?.includes(PWM_DUTY_CONTROL_CAPABILITY));
 }
-
 
 function updatePwmControls() {
   const input = element("lc-pwm-duty");
@@ -165,29 +108,17 @@ function updatePwmControls() {
   if (offButton) offButton.disabled = !enabled;
 }
 
-
-function updateSimulatedButton() {
-  const button = element("lc-simulated-run");
-  if (!button) return;
-  const active = ACTIVE_STATES.has(simulatedStatus?.state);
-  button.disabled = !Boolean(simulatedStatus?.admissible)
-    || !Boolean(qualificationStatus?.hello_qualified)
-    || active
-    || Boolean(simulatedStatus?.safe_reset_required);
-}
-
-
 function renderPwm(status) {
   pwmStatus = status || null;
   if (!createUi()) return;
 
-  const state = status?.state || "DISCONNECTED";
-  const rejected = state === "REJECTED";
-  const applied = state === "APPLIED";
-  const off = state === "OFF";
-  const active = ACTIVE_STATES.has(state);
+  const currentState = status?.state || "DISCONNECTED";
+  const rejected = currentState === "REJECTED";
+  const applied = currentState === "APPLIED";
+  const off = currentState === "OFF";
+  const active = ACTIVE_STATES.has(currentState);
 
-  element("lc-pwm-state").textContent = state;
+  element("lc-pwm-state").textContent = currentState;
   element("lc-pwm-requested").textContent = dutyText(status?.requested_duty_percent);
   element("lc-pwm-actual").textContent = dutyText(status?.actual_duty_percent);
   element("lc-pwm-sequence").textContent = status?.command_sequence ?? "—";
@@ -198,15 +129,9 @@ function renderPwm(status) {
 
   setStatusTone(
     "lc-pwm-state",
-    rejected
-      ? "error"
-      : active
-        ? "warn"
-        : applied || off
-          ? "ok"
-          : "idle",
+    rejected ? "error" : active ? "warn" : applied || off ? "ok" : "idle",
   );
-  setStatusTone("lc-pwm-actual", applied ? "ok" : off ? "ok" : "idle");
+  setStatusTone("lc-pwm-actual", applied || off ? "ok" : "idle");
 
   if (!qualificationStatus?.connected || !qualificationStatus?.hello_qualified) {
     setPwmMessage("Connect and qualify an actuator first.");
@@ -227,59 +152,15 @@ function renderPwm(status) {
   updatePwmControls();
 }
 
-
-function renderSimulated(status) {
-  simulatedStatus = status || null;
-  if (!createUi()) return;
-
-  const simulatedState = status?.state || "IDLE";
-  const active = ACTIVE_STATES.has(simulatedState);
-  const rejected = simulatedState === "REJECTED";
-  const resetRequired = Boolean(status?.safe_reset_required);
-
-  element("lc-simulated-state").textContent = simulatedState;
-  element("lc-simulated-request").textContent = powerTriplet(status?.fixed_request);
-  element("lc-simulated-reset").textContent = resetRequired
-    ? "ZERO RESET REQUIRED"
-    : "NOT REQUIRED";
-  element("lc-simulated-sequence").textContent = status?.command_sequence ?? "—";
-  element("lc-simulated-ack").textContent = status?.ack_result || "—";
-  element("lc-simulated-rejection").textContent = status?.rejection_reason || "—";
-
-  setStatusTone(
-    "lc-simulated-state",
-    rejected
-      ? "error"
-      : resetRequired || active
-        ? "warn"
-        : simulatedState === "PASSED"
-          ? "ok"
-          : "idle",
-  );
-  setStatusTone(
-    "lc-simulated-reset",
-    resetRequired
-      ? "warn"
-      : simulatedState === "PASSED"
-        ? "ok"
-        : "idle",
-  );
-  updateSimulatedButton();
-}
-
-
 async function refresh() {
   if (!createUi()) return;
-  const [qualification, pwm, simulated] = await Promise.all([
+  const [qualification, pwm] = await Promise.all([
     getLanQualificationStatus(),
     getManualPwmStatus(),
-    getSimulatedTestStatus(),
   ]);
   qualificationStatus = qualification;
   renderPwm(pwm);
-  renderSimulated(simulated);
 }
-
 
 function readPwmDuty() {
   const input = element("lc-pwm-duty");
@@ -291,15 +172,13 @@ function readPwmDuty() {
   return duty;
 }
 
-
 async function applyPwmDuty() {
   try {
     const duty = readPwmDuty();
     pwmRequestActive = true;
     updatePwmControls();
     setPwmMessage(`Applying manual PWM duty ${duty.toFixed(6)} %...`);
-    const status = await applyManualPwmDuty(duty);
-    renderPwm(status);
+    renderPwm(await applyManualPwmDuty(duty));
   } catch (error) {
     setPwmMessage(error.message, true);
   } finally {
@@ -308,15 +187,13 @@ async function applyPwmDuty() {
     updatePwmControls();
   }
 }
-
 
 async function turnPwmOff() {
   try {
     pwmRequestActive = true;
     updatePwmControls();
     setPwmMessage("Sending explicit PWM OFF...");
-    const status = await turnManualPwmOff();
-    renderPwm(status);
+    renderPwm(await turnManualPwmOff());
   } catch (error) {
     setPwmMessage(error.message, true);
   } finally {
@@ -326,42 +203,16 @@ async function turnPwmOff() {
   }
 }
 
-
-async function runSimulatedTest() {
-  const button = element("lc-simulated-run");
-  try {
-    if (button) button.disabled = true;
-    setSimulatedMessage("Waiting for a fresh Emonio sample, then applying the fixed simulated 1 W Phase A test...");
-    const status = await runSimulatedCommandTest();
-    renderSimulated(status);
-    if (status?.safe_reset_required) {
-      setSimulatedMessage("1 W simulated test finished. SAFE 0 W is required before another 1 W test.");
-    } else if (status?.state === "REJECTED") {
-      setSimulatedMessage(`Simulated test rejected: ${status?.rejection_reason || "unknown reason"}.`, true);
-    }
-  } catch (error) {
-    setSimulatedMessage(error.message, true);
-  } finally {
-    await refresh().catch(() => {});
-    updateSimulatedButton();
-  }
-}
-
-
 function start() {
   if (!createUi()) {
     window.setTimeout(start, 50);
     return;
   }
-  refresh().catch((error) => {
-    setPwmMessage(error.message, true);
-    setSimulatedMessage(error.message, true);
-  });
+  refresh().catch((error) => setPwmMessage(error.message, true));
   window.setInterval(() => {
     const panel = element("load-control-panel");
     if (panel && !panel.hidden) refresh().catch(() => {});
   }, 1000);
 }
-
 
 start();
