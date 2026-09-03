@@ -50,6 +50,8 @@ def _status_payload(status: ZeroExportControllerStatus) -> dict:
         "command_sequence": status.command_sequence,
         "confirmed_requested_duty_percent": status.confirmed_requested_duty_percent,
         "confirmed_actual_duty_percent": status.confirmed_actual_duty_percent,
+        "confirmed_compare_ticks": status.confirmed_compare_ticks,
+        "confirmed_period_ticks": status.confirmed_period_ticks,
         "safe_confirmed": status.safe_confirmed,
     }
 
