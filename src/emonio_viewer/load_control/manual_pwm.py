@@ -247,13 +247,13 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
 
             self._manual_pwm_ack_result = frame.result
             self._manual_pwm_rejection_reason = None
-            self._manual_pwm_requested_duty = frame.requested_duty_percent
+            self._manual_pwm_requested_duty = command.duty_percent
             self._manual_pwm_actual_duty = frame.actual_duty_percent
             self._manual_pwm_compare_ticks = frame.compare_ticks
             self._manual_pwm_period_ticks = frame.period_ticks
             self._manual_pwm_state = (
                 ManualPwmState.OFF
-                if frame.requested_duty_percent == 0.0
+                if command.duty_percent == 0.0
                 else ManualPwmState.APPLIED
             )
             self._diagnostic_log.append(
@@ -261,7 +261,8 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
                 node_id=frame.node_id,
                 boot_id=frame.boot_id,
                 sequence=frame.sequence,
-                requested_duty_percent=frame.requested_duty_percent,
+                requested_duty_percent=command.duty_percent,
+                ack_requested_duty_percent=frame.requested_duty_percent,
                 actual_duty_percent=frame.actual_duty_percent,
                 compare_ticks=frame.compare_ticks,
                 period_ticks=frame.period_ticks,
