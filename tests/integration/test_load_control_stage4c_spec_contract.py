@@ -217,7 +217,7 @@ def test_stage4c_frontend_has_no_manual_pwm_hook_or_operator_duty_increment() ->
     ):
         assert forbidden not in combined
     for required in (
-        "Canonical signed P is the only feedback input.",
+        "Canonical signed P is the only measurement feedback input.",
         "Target is fixed at 0 W.",
         "No watts-to-duty calibration is used.",
         "No operator-selected duty increment is used.",
