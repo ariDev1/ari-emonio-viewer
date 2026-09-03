@@ -62,6 +62,8 @@ def _status() -> ZeroExportControllerStatus:
         command_sequence=21,
         confirmed_requested_duty_percent=56.25,
         confirmed_actual_duty_percent=56.20214395,
+        confirmed_compare_ticks=367,
+        confirmed_period_ticks=653,
         safe_confirmed=False,
     )
 
@@ -115,6 +117,8 @@ def test_status_serializes_zero_export_evidence() -> None:
             "command_sequence": 21,
             "confirmed_requested_duty_percent": 56.25,
             "confirmed_actual_duty_percent": 56.20214395,
+            "confirmed_compare_ticks": 367,
+            "confirmed_period_ticks": 653,
             "safe_confirmed": False,
         }
 
