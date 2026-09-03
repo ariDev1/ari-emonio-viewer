@@ -13,6 +13,7 @@ from .stage3b import Stage3BExplicitCommandService
 
 
 PWM_DUTY_CONTROL_CAPABILITY = "PWM_DUTY_CONTROL"
+PWM_ACK_REQUESTED_DUTY_ABS_TOLERANCE_PERCENT = 1e-5
 
 
 class ManualPwmState(str, Enum):
@@ -173,7 +174,12 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
             return "PWM_ACK_SEQUENCE_MISMATCH"
         if ack.result != "APPLIED":
             return "PWM_ACK_RESULT_MISMATCH"
-        if ack.requested_duty_percent != command.duty_percent:
+        if not math.isclose(
+            ack.requested_duty_percent,
+            command.duty_percent,
+            rel_tol=0.0,
+            abs_tol=PWM_ACK_REQUESTED_DUTY_ABS_TOLERANCE_PERCENT,
+        ):
             return "PWM_ACK_REQUESTED_DUTY_MISMATCH"
         if command.duty_percent == 0.0:
             if ack.actual_duty_percent != 0.0 or ack.compare_ticks != 0:
