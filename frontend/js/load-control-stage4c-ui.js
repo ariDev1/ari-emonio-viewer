@@ -109,6 +109,8 @@ function renderStatus(status) {
   setText("lc-zec-action", state.status.action || "—");
   setText("lc-zec-confirmed-requested", formatDuty(state.status.confirmed_requested_duty_percent));
   setText("lc-zec-confirmed-actual", formatDuty(state.status.confirmed_actual_duty_percent));
+  setText("lc-zec-confirmed-compare", formatSequence(state.status.confirmed_compare_ticks));
+  setText("lc-zec-confirmed-period", formatSequence(state.status.confirmed_period_ticks));
   setText("lc-zec-lower", formatDuty(state.status.lower_bracket_duty_percent));
   setText("lc-zec-upper", formatDuty(state.status.upper_bracket_duty_percent));
   setText("lc-zec-node", state.status.actuator_node_id || "—");
@@ -189,7 +191,7 @@ function createUi() {
       <span>Stage 4C · automatic physical control</span>
     </div>
     <p class="load-control-section-note load-control-zero-export-boundary">
-      Automatic physical PWM control is active when enabled. Canonical signed P is the only feedback input. Target is fixed at 0 W. No watts-to-duty calibration is used. No operator-selected duty increment is used. No Q or PF control is used. No PID is active. No automatic reconnect is used. The qualified PWM range is OFF 0 % and active 25–75 %. A control fault requests one explicit OFF. If OFF cannot be confirmed, the state is SAFE_UNCONFIRMED.
+      Automatic physical PWM control is active when enabled. Canonical signed P is the only measurement feedback input. Target is fixed at 0 W. No watts-to-duty calibration is used. No operator-selected duty increment is used. No Q or PF control is used. No PID is active. No automatic reconnect is used. The qualified requested-duty range is OFF 0 % and active 25–75 %. Actual PWM duty is quantized by actuator timer-tick resolution. LIMIT_LOW holds confirmed OFF when the observed sign bracket places zero between OFF and the 25 % active minimum; operator disable and re-enable is required to re-test that minimum. RESOLUTION_LIMIT holds the current physical PWM state while the same control direction would produce no timer-tick change. A control fault requests one explicit OFF. If OFF cannot be confirmed, the state is SAFE_UNCONFIRMED.
     </p>
     <div class="load-control-zero-export-config">
       <label>Emonio source
@@ -221,6 +223,8 @@ function createUi() {
       <div><span>Control action</span><strong id="lc-zec-action">—</strong></div>
       <div><span>Confirmed requested duty</span><strong id="lc-zec-confirmed-requested">—</strong></div>
       <div><span>Confirmed actual duty</span><strong id="lc-zec-confirmed-actual">—</strong></div>
+      <div><span>Compare ticks</span><strong id="lc-zec-confirmed-compare">—</strong></div>
+      <div><span>Period ticks</span><strong id="lc-zec-confirmed-period">—</strong></div>
       <div><span>Negative-P bracket</span><strong id="lc-zec-lower">—</strong></div>
       <div><span>Positive-P bracket</span><strong id="lc-zec-upper">—</strong></div>
       <div><span>Actuator node</span><strong id="lc-zec-node">—</strong></div>
