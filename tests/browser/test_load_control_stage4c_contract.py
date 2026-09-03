@@ -24,6 +24,8 @@ def test_stage4c_frontend_exposes_only_required_operator_configuration() -> None
         "lc-zec-action",
         "lc-zec-confirmed-requested",
         "lc-zec-confirmed-actual",
+        "lc-zec-confirmed-compare",
+        "lc-zec-confirmed-period",
         "lc-zec-lower",
         "lc-zec-upper",
         "lc-zec-safe",
@@ -38,13 +40,15 @@ def test_stage4c_ui_states_control_and_scientific_boundaries() -> None:
     source = UI.read_text(encoding="utf-8")
     for statement in (
         "Automatic physical PWM control is active when enabled",
-        "Canonical signed P is the only feedback input",
+        "Canonical signed P is the only measurement feedback input",
         "Target is fixed at 0 W",
         "No watts-to-duty calibration",
         "No Q or PF control",
         "No automatic reconnect",
-        "OFF 0 %",
-        "active 25–75 %",
+        "requested-duty range is OFF 0 % and active 25–75 %",
+        "timer-tick resolution",
+        "LIMIT_LOW",
+        "RESOLUTION_LIMIT",
         "SAFE_UNCONFIRMED",
     ):
         assert statement in source
