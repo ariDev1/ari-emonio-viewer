@@ -142,7 +142,7 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
             admissible=admissible,
         )
 
-    def _manual_reject(self, reason: str) -> ManualPwmStatus:
+    def _manual_reject(self, reason: str, **diagnostic_fields) -> ManualPwmStatus:
         self._manual_pwm_state = ManualPwmState.REJECTED
         self._manual_pwm_rejection_reason = reason
         self._manual_pwm_ack_result = None
@@ -151,6 +151,7 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
             reason=reason,
             sequence=self._manual_pwm_sequence,
             requested_duty_percent=self._manual_pwm_requested_duty,
+            **diagnostic_fields,
         )
         return self.manual_pwm_status()
 
@@ -230,6 +231,12 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
 
             mismatch = self._pwm_ack_mismatch(command, frame)
             if mismatch is not None:
+                if mismatch == "PWM_ACK_REQUESTED_DUTY_MISMATCH":
+                    return self._manual_reject(
+                        mismatch,
+                        commanded_duty_percent=command.duty_percent,
+                        ack_requested_duty_percent=frame.requested_duty_percent,
+                    )
                 return self._manual_reject(mismatch)
 
             self._manual_pwm_ack_result = frame.result
