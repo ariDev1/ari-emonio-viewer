@@ -52,8 +52,8 @@ def test_stage4c_calculator_is_p_only_with_fixed_qualified_duty_bounds() -> None
     assert "q" not in names
     assert "pf" not in names
     assert "SAFE_OFF_DUTY_PERCENT = 0.0" in source
-    assert "ACTIVE_DUTY_MIN_PERCENT = 25.0" in source
-    assert "ACTIVE_DUTY_MAX_PERCENT = 75.0" in source
+    assert "ACTIVE_DUTY_MIN_PERCENT = 5.0" in source
+    assert "ACTIVE_DUTY_MAX_PERCENT = 95.0" in source
     assert "from emonio_viewer" not in source
 
 
