@@ -1,3 +1,7 @@
+import { initializeRightPanelInformation } from "./right-panel-information.js";
+
+initializeRightPanelInformation();
+
 const ORDER = [
   "state",
   "firmware_version",
