@@ -296,6 +296,15 @@ class Stage4CZeroExportControllerService:
         assert self._settings is not None
         self._event_bus_drops_at_arm = self._bus.dropped_deliveries(self._settings.source_id)
         self._state = ZeroExportControllerState.WAITING_FOR_SAMPLE
+        self._diagnostic_log.append(
+            "ZERO_EXPORT_CAUSAL_BOUNDARY_ARMED",
+            source_id=self._settings.source_id,
+            phase=self._settings.phase,
+            command_sequence=self._command_sequence,
+            causal_after_ns=now,
+            freshness_deadline_ns=self._freshness_deadline_ns,
+            controller_state=self._state.value,
+        )
 
     def _stale_diagnostic_fields(
         self,
@@ -706,6 +715,15 @@ class Stage4CZeroExportControllerService:
         if self._settling_pending:
             self._settling_pending = False
             self._state = ZeroExportControllerState.SETTLING
+            self._diagnostic_log.append(
+                "ZERO_EXPORT_SETTLING_SAMPLE",
+                source_id=self._settings.source_id,
+                phase=self._settings.phase,
+                cycle_id=cycle,
+                cycle_finished_utc=sample.timing.cycle_finished_utc.isoformat(),
+                cycle_finished_monotonic_ns=sample.timing.cycle_finished_monotonic_ns,
+                controller_state=self._state.value,
+            )
             return
 
         measured_p = self._selected_p(sample)
@@ -785,11 +803,33 @@ class Stage4CZeroExportControllerService:
             if decision.action is ZeroExportAction.LIMIT_LOW
             else None
         )
+
+        if decision.next_duty_percent == self._confirmed_requested_duty:
+            if decision.action is ZeroExportAction.HOLD:
+                decision_state = ZeroExportControllerState.TARGET_BAND
+            elif decision.action is ZeroExportAction.LIMIT_LOW:
+                decision_state = ZeroExportControllerState.LIMIT_LOW
+            elif decision.action is ZeroExportAction.LIMIT_HIGH:
+                decision_state = ZeroExportControllerState.LIMIT_HIGH
+            elif decision.action is ZeroExportAction.SAFE_OFF:
+                decision_state = ZeroExportControllerState.SAFE_OFF
+            else:
+                decision_state = ZeroExportControllerState.CONTROLLING
+        else:
+            decision_state = ZeroExportControllerState.CONTROLLING
+
         self._diagnostic_log.append(
             "ZERO_EXPORT_DECISION",
+            source_id=self._settings.source_id,
+            phase=self._settings.phase,
+            p_deadband_w=self._settings.p_deadband_w,
             cycle_id=cycle,
+            cycle_finished_utc=sample.timing.cycle_finished_utc.isoformat(),
+            cycle_finished_monotonic_ns=sample.timing.cycle_finished_monotonic_ns,
             measured_p_w=measured_p,
             action=decision.action.value,
+            controller_state=decision_state.value,
+            reason=self._reason,
             confirmed_requested_duty_percent=self._confirmed_requested_duty,
             next_requested_duty_percent=decision.next_duty_percent,
             lower_bracket_duty_percent=self._lower_bracket,
