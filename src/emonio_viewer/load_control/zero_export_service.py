@@ -24,6 +24,7 @@ from .zero_export import (
 ZERO_EXPORT_PWM_OWNER = "STAGE4C_ZERO_EXPORT"
 _EVENT_QUEUE_WAIT_S = 0.05
 _ACQUISITION_EVENT_PREFIX = "ACQUISITION_"
+_RESOLUTION_LIMIT_HEARTBEAT_CYCLES = 10
 
 
 class ZeroExportControllerState(str, Enum):
@@ -174,6 +175,7 @@ class Stage4CZeroExportControllerService:
         self._confirmed_period_ticks: int | None = None
         self._safe_confirmed: bool | None = None
         self._resolution_limit_direction: ZeroExportAction | None = None
+        self._resolution_limit_last_log_cycle: int | None = None
 
         self._causal_after_ns: int | None = None
         self._settling_pending = False
@@ -275,6 +277,7 @@ class Stage4CZeroExportControllerService:
         self._last_accepted_sample_finished_ns = None
         self._settling_pending = False
         self._resolution_limit_direction = None
+        self._resolution_limit_last_log_cycle = None
         self._event_bus_drops_at_arm = 0
 
     def _freshness_ns(self) -> int:
@@ -428,6 +431,7 @@ class Stage4CZeroExportControllerService:
             self._confirmed_compare_ticks = None
             self._confirmed_period_ticks = None
             self._resolution_limit_direction = None
+            self._resolution_limit_last_log_cycle = None
             try:
                 self._manual_pwm.reserve_pwm_owner(ZERO_EXPORT_PWM_OWNER)
                 self._owner_reserved = True
@@ -490,6 +494,7 @@ class Stage4CZeroExportControllerService:
         current = self._manual_pwm.manual_pwm_status()
         same, actuator_reason = self._same_pinned_actuator(current)
         self._resolution_limit_direction = None
+        self._resolution_limit_last_log_cycle = None
         if not same:
             self._enabled = False
             self._safe_confirmed = False
@@ -589,6 +594,7 @@ class Stage4CZeroExportControllerService:
             self._last_accepted_sample_finished_ns = None
             self._settling_pending = False
             self._resolution_limit_direction = None
+            self._resolution_limit_last_log_cycle = None
             self._event_bus_drops_at_arm = 0
             self._release_owner_best_effort()
             self._diagnostic_log.append(
@@ -656,6 +662,7 @@ class Stage4CZeroExportControllerService:
             self._reason = actuator_reason
             self._freshness_deadline_ns = None
             self._resolution_limit_direction = None
+            self._resolution_limit_last_log_cycle = None
             self._release_owner_best_effort()
             return
 
@@ -739,11 +746,28 @@ class Stage4CZeroExportControllerService:
                         compare_ticks=self._confirmed_compare_ticks,
                         period_ticks=self._confirmed_period_ticks,
                     )
+                    self._resolution_limit_last_log_cycle = cycle
+                elif (
+                    self._resolution_limit_last_log_cycle is None
+                    or cycle - self._resolution_limit_last_log_cycle >= _RESOLUTION_LIMIT_HEARTBEAT_CYCLES
+                ):
+                    self._diagnostic_log.append(
+                        "ZERO_EXPORT_RESOLUTION_LIMIT_ACTIVE",
+                        cycle_id=cycle,
+                        measured_p_w=measured_p,
+                        direction=self._resolution_limit_direction.value,
+                        requested_duty_percent=self._confirmed_requested_duty,
+                        actual_duty_percent=self._confirmed_actual_duty,
+                        compare_ticks=self._confirmed_compare_ticks,
+                        period_ticks=self._confirmed_period_ticks,
+                    )
+                    self._resolution_limit_last_log_cycle = cycle
                 self._action = ZeroExportAction.RESOLUTION_LIMIT
                 self._state = ZeroExportControllerState.RESOLUTION_LIMIT
                 self._reason = "PWM_RESOLUTION_LIMIT"
                 return
             self._resolution_limit_direction = None
+            self._resolution_limit_last_log_cycle = None
             self._reason = None
 
         decision = calculate_zero_export_step(
@@ -817,6 +841,7 @@ class Stage4CZeroExportControllerService:
             self._reason = actuator_reason
             self._freshness_deadline_ns = None
             self._resolution_limit_direction = None
+            self._resolution_limit_last_log_cycle = None
             self._release_owner_best_effort()
             return
         if not self._qualified_command_ack(status, requested):
@@ -836,6 +861,7 @@ class Stage4CZeroExportControllerService:
 
         if physical_unchanged and decision.action in {ZeroExportAction.INCREASE, ZeroExportAction.DECREASE}:
             self._resolution_limit_direction = decision.action
+            self._resolution_limit_last_log_cycle = cycle
             self._action = ZeroExportAction.RESOLUTION_LIMIT
             self._reason = "PWM_RESOLUTION_LIMIT"
             self._arm_after_ack()
@@ -853,6 +879,7 @@ class Stage4CZeroExportControllerService:
             return
 
         self._resolution_limit_direction = None
+        self._resolution_limit_last_log_cycle = None
         if decision.action is ZeroExportAction.LIMIT_LOW:
             self._diagnostic_log.append(
                 "ZERO_EXPORT_LIMIT_LOW",
