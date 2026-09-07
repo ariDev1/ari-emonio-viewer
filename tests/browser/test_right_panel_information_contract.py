@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PANEL_CSS = ROOT / "frontend/css/panel-information.css"
+PANEL_CSS = ROOT / "frontend/css/panels/panel-information.css"
 PANEL_UI = ROOT / "frontend/js/right-panel-information.js"
 DIAGNOSTICS_UI = ROOT / "frontend/js/diagnostics.js"
 SERVER_APP = ROOT / "src/emonio_viewer/server/app_v0416.py"
@@ -15,7 +15,7 @@ def test_shared_right_panel_information_layer_is_loaded() -> None:
 
     assert 'from "./right-panel-information.js"' in diagnostics
     assert "initializeRightPanelInformation();" in diagnostics
-    assert 'new URL("../css/panel-information.css", import.meta.url)' in ui
+    assert 'new URL("../css/panels/panel-information.css", import.meta.url)' in ui
     for selector in (
         ".panel-purpose",
         ".panel-critical-boundary",
