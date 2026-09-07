@@ -5,6 +5,10 @@ import {
   enableZeroExport,
   getZeroExportStatus,
 } from "./load-control-stage4c-api.js";
+import {
+  deriveStage4CEvidence,
+  explainStage4CState,
+} from "./load-control-stage4c-evidence.js";
 
 const REFRESH_MS = 750;
 
@@ -37,6 +41,16 @@ function formatPower(value) {
 function formatDuty(value) {
   if (value == null || !Number.isFinite(Number(value))) return "—";
   return `${Number(value).toFixed(6)} %`;
+}
+
+function formatDeadband(value) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  return `±${Number(value).toFixed(6)} W`;
+}
+
+function formatTimerStep(value) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  return `≈ ${Number(value).toFixed(8)} % / tick`;
 }
 
 function formatSequence(value) {
@@ -96,6 +110,16 @@ function renderSafeState(status) {
   return status?.safe_confirmed === false ? "OFF NOT CONFIRMED" : "—";
 }
 
+function renderEngineeringEvidence(status) {
+  const evidence = deriveStage4CEvidence(status);
+  setText("lc-zec-deadband-evidence", formatDeadband(evidence.deadbandW));
+  setText("lc-zec-p-condition", evidence.pCondition);
+  setText("lc-zec-bracket-width", formatDuty(evidence.bracketWidthPercent));
+  setText("lc-zec-timer-step", formatTimerStep(evidence.timerStepPercent));
+  setText("lc-zec-command-suppressed", evidence.commandSuppressed);
+  setText("lc-zec-state-explanation", explainStage4CState(status));
+}
+
 function renderStatus(status) {
   state.status = status || { state: "DISABLED" };
   const mode = state.status.state || "DISABLED";
@@ -117,6 +141,7 @@ function renderStatus(status) {
   setText("lc-zec-boot", state.status.actuator_boot_id || "—");
   setText("lc-zec-sequence", formatSequence(state.status.command_sequence));
   setText("lc-zec-safe", renderSafeState(state.status));
+  renderEngineeringEvidence(state.status);
 
   const inputLocked = !disabled || state.busy;
   for (const id of ("lc-zec-source", "lc-zec-phase", "lc-zec-deadband")) {
@@ -191,7 +216,7 @@ function createUi() {
       <span>Stage 4C · automatic physical control</span>
     </div>
     <p class="load-control-section-note load-control-zero-export-boundary">
-      Automatic physical PWM control is active when enabled. Canonical signed P is the only measurement feedback input. Target is fixed at 0 W. No watts-to-duty calibration is used. No operator-selected duty increment is used. No Q or PF control is used. No PID is active. No automatic reconnect is used. The qualified requested-duty range is OFF 0 % and active 25–75 %. Actual PWM duty is quantized by actuator timer-tick resolution. LIMIT_LOW holds confirmed OFF after opposite P signs were observed at OFF and the 25 % active minimum. No qualified requested duty exists between OFF and 25 %, so automatic control does not repeat the 0↔25 sequence until the operator disables and re-enables automatic control. RESOLUTION_LIMIT holds the current physical PWM state after a requested adjustment produces no timer-tick change. Further commands in that same direction are suppressed until canonical P changes direction or enters the deadband, or automatic control is restarted. A control fault requests one explicit OFF. If OFF cannot be confirmed, the state is SAFE_UNCONFIRMED.
+      Automatic physical PWM control is active when enabled. Canonical signed P is the only measurement feedback input. Target is fixed at 0 W. No watts-to-duty calibration is used. No operator-selected duty increment is used. No Q or PF control is used. No PID is active. No automatic reconnect is used. The qualified requested-duty range is OFF 0 % and active 5–95 %. Actual PWM duty is quantized by actuator timer-tick resolution. LIMIT_LOW holds confirmed OFF after opposite P signs were observed at OFF and the 5 % active minimum. No qualified requested duty exists between OFF and 5 %, so automatic control does not repeat the 0↔5 sequence until the operator disables and re-enables automatic control. RESOLUTION_LIMIT holds the current physical PWM state after a requested adjustment produces no timer-tick change. Further commands in that same direction are suppressed until canonical P changes direction or enters the deadband, or automatic control is restarted. A control fault requests one explicit OFF. If OFF cannot be confirmed, the state is SAFE_UNCONFIRMED.
     </p>
     <div class="load-control-zero-export-config">
       <label>Emonio source
@@ -231,6 +256,32 @@ function createUi() {
       <div><span>Actuator boot</span><strong id="lc-zec-boot">—</strong></div>
       <div><span>Command sequence</span><strong id="lc-zec-sequence">—</strong></div>
       <div class="load-control-zero-export-safe"><span>OFF evidence</span><strong id="lc-zec-safe">—</strong></div>
+    </div>
+    <div class="load-control-zero-export-evidence" aria-label="Stage4C engineering evidence">
+      <div class="load-control-zero-export-evidence-card">
+        <span class="load-control-zero-export-evidence-heading">CONTROL CONDITION</span>
+        <dl>
+          <div><dt>Deadband</dt><dd id="lc-zec-deadband-evidence">—</dd></div>
+          <div><dt>P condition</dt><dd id="lc-zec-p-condition">—</dd></div>
+        </dl>
+      </div>
+      <div class="load-control-zero-export-evidence-card">
+        <span class="load-control-zero-export-evidence-heading">SEARCH BRACKET</span>
+        <dl>
+          <div><dt>Bracket width</dt><dd id="lc-zec-bracket-width">—</dd></div>
+        </dl>
+      </div>
+      <div class="load-control-zero-export-evidence-card">
+        <span class="load-control-zero-export-evidence-heading">PWM PHYSICAL STATE</span>
+        <dl>
+          <div><dt>One timer tick</dt><dd id="lc-zec-timer-step">—</dd></div>
+          <div><dt>Command suppressed</dt><dd id="lc-zec-command-suppressed">—</dd></div>
+        </dl>
+      </div>
+      <div class="load-control-zero-export-evidence-card load-control-zero-export-explanation">
+        <span class="load-control-zero-export-evidence-heading">STATE EXPLANATION</span>
+        <p id="lc-zec-state-explanation">Automatic control is disabled. No Stage4C PWM command is active.</p>
+      </div>
     </div>
     <div id="lc-zec-message" class="load-control-status-text" aria-live="polite"></div>
   `;
