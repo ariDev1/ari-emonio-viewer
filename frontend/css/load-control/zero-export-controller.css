@@ -88,6 +88,66 @@
   border-style: dashed !important;
 }
 
+.load-control-zero-export-evidence {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.load-control-zero-export-evidence-card {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.load-control-zero-export-evidence-heading {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 0.64rem;
+  line-height: 1.15;
+  letter-spacing: 0.04em;
+}
+
+.load-control-zero-export-evidence-card dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.load-control-zero-export-evidence-card dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.load-control-zero-export-evidence-card dt {
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+
+.load-control-zero-export-evidence-card dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.load-control-zero-export-explanation {
+  grid-column: 1 / -1;
+}
+
+.load-control-zero-export-explanation p {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
 .load-control-zero-export[data-state="CONTROLLING"],
 .load-control-zero-export[data-state="WAITING_FOR_SAMPLE"],
 .load-control-zero-export[data-state="SETTLING"] {
@@ -104,15 +164,25 @@
 }
 
 @media (max-width: 1050px) {
-  .load-control-zero-export-status {
+  .load-control-zero-export-status,
+  .load-control-zero-export-evidence {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .load-control-zero-export-explanation {
+    grid-column: 1 / -1;
   }
 }
 
 @media (max-width: 760px) {
   .load-control-zero-export-config,
-  .load-control-zero-export-status {
+  .load-control-zero-export-status,
+  .load-control-zero-export-evidence {
     grid-template-columns: 1fr;
+  }
+
+  .load-control-zero-export-explanation {
+    grid-column: auto;
   }
 
   .load-control-zero-export-actions {
