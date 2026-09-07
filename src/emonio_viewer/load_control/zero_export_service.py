@@ -178,7 +178,9 @@ class Stage4CZeroExportControllerService:
         self._causal_after_ns: int | None = None
         self._settling_pending = False
         self._last_post_ack_cycle: int | None = None
+        self._last_accepted_sample_finished_ns: int | None = None
         self._freshness_deadline_ns: int | None = None
+        self._event_bus_drops_at_arm = 0
         self._operation_lock = asyncio.Lock()
 
     def status(self) -> ZeroExportControllerStatus:
@@ -270,8 +272,10 @@ class Stage4CZeroExportControllerService:
         self._freshness_deadline_ns = None
         self._causal_after_ns = None
         self._last_post_ack_cycle = None
+        self._last_accepted_sample_finished_ns = None
         self._settling_pending = False
         self._resolution_limit_direction = None
+        self._event_bus_drops_at_arm = 0
 
     def _freshness_ns(self) -> int:
         assert self._settings is not None
@@ -284,8 +288,57 @@ class Stage4CZeroExportControllerService:
         self._causal_after_ns = now
         self._settling_pending = True
         self._last_post_ack_cycle = None
+        self._last_accepted_sample_finished_ns = None
         self._freshness_deadline_ns = now + self._freshness_ns()
+        assert self._settings is not None
+        self._event_bus_drops_at_arm = self._bus.dropped_deliveries(self._settings.source_id)
         self._state = ZeroExportControllerState.WAITING_FOR_SAMPLE
+
+    def _stale_diagnostic_fields(
+        self,
+        *,
+        now_ns: int,
+        trigger: str,
+        sample_age_ns: int | None = None,
+        sample_cycle_id: int | None = None,
+        sample_finished_ns: int | None = None,
+    ) -> dict[str, object]:
+        assert self._settings is not None
+        source = self._source_config(self._settings.source_id)
+        assert source is not None
+        freshness_ns = self._freshness_ns()
+        current_drops = self._bus.dropped_deliveries(self._settings.source_id)
+        last_finished_ns = self._last_accepted_sample_finished_ns
+        causal_after_ns = self._causal_after_ns
+        fields: dict[str, object] = {
+            "stale_trigger": trigger,
+            "controller_state_before_safe": self._state.value,
+            "poll_interval_s": float(source.poll_interval_s),
+            "freshness_limit_s": freshness_ns / 1_000_000_000,
+            "freshness_deadline_ns": self._freshness_deadline_ns,
+            "elapsed_since_last_accepted_sample_s": (
+                None
+                if last_finished_ns is None
+                else (now_ns - last_finished_ns) / 1_000_000_000
+            ),
+            "last_accepted_cycle_id": self._last_post_ack_cycle,
+            "causal_after_ack_ns": causal_after_ns,
+            "elapsed_since_ack_s": (
+                None
+                if causal_after_ns is None
+                else (now_ns - causal_after_ns) / 1_000_000_000
+            ),
+            "settling_pending": self._settling_pending,
+            "event_bus_dropped_deliveries": current_drops,
+            "event_bus_dropped_since_ack": current_drops - self._event_bus_drops_at_arm,
+        }
+        if sample_age_ns is not None:
+            fields["sample_age_s"] = sample_age_ns / 1_000_000_000
+        if sample_cycle_id is not None:
+            fields["stale_sample_cycle_id"] = sample_cycle_id
+        if sample_finished_ns is not None:
+            fields["stale_sample_finished_ns"] = sample_finished_ns
+        return fields
 
     @staticmethod
     def _safe_off_ack(status: ManualPwmStatus) -> bool:
@@ -426,7 +479,14 @@ class Stage4CZeroExportControllerService:
             pass
         self._owner_reserved = False
 
-    async def _finish_safe(self, *, reason: str, blocked_state: ZeroExportControllerState) -> None:
+    async def _finish_safe(
+        self,
+        *,
+        reason: str,
+        blocked_state: ZeroExportControllerState,
+        diagnostic_fields: dict[str, object] | None = None,
+    ) -> None:
+        extra_fields = diagnostic_fields or {}
         current = self._manual_pwm.manual_pwm_status()
         same, actuator_reason = self._same_pinned_actuator(current)
         self._resolution_limit_direction = None
@@ -442,6 +502,7 @@ class Stage4CZeroExportControllerService:
                 reason=self._reason,
                 state=self._state.value,
                 safe_confirmed=False,
+                **extra_fields,
             )
             return
 
@@ -475,6 +536,7 @@ class Stage4CZeroExportControllerService:
             node_id=self._actuator_node_id,
             boot_id=self._actuator_boot_id,
             sequence=self._command_sequence,
+            **extra_fields,
         )
 
     async def disable(self) -> ZeroExportControllerStatus:
@@ -524,8 +586,10 @@ class Stage4CZeroExportControllerService:
             self._freshness_deadline_ns = None
             self._causal_after_ns = None
             self._last_post_ack_cycle = None
+            self._last_accepted_sample_finished_ns = None
             self._settling_pending = False
             self._resolution_limit_direction = None
+            self._event_bus_drops_at_arm = 0
             self._release_owner_best_effort()
             self._diagnostic_log.append(
                 "ZERO_EXPORT_DISABLED",
@@ -548,10 +612,15 @@ class Stage4CZeroExportControllerService:
             except Empty:
                 async with self._operation_lock:
                     if self._enabled and self._freshness_deadline_ns is not None:
-                        if self._monotonic_ns() > self._freshness_deadline_ns:
+                        now = self._monotonic_ns()
+                        if now > self._freshness_deadline_ns:
                             await self._finish_safe(
                                 reason="SAMPLE_STALE",
                                 blocked_state=ZeroExportControllerState.BLOCKED_SAFE,
+                                diagnostic_fields=self._stale_diagnostic_fields(
+                                    now_ns=now,
+                                    trigger="WATCHDOG_DEADLINE",
+                                ),
                             )
                 continue
             if item is self._stop_sentinel:
@@ -600,6 +669,13 @@ class Stage4CZeroExportControllerService:
             await self._finish_safe(
                 reason="SAMPLE_STALE",
                 blocked_state=ZeroExportControllerState.BLOCKED_SAFE,
+                diagnostic_fields=self._stale_diagnostic_fields(
+                    now_ns=now,
+                    trigger="SAMPLE_AGE",
+                    sample_age_ns=age_ns,
+                    sample_cycle_id=sample.identity.cycle_id,
+                    sample_finished_ns=sample.timing.cycle_finished_monotonic_ns,
+                ),
             )
             return
         if sample.quality is not SampleQuality.VALID:
@@ -617,6 +693,7 @@ class Stage4CZeroExportControllerService:
             )
             return
         self._last_post_ack_cycle = cycle
+        self._last_accepted_sample_finished_ns = sample.timing.cycle_finished_monotonic_ns
         self._freshness_deadline_ns = now + self._freshness_ns()
 
         if self._settling_pending:
