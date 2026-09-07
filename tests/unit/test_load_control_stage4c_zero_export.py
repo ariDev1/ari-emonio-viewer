@@ -8,7 +8,7 @@ from emonio_viewer.load_control.zero_export import (
 )
 
 
-def test_off_with_negative_p_enters_active_window_at_25_percent() -> None:
+def test_off_with_negative_p_enters_active_window_at_5_percent() -> None:
     decision = calculate_zero_export_step(
         measured_p_w=-40.0,
         p_deadband_w=2.0,
@@ -17,7 +17,7 @@ def test_off_with_negative_p_enters_active_window_at_25_percent() -> None:
         upper_bracket_duty_percent=None,
     )
     assert decision.action is ZeroExportAction.INCREASE
-    assert decision.next_duty_percent == 25.0
+    assert decision.next_duty_percent == 5.0
     assert decision.lower_bracket_duty_percent is None
     assert decision.upper_bracket_duty_percent is None
 
@@ -26,13 +26,13 @@ def test_negative_p_without_upper_bracket_moves_by_midpoint_to_upper_limit() -> 
     first = calculate_zero_export_step(
         measured_p_w=-40.0,
         p_deadband_w=2.0,
-        confirmed_duty_percent=25.0,
+        confirmed_duty_percent=5.0,
         lower_bracket_duty_percent=None,
         upper_bracket_duty_percent=None,
     )
     assert first.action is ZeroExportAction.INCREASE
     assert first.next_duty_percent == 50.0
-    assert first.lower_bracket_duty_percent == 25.0
+    assert first.lower_bracket_duty_percent == 5.0
 
     second = calculate_zero_export_step(
         measured_p_w=-20.0,
@@ -41,7 +41,7 @@ def test_negative_p_without_upper_bracket_moves_by_midpoint_to_upper_limit() -> 
         lower_bracket_duty_percent=first.lower_bracket_duty_percent,
         upper_bracket_duty_percent=first.upper_bracket_duty_percent,
     )
-    assert second.next_duty_percent == 62.5
+    assert second.next_duty_percent == 72.5
     assert second.lower_bracket_duty_percent == 50.0
 
 
@@ -77,14 +77,14 @@ def test_positive_p_at_minimum_active_duty_enters_low_authority_limit_and_comman
     decision = calculate_zero_export_step(
         measured_p_w=5.0,
         p_deadband_w=2.0,
-        confirmed_duty_percent=25.0,
+        confirmed_duty_percent=5.0,
         lower_bracket_duty_percent=None,
         upper_bracket_duty_percent=None,
     )
     assert decision.action is ZeroExportAction.LIMIT_LOW
     assert decision.next_duty_percent == 0.0
     assert decision.lower_bracket_duty_percent is None
-    assert decision.upper_bracket_duty_percent == 25.0
+    assert decision.upper_bracket_duty_percent == 5.0
 
 
 def test_positive_p_while_off_stays_explicitly_off() -> None:
@@ -99,16 +99,16 @@ def test_positive_p_while_off_stays_explicitly_off() -> None:
     assert decision.next_duty_percent == 0.0
 
 
-def test_negative_p_at_75_percent_reports_high_limit_without_command_change() -> None:
+def test_negative_p_at_95_percent_reports_high_limit_without_command_change() -> None:
     decision = calculate_zero_export_step(
         measured_p_w=-100.0,
         p_deadband_w=2.0,
-        confirmed_duty_percent=75.0,
-        lower_bracket_duty_percent=60.0,
+        confirmed_duty_percent=95.0,
+        lower_bracket_duty_percent=90.0,
         upper_bracket_duty_percent=None,
     )
     assert decision.action is ZeroExportAction.LIMIT_HIGH
-    assert decision.next_duty_percent == 75.0
+    assert decision.next_duty_percent == 95.0
 
 
 def test_changed_load_invalidates_stale_upper_bracket() -> None:
@@ -122,7 +122,7 @@ def test_changed_load_invalidates_stale_upper_bracket() -> None:
     assert decision.action is ZeroExportAction.INCREASE
     assert decision.lower_bracket_duty_percent == 60.0
     assert decision.upper_bracket_duty_percent is None
-    assert decision.next_duty_percent == 67.5
+    assert decision.next_duty_percent == 77.5
 
 
 def test_changed_load_invalidates_stale_lower_bracket() -> None:
@@ -136,7 +136,7 @@ def test_changed_load_invalidates_stale_lower_bracket() -> None:
     assert decision.action is ZeroExportAction.DECREASE
     assert decision.lower_bracket_duty_percent is None
     assert decision.upper_bracket_duty_percent == 40.0
-    assert decision.next_duty_percent == 32.5
+    assert decision.next_duty_percent == 22.5
 
 
 @pytest.mark.parametrize(
@@ -144,7 +144,7 @@ def test_changed_load_invalidates_stale_lower_bracket() -> None:
     [
         {"measured_p_w": float("nan")},
         {"p_deadband_w": -0.1},
-        {"confirmed_duty_percent": 10.0},
+        {"confirmed_duty_percent": 4.0},
         {"confirmed_duty_percent": 100.0},
         {"lower_bracket_duty_percent": float("inf")},
         {"upper_bracket_duty_percent": -1.0},
