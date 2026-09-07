@@ -18,6 +18,7 @@ class DiagnosticEvent:
     sequence: int
     utc: str
     event: str
+    fields: tuple[tuple[str, object], ...]
     line: str
 
 
@@ -65,11 +66,13 @@ class LoadControlDiagnosticLog:
 
         self._latest_sequence += 1
         utc = _format_utc(self._utc_now())
-        suffix = "".join(f" {name}={_format_value(value)}" for name, value in fields.items())
+        field_items = tuple(fields.items())
+        suffix = "".join(f" {name}={_format_value(value)}" for name, value in field_items)
         item = DiagnosticEvent(
             sequence=self._latest_sequence,
             utc=utc,
             event=event,
+            fields=field_items,
             line=f"{utc}  {event}{suffix}",
         )
         self._events.append(item)
