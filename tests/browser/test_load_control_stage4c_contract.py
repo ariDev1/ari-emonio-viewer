@@ -92,11 +92,12 @@ def test_stage4c_frontend_has_no_direct_manual_pwm_hook() -> None:
         assert forbidden not in source
 
 
-def test_stage4c_uses_dedicated_structured_css_and_loads_after_stage4b() -> None:
+def test_stage4c_uses_dedicated_structured_css_and_loads_after_manual_pwm() -> None:
     css = CSS.read_text(encoding="utf-8")
     app = APP.read_text(encoding="utf-8")
     assert ".load-control-zero-export" in css
     assert "zero-export-controller.css" in app
-    stage4b = app.index("load-control-stage4b-characterization-ui.js")
+    assert "load-control-stage4b-characterization-ui.js" not in app
+    stage3b = app.index("load-control-stage3b-ui.js")
     stage4c = app.index("load-control-stage4c-ui.js")
-    assert stage4b < stage4c
+    assert stage3b < stage4c
