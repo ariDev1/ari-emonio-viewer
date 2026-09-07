@@ -196,7 +196,12 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
             state=frame.state,
         )
 
-    async def _wait_for_pwm_ack(self, command: PwmCommandFrame) -> ManualPwmStatus:
+    async def _wait_for_pwm_ack(
+        self,
+        command: PwmCommandFrame,
+        *,
+        owner: str | None,
+    ) -> ManualPwmStatus:
         deadline_ns = self._monotonic_ns() + int(ACK_TIMEOUT_S * 1_000_000_000)
         self._manual_pwm_state = ManualPwmState.WAITING_FOR_ACK
         while True:
@@ -261,6 +266,7 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
                 node_id=frame.node_id,
                 boot_id=frame.boot_id,
                 sequence=frame.sequence,
+                owner=owner,
                 requested_duty_percent=command.duty_percent,
                 ack_requested_duty_percent=frame.requested_duty_percent,
                 actual_duty_percent=frame.actual_duty_percent,
@@ -336,9 +342,10 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
                             boot_id=command.boot_id,
                             viewer_session_id=command.viewer_session_id,
                             sequence=command.sequence,
+                            owner=owner,
                             requested_duty_percent=command.duty_percent,
                         )
-                        await self._wait_for_pwm_ack(command)
+                        await self._wait_for_pwm_ack(command, owner=owner)
                 finally:
                     self._ack_wait_active = False
         finally:
