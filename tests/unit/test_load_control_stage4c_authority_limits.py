@@ -203,26 +203,26 @@ async def _enabled_service():
     return clock, bus, manual, service
 
 
-def test_low_authority_bracket_latches_confirmed_off_instead_of_chattering_0_to_25() -> None:
+def test_low_authority_bracket_latches_confirmed_off_instead_of_chattering_0_to_5() -> None:
     async def scenario() -> None:
         clock, bus, manual, service = await _enabled_service()
 
         await _publish_pair(clock=clock, bus=bus, first_cycle=1, p=-20.0)
-        await _wait_until(lambda: manual.commands == [0.0, 25.0])
+        await _wait_until(lambda: manual.commands == [0.0, 5.0])
 
         await _publish_pair(clock=clock, bus=bus, first_cycle=3, p=10.0)
-        await _wait_until(lambda: manual.commands == [0.0, 25.0, 0.0])
+        await _wait_until(lambda: manual.commands == [0.0, 5.0, 0.0])
 
         await _publish_pair(clock=clock, bus=bus, first_cycle=5, p=-20.0)
         await _wait_until(lambda: service.status().state is ZeroExportControllerState.LIMIT_LOW)
 
         status = service.status()
-        assert manual.commands == [0.0, 25.0, 0.0]
+        assert manual.commands == [0.0, 5.0, 0.0]
         assert status.action == "LIMIT_LOW"
         assert status.reason == "LOW_AUTHORITY_LIMIT"
         assert status.confirmed_requested_duty_percent == 0.0
         assert status.safe_confirmed is True
-        assert status.upper_bracket_duty_percent == 25.0
+        assert status.upper_bracket_duty_percent == 5.0
 
         await service.disable()
         await service.close()
