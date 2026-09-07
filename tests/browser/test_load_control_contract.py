@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-def test_load_control_ui_keeps_actuator_and_collapsed_engineering_tools_only() -> None:
+def test_load_control_ui_keeps_actuator_and_minimal_engineering_tools_only() -> None:
     ui = Path("frontend/js/load-control-ui.js").read_text(encoding="utf-8")
     api = Path("frontend/js/load-control-api.js").read_text(encoding="utf-8")
 
@@ -14,16 +14,28 @@ def test_load_control_ui_keeps_actuator_and_collapsed_engineering_tools_only() -
 
     engineering_index = ui.index("ENGINEERING DIAGNOSTICS")
     assert ui.index('id="lc-manual-pwm-slot"') > engineering_index
-    assert ui.index('id="lc-characterization-slot"') > engineering_index
-    assert ui.index('id="lc-lan-discovery-window"') > engineering_index
-    assert ui.index('id="lc-lan-resolve-timeout"') > engineering_index
-    assert ui.index('id="lc-qualification-identity"') > engineering_index
-    assert ui.index('id="lc-qualification-protocol"') > engineering_index
-    assert ui.index('id="lc-qualification-limits"') > engineering_index
-    assert ui.index('id="lc-qualification-location"') > engineering_index
     assert ui.index('id="lc-diagnostic-log"') > engineering_index
     assert ui.index('id="lc-copy-diagnostic-log"') > engineering_index
     assert ui.index('id="lc-clear-diagnostic-view"') > engineering_index
+
+    for removed_from_ui in (
+        'id="lc-characterization-slot"',
+        'id="lc-lan-discovery-window"',
+        'id="lc-lan-resolve-timeout"',
+        'id="lc-qualification-identity"',
+        'id="lc-qualification-protocol"',
+        'id="lc-qualification-limits"',
+        'id="lc-qualification-location"',
+        "Qualification evidence",
+        "LAN discovery timing",
+        "characterization, qualification evidence",
+    ):
+        assert removed_from_ui not in ui
+
+    assert "LAN_DISCOVERY_WINDOW_S = 5.0" in ui
+    assert "LAN_RESOLVE_TIMEOUT_S = 5.0" in ui
+    assert "discovery_window_s: LAN_DISCOVERY_WINDOW_S" in ui
+    assert "resolve_timeout_s: LAN_RESOLVE_TIMEOUT_S" in ui
 
     for obsolete in (
         'id="lc-safe-source"',
