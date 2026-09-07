@@ -18,6 +18,9 @@ def test_load_control_panel_defaults_to_zero_export_operator_view() -> None:
         "SET SAFE 0 W",
         "DEVELOPMENT / MOCK CONTROL",
         "ENABLE MOCK CONTROL",
+        'id="lc-characterization-slot"',
+        "Qualification evidence",
+        "LAN discovery timing",
     ):
         assert obsolete not in ui
 
@@ -25,7 +28,6 @@ def test_load_control_panel_defaults_to_zero_export_operator_view() -> None:
     assert '<details id="lc-engineering-diagnostics" class="load-control-engineering-tools" open>' not in ui
     engineering_index = ui.index("ENGINEERING DIAGNOSTICS")
     assert ui.index('id="lc-manual-pwm-slot"') > engineering_index
-    assert ui.index('id="lc-characterization-slot"') > engineering_index
     assert ui.index("Diagnostic log") > engineering_index
     assert ui.index('id="lc-zero-export-slot"') < engineering_index
 
