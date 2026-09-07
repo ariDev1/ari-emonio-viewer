@@ -39,7 +39,6 @@ def test_lifecycle_frontend_keeps_structured_css_file_set() -> None:
         "modbus-evidence.css",
         "density.css",
         "recording-monitor.css",
-        "panel-information.css",
     }
 
 
