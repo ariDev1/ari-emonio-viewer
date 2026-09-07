@@ -254,7 +254,7 @@ def test_enable_reserves_pwm_and_establishes_acknowledged_off_baseline() -> None
     asyncio.run(scenario())
 
 
-def test_negative_p_after_one_causal_settling_cycle_commands_25_percent() -> None:
+def test_negative_p_after_one_causal_settling_cycle_commands_5_percent() -> None:
     async def scenario() -> None:
         clock, bus, manual, service, _status = await _enabled_service()
         ack_ns = clock.value
@@ -266,8 +266,8 @@ def test_negative_p_after_one_causal_settling_cycle_commands_25_percent() -> Non
 
         clock.value = ack_ns + 100_000_000
         bus.publish(_sample(2, -40.0, finish_ns=ack_ns + 75_000_000, q=-900.0, pf=-0.25))
-        await _wait_until(lambda: manual.commands == [0.0, 25.0])
-        assert service.status().confirmed_requested_duty_percent == 25.0
+        await _wait_until(lambda: manual.commands == [0.0, 5.0])
+        assert service.status().confirmed_requested_duty_percent == 5.0
         assert service.status().measured_p_w == -40.0
         await service.disable()
         await service.close()
@@ -368,7 +368,7 @@ def test_actuator_boot_change_never_commands_the_new_boot_automatically() -> Non
 def test_rejected_active_command_gets_one_distinct_safe_off_attempt() -> None:
     async def scenario() -> None:
         clock, bus, manual, service, _status = await _enabled_service()
-        manual.reject_duty = 25.0
+        manual.reject_duty = 5.0
         ack_ns = clock.value
         clock.value = ack_ns + 50_000_000
         bus.publish(_sample(1, -50.0, finish_ns=ack_ns + 25_000_000))
@@ -377,7 +377,7 @@ def test_rejected_active_command_gets_one_distinct_safe_off_attempt() -> None:
         bus.publish(_sample(2, -50.0, finish_ns=ack_ns + 75_000_000))
         await _wait_until(lambda: service.status().state is ZeroExportControllerState.BLOCKED_SAFE)
         assert service.status().reason == "PWM_COMMAND_NOT_CONFIRMED"
-        assert manual.commands == [0.0, 25.0, 0.0]
+        assert manual.commands == [0.0, 5.0, 0.0]
         assert service.status().safe_confirmed is True
         await service.disable()
         await service.close()
@@ -394,12 +394,12 @@ def test_disable_from_active_duty_finishes_with_acknowledged_off_and_releases_ow
         await asyncio.sleep(0.01)
         clock.value = ack_ns + 100_000_000
         bus.publish(_sample(2, -50.0, finish_ns=ack_ns + 75_000_000))
-        await _wait_until(lambda: manual.commands == [0.0, 25.0])
+        await _wait_until(lambda: manual.commands == [0.0, 5.0])
 
         status = await service.disable()
         assert status.state is ZeroExportControllerState.DISABLED
         assert status.safe_confirmed is True
-        assert manual.commands == [0.0, 25.0, 0.0]
+        assert manual.commands == [0.0, 5.0, 0.0]
         assert manual.pwm_owner is None
         await service.close()
 
