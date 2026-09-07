@@ -265,6 +265,20 @@ def test_lan_scan_writes_backend_diagnostics_and_log_route_supports_view_cursor(
             "ACTUATOR_DISCOVERED",
             "LAN_SCAN_COMPLETE",
         ]
+        assert payload["events"][0]["fields"] == {
+            "discovery_window_s": 5.0,
+            "resolve_timeout_s": 5.0,
+        }
+        assert payload["events"][1]["fields"] == {
+            "node_id": "ARI-LOAD-001",
+            "location": "ws://192.168.1.141:8080/load-control",
+            "device_class": "ARI_LOAD_ACTUATOR",
+            "capabilities": "ACTIVE_LOAD_CONTROL",
+            "p_max_a_w": 1000.0,
+            "p_max_b_w": 1000.0,
+            "p_max_c_w": 1000.0,
+        }
+        assert payload["events"][2]["fields"] == {"count": 1}
         assert 'node_id="ARI-LOAD-001"' in payload["events"][1]["line"]
         assert 'location="ws://192.168.1.141:8080/load-control"' in payload["events"][1]["line"]
         assert all("MOCK" not in item["line"] for item in payload["events"])
@@ -277,5 +291,6 @@ def test_lan_scan_writes_backend_diagnostics_and_log_route_supports_view_cursor(
         assert status == 200
         assert payload["latest_sequence"] == 3
         assert [item["sequence"] for item in payload["events"]] == [3]
+        assert payload["events"][0]["fields"] == {"count": 1}
 
     asyncio.run(scenario())
