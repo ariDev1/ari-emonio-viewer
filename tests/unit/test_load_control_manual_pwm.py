@@ -258,3 +258,45 @@ def test_manual_pwm_rejects_ack_identity_mismatch_and_does_not_retry() -> None:
         await service.close()
 
     asyncio.run(scenario())
+
+
+def test_pwm_command_and_ack_evidence_preserve_command_owner() -> None:
+    async def scenario() -> None:
+        channel = FakeQualifiedChannel(_hello())
+        service = _service(channel)
+        await service.start()
+
+        owner = "STAGE4C_ZERO_EXPORT"
+        service.reserve_pwm_owner(owner)
+        reserved_request = asyncio.create_task(service.run_reserved_pwm(5.0, owner=owner))
+        await _wait_for_pwm(channel, count=1)
+        reserved_command = channel.sent_pwm[0]
+        channel.push(_ack(reserved_command, actual=100.0 * 33 / 653, compare=33, period=653))
+        await reserved_request
+        service.release_pwm_owner(owner)
+
+        manual_request = asyncio.create_task(service.run_manual_pwm(10.0))
+        await _wait_for_pwm(channel, count=2)
+        manual_command = channel.sent_pwm[1]
+        channel.push(_ack(manual_command, actual=100.0 * 65 / 653, compare=65, period=653))
+        await manual_request
+
+        evidence = [
+            (event.event, dict(event.fields))
+            for event in service.diagnostic_log.recent()
+            if event.event in {"PWM_COMMAND_SENT", "PWM_ACK_QUALIFIED"}
+        ]
+        assert [item[0] for item in evidence] == [
+            "PWM_COMMAND_SENT",
+            "PWM_ACK_QUALIFIED",
+            "PWM_COMMAND_SENT",
+            "PWM_ACK_QUALIFIED",
+        ]
+        assert evidence[0][1]["owner"] == owner
+        assert evidence[1][1]["owner"] == owner
+        assert evidence[2][1]["owner"] is None
+        assert evidence[3][1]["owner"] is None
+
+        await service.close()
+
+    asyncio.run(scenario())
