@@ -36,7 +36,7 @@ def test_stage4c_frontend_exposes_only_required_operator_configuration() -> None
     assert "p_target" not in source
 
 
-def test_stage4c_ui_states_control_and_scientific_boundaries() -> None:
+def test_stage4c_ui_states_current_control_and_scientific_boundaries() -> None:
     source = UI.read_text(encoding="utf-8")
     for statement in (
         "Automatic physical PWM control is active when enabled",
@@ -45,13 +45,51 @@ def test_stage4c_ui_states_control_and_scientific_boundaries() -> None:
         "No watts-to-duty calibration",
         "No Q or PF control",
         "No automatic reconnect",
-        "requested-duty range is OFF 0 % and active 25–75 %",
+        "requested-duty range is OFF 0 % and active 5–95 %",
         "timer-tick resolution",
         "LIMIT_LOW",
         "RESOLUTION_LIMIT",
         "SAFE_UNCONFIRMED",
     ):
         assert statement in source
+
+    for obsolete in (
+        "active 25–75 %",
+        "25 % active minimum",
+        "0↔25",
+    ):
+        assert obsolete not in source
+
+
+def test_stage4c_operator_view_exposes_engineering_evidence() -> None:
+    source = UI.read_text(encoding="utf-8")
+    for field_id in (
+        "lc-zec-deadband-evidence",
+        "lc-zec-p-condition",
+        "lc-zec-bracket-width",
+        "lc-zec-timer-step",
+        "lc-zec-command-suppressed",
+        "lc-zec-state-explanation",
+    ):
+        assert field_id in source
+
+    for heading in (
+        "CONTROL CONDITION",
+        "SEARCH BRACKET",
+        "PWM PHYSICAL STATE",
+        "STATE EXPLANATION",
+    ):
+        assert heading in source
+
+
+def test_stage4c_operator_evidence_uses_dedicated_structured_css() -> None:
+    css = CSS.read_text(encoding="utf-8")
+    for selector in (
+        ".load-control-zero-export-evidence",
+        ".load-control-zero-export-evidence-card",
+        ".load-control-zero-export-explanation",
+    ):
+        assert selector in css
 
 
 def test_stage4c_uses_existing_safe_source_list() -> None:
