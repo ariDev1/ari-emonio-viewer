@@ -5,7 +5,7 @@ function ensureStylesheet() {
   const link = document.createElement("link");
   link.id = STYLE_MARKER;
   link.rel = "stylesheet";
-  link.href = new URL("../css/panel-information.css", import.meta.url).href;
+  link.href = new URL("../css/panels/panel-information.css", import.meta.url).href;
   document.head.append(link);
 }
 
