@@ -238,6 +238,14 @@ async def _enabled_service():
     return clock, bus, manual, service, status
 
 
+def _events(service, name: str):
+    return tuple(
+        event
+        for event in service._diagnostic_log.recent()
+        if event.event == name
+    )
+
+
 def test_enable_reserves_pwm_and_establishes_acknowledged_off_baseline() -> None:
     async def scenario() -> None:
         clock, _bus, manual, service, status = await _enabled_service()
@@ -401,6 +409,85 @@ def test_disable_from_active_duty_finishes_with_acknowledged_off_and_releases_ow
         assert status.safe_confirmed is True
         assert manual.commands == [0.0, 5.0, 0.0]
         assert manual.pwm_owner is None
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_stage4c_records_exact_causal_boundary_after_ack() -> None:
+    async def scenario() -> None:
+        clock, _bus, _manual, service, status = await _enabled_service()
+        ack_ns = clock.value
+        events = _events(service, "ZERO_EXPORT_CAUSAL_BOUNDARY_ARMED")
+        assert len(events) == 1
+        fields = dict(events[0].fields)
+        assert fields == {
+            "source_id": "emonio-a",
+            "phase": "A",
+            "command_sequence": status.command_sequence,
+            "causal_after_ns": ack_ns,
+            "freshness_deadline_ns": ack_ns + 200_000_000,
+            "controller_state": "WAITING_FOR_SAMPLE",
+        }
+        await service.disable()
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_stage4c_records_settling_sample_with_original_time_domains_and_no_decision() -> None:
+    async def scenario() -> None:
+        clock, bus, _manual, service, _status = await _enabled_service()
+        ack_ns = clock.value
+        finish_ns = ack_ns + 25_000_000
+        clock.value = ack_ns + 50_000_000
+        bus.publish(_sample(1, -37.25, finish_ns=finish_ns))
+        await _wait_until(lambda: service.status().state is ZeroExportControllerState.SETTLING)
+
+        events = _events(service, "ZERO_EXPORT_SETTLING_SAMPLE")
+        assert len(events) == 1
+        assert dict(events[0].fields) == {
+            "source_id": "emonio-a",
+            "phase": "A",
+            "cycle_id": 1,
+            "cycle_finished_utc": UTC.isoformat(),
+            "cycle_finished_monotonic_ns": finish_ns,
+            "controller_state": "SETTLING",
+        }
+        assert _events(service, "ZERO_EXPORT_DECISION") == ()
+
+        await service.disable()
+        await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_stage4c_decision_evidence_copies_canonical_p_and_exact_sample_timestamps() -> None:
+    async def scenario() -> None:
+        clock, bus, manual, service, _status = await _enabled_service()
+        ack_ns = clock.value
+
+        clock.value = ack_ns + 50_000_000
+        bus.publish(_sample(1, -9.0, finish_ns=ack_ns + 25_000_000))
+        await _wait_until(lambda: service.status().state is ZeroExportControllerState.SETTLING)
+
+        decision_finish_ns = ack_ns + 75_000_000
+        clock.value = ack_ns + 100_000_000
+        bus.publish(_sample(2, -37.25, finish_ns=decision_finish_ns, q=1200.0, pf=-0.1))
+        await _wait_until(lambda: manual.commands == [0.0, 5.0])
+
+        events = _events(service, "ZERO_EXPORT_DECISION")
+        assert len(events) == 1
+        fields = dict(events[0].fields)
+        assert fields["cycle_id"] == 2
+        assert fields["cycle_finished_utc"] == UTC.isoformat()
+        assert fields["cycle_finished_monotonic_ns"] == decision_finish_ns
+        assert fields["measured_p_w"] == -37.25
+        assert fields["action"] == "INCREASE"
+        assert fields["controller_state"] == "CONTROLLING"
+        assert fields["reason"] is None
+
+        await service.disable()
         await service.close()
 
     asyncio.run(scenario())
