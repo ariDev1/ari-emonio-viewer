@@ -1,0 +1,84 @@
+.panel-purpose {
+  margin: 8px 10px 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.load-control-section > .panel-purpose,
+.load-control-engineering-tools > .panel-purpose,
+.modbus-evidence-body > .panel-purpose,
+.ct-evidence-body > .panel-purpose {
+  margin-right: 0;
+  margin-left: 0;
+}
+
+.panel-critical-boundary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 10px 10px;
+}
+
+.load-control-section > .panel-critical-boundary,
+.modbus-evidence-body > .panel-critical-boundary,
+.ct-evidence-body > .panel-critical-boundary {
+  margin-right: 0;
+  margin-left: 0;
+}
+
+.panel-critical-boundary-item {
+  padding: 4px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.panel-technical-boundary {
+  margin: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.load-control-section > .panel-technical-boundary,
+.load-control-diagnostic-section > .panel-technical-boundary,
+.modbus-evidence-body > .panel-technical-boundary,
+.ct-evidence-body > .panel-technical-boundary {
+  margin-right: 0;
+  margin-left: 0;
+}
+
+.panel-technical-boundary > summary {
+  padding: 7px 0 5px;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.panel-technical-boundary[open] > summary {
+  color: var(--text);
+}
+
+.panel-technical-boundary-body {
+  padding: 2px 0 1px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.panel-technical-boundary-body p {
+  margin: 0 0 6px;
+}
+
+.panel-technical-boundary-body p:last-child {
+  margin-bottom: 0;
+}
