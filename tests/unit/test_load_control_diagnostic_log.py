@@ -25,6 +25,11 @@ def test_diagnostic_log_formats_backend_owned_copyable_lines() -> None:
     assert event.sequence == 1
     assert event.utc == "2026-09-01T16:32:01.524Z"
     assert event.event == "HELLO_QUALIFIED"
+    assert event.fields == (
+        ("protocol", 1),
+        ("device_class", "ARI_LOAD_ACTUATOR"),
+        ("capability", "ACTIVE_LOAD_CONTROL"),
+    )
     assert event.line == (
         '2026-09-01T16:32:01.524Z  HELLO_QUALIFIED '
         'protocol=1 device_class="ARI_LOAD_ACTUATOR" '
