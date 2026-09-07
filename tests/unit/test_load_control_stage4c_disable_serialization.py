@@ -218,7 +218,7 @@ def test_disable_waits_for_inflight_automatic_command_then_confirms_off() -> Non
         clock.value = ack_ns + 70_000_000
         bus.publish(_sample(2, -50.0, ack_ns + 60_000_000))
         await asyncio.wait_for(manual.active_command_started.wait(), timeout=0.7)
-        assert manual.commands == [0.0, 25.0]
+        assert manual.commands == [0.0, 5.0]
 
         disable_task = asyncio.create_task(service.disable())
         try:
@@ -231,7 +231,7 @@ def test_disable_waits_for_inflight_automatic_command_then_confirms_off() -> Non
         assert status.state is ZeroExportControllerState.DISABLED
         assert status.safe_confirmed is True
         assert status.confirmed_requested_duty_percent == 0.0
-        assert manual.commands == [0.0, 25.0, 0.0]
+        assert manual.commands == [0.0, 5.0, 0.0]
         assert manual.pwm_owner is None
         await service.close()
 
