@@ -8,7 +8,7 @@ CSS = ROOT / "frontend/css/load-control/p-characterization.css"
 APP = ROOT / "src/emonio_viewer/server/app_v0416.py"
 
 
-def test_stage4b_frontend_files_exist_and_expose_engineering_controls() -> None:
+def test_stage4b_frontend_files_remain_available_for_reversible_cleanup() -> None:
     source = UI.read_text(encoding="utf-8")
     assert 'element("lc-characterization-slot")' in source
     for field_id in (
@@ -88,14 +88,15 @@ def test_stage4b_api_client_exposes_characterization_routes_only() -> None:
         assert forbidden not in source
 
 
-def test_stage4b_uses_dedicated_css_and_loads_as_collapsed_engineering_tool() -> None:
+def test_stage4b_backend_remains_but_frontend_is_not_loaded() -> None:
     css = CSS.read_text(encoding="utf-8")
     app = APP.read_text(encoding="utf-8")
     assert ".load-control-p-characterization" in css
-    assert "p-characterization.css" in app
-    assert "load-control-stage4b-characterization-ui.js" in app
+    assert "register_load_control_stage4b_characterization_routes(app)" in app
+    assert "start_characterization" in app
+    assert "stop_characterization" in app
+    assert "p-characterization.css" not in app
+    assert "load-control-stage4b-characterization-ui.js" not in app
     assert "load-control-stage4a-ui.js" not in app
-    stage3b = app.index("load-control-stage3b-ui.js")
-    stage4b = app.index("load-control-stage4b-characterization-ui.js")
-    stage4c = app.index("load-control-stage4c-ui.js")
-    assert stage3b < stage4b < stage4c
+    assert "load-control-stage3b-ui.js" in app
+    assert "load-control-stage4c-ui.js" in app
