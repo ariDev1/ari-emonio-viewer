@@ -6,6 +6,9 @@ import {
   scanLanActuators,
 } from "./load-control-api.js";
 
+const LAN_DISCOVERY_WINDOW_S = 5.0;
+const LAN_RESOLVE_TIMEOUT_S = 5.0;
+
 const state = {
   qualification: null,
   visible: false,
@@ -17,24 +20,6 @@ const state = {
 
 function element(id) {
   return document.getElementById(id);
-}
-
-function formatPower(value) {
-  if (value == null || !Number.isFinite(Number(value))) return "—";
-  return `${Number(value).toFixed(1)} W`;
-}
-
-function powerTriplet(value) {
-  if (!value) return "—";
-  return `A ${formatPower(value.a)} · B ${formatPower(value.b)} · C ${formatPower(value.c)}`;
-}
-
-function positiveInputValue(id, label) {
-  const value = Number(element(id)?.value);
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new Error(`${label} must be finite and greater than 0 s.`);
-  }
-  return value;
 }
 
 function setStatusTone(id, tone) {
@@ -125,33 +110,10 @@ function createUi() {
     <details id="lc-engineering-diagnostics" class="load-control-engineering-tools">
       <summary>ENGINEERING DIAGNOSTICS</summary>
       <p class="load-control-section-note">
-        Manual PWM control, characterization, qualification evidence, and protocol diagnostics are available here. They are not required for normal zero-export operation.
+        Manual PWM control and protocol diagnostics are available here. They are not required for normal zero-export operation.
       </p>
 
-      <section class="load-control-section">
-        <div class="load-control-section-header"><h3>LAN discovery timing</h3><span>s</span></div>
-        <div class="load-control-connection-controls">
-          <label>Discovery window / s
-            <input id="lc-lan-discovery-window" type="number" min="0" step="any" value="5">
-          </label>
-          <label>Resolve timeout / s
-            <input id="lc-lan-resolve-timeout" type="number" min="0" step="any" value="5">
-          </label>
-        </div>
-      </section>
-
-      <section class="load-control-section load-control-qualification-section">
-        <div class="load-control-section-header"><h3>Qualification evidence</h3><span>HELLO</span></div>
-        <div class="load-control-qualification-evidence">
-          <div><span>Actuator instance</span><strong id="lc-qualification-identity">—</strong></div>
-          <div><span>Protocol / class / capability</span><strong id="lc-qualification-protocol">—</strong></div>
-          <div><span>Advertised test limit</span><strong id="lc-qualification-limits">—</strong></div>
-          <div><span>WebSocket locator</span><strong id="lc-qualification-location">—</strong></div>
-        </div>
-      </section>
-
       <div id="lc-manual-pwm-slot"></div>
-      <div id="lc-characterization-slot"></div>
 
       <section class="load-control-section load-control-diagnostic-section">
         <div class="load-control-section-header"><h3>Diagnostic log</h3><span>actuator protocol</span></div>
@@ -265,21 +227,6 @@ function renderLanQualification(status) {
     qualified ? "ok" : rejected ? "error" : connected || hasSelectedActuator ? "warn" : "idle",
   );
 
-  const nodeId = status?.node_id || status?.selected_node_id || "";
-  const bootId = status?.boot_id || "";
-  element("lc-qualification-identity").textContent = nodeId
-    ? bootId
-      ? `${nodeId} · ${bootId}`
-      : nodeId
-    : "—";
-
-  const capabilities = Array.isArray(status?.capabilities) ? status.capabilities.join(", ") : "";
-  element("lc-qualification-protocol").textContent = status?.protocol_version != null
-    ? `${status.protocol_version} · ${status.device_class || "—"} · ${capabilities || "—"}`
-    : "—";
-  element("lc-qualification-limits").textContent = powerTriplet(status?.p_max);
-  element("lc-qualification-location").textContent = status?.location || "—";
-
   const error = element("lc-qualification-error");
   error.textContent = status?.last_error || "";
   error.dataset.error = status?.last_error ? "true" : "false";
@@ -351,13 +298,11 @@ async function clearDiagnosticView() {
 async function runLanScan() {
   const button = element("lc-scan-lan");
   try {
-    const discoveryWindow = positiveInputValue("lc-lan-discovery-window", "Discovery window");
-    const resolveTimeout = positiveInputValue("lc-lan-resolve-timeout", "Resolve timeout");
     if (button) button.disabled = true;
     setLanMessage("Scanning for compatible actuator advertisements...");
     const values = await scanLanActuators({
-      discovery_window_s: discoveryWindow,
-      resolve_timeout_s: resolveTimeout,
+      discovery_window_s: LAN_DISCOVERY_WINDOW_S,
+      resolve_timeout_s: LAN_RESOLVE_TIMEOUT_S,
     });
     renderLanResults(values);
     setLanMessage(`LAN scan complete. ${values.length} compatible actuator advertisement(s) found.`);
