@@ -230,7 +230,7 @@ def test_stage4c_frontend_has_no_manual_pwm_hook_or_operator_duty_increment() ->
 
 def test_stage4c_keeps_release_identity_and_protected_scientific_contract() -> None:
     pyproject = PYPROJECT.read_text(encoding="utf-8")
-    assert 'version = "0.4.24"' in pyproject
+    assert 'version = "0.4.25"' in pyproject
     assert 'emonio-viewer = "emonio_viewer.main_v0416:main"' in pyproject
     assert PROTECTED_SCIENTIFIC_PATHS == (
         "src/emonio_viewer/acquisition",
