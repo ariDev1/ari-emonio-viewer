@@ -187,6 +187,7 @@ def _diagnostic_event_json(item) -> dict:
         "sequence": item.sequence,
         "utc": item.utc,
         "event": item.event,
+        "fields": dict(item.fields),
         "line": item.line,
     }
 
