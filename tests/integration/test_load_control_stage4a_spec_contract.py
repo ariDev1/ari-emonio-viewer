@@ -86,7 +86,7 @@ def test_stage4a_http_and_frontend_have_no_pwm_output_route_or_command() -> None
 
 def test_stage4a_keeps_active_launcher_and_version() -> None:
     pyproject = PYPROJECT.read_text(encoding="utf-8")
-    assert 'version = "0.4.23"' in pyproject
+    assert 'version = "0.4.24"' in pyproject
     assert 'emonio-viewer = "emonio_viewer.main_v0416:main"' in pyproject
 
 
