@@ -7,9 +7,8 @@ const STAGE4C_PWM_EVENTS = new Set([
   "PWM_ACK_QUALIFIED",
 ]);
 
-function finiteOrNull(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
+export function finiteEvidenceNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function textOrNull(value) {
@@ -190,25 +189,25 @@ export function deriveControlHistorySeries(events) {
 
     if (event === "ZERO_EXPORT_DECISION") {
       const measurementUtc = textOrNull(fields.cycle_finished_utc);
-      const pW = finiteOrNull(fields.measured_p_w);
+      const pW = finiteEvidenceNumber(fields.measured_p_w);
       if (measurementUtc != null && timestampMsOf(measurementUtc) != null && pW != null) {
         series.p.push({
           sequence,
           utc: measurementUtc,
           diagnosticUtc: utc,
           cycleId: Number.isInteger(Number(fields.cycle_id)) ? Number(fields.cycle_id) : null,
-          cycleFinishedMonotonicNs: finiteOrNull(fields.cycle_finished_monotonic_ns),
+          cycleFinishedMonotonicNs: finiteEvidenceNumber(fields.cycle_finished_monotonic_ns),
           sourceId: textOrNull(fields.source_id),
           phase: textOrNull(fields.phase),
           pW,
-          deadbandW: finiteOrNull(fields.p_deadband_w),
+          deadbandW: finiteEvidenceNumber(fields.p_deadband_w),
           action: textOrNull(fields.action),
           state: textOrNull(fields.controller_state),
           reason: textOrNull(fields.reason),
-          confirmedRequestedDutyPercent: finiteOrNull(fields.confirmed_requested_duty_percent),
-          nextRequestedDutyPercent: finiteOrNull(fields.next_requested_duty_percent),
-          lowerBracketDutyPercent: finiteOrNull(fields.lower_bracket_duty_percent),
-          upperBracketDutyPercent: finiteOrNull(fields.upper_bracket_duty_percent),
+          confirmedRequestedDutyPercent: finiteEvidenceNumber(fields.confirmed_requested_duty_percent),
+          nextRequestedDutyPercent: finiteEvidenceNumber(fields.next_requested_duty_percent),
+          lowerBracketDutyPercent: finiteEvidenceNumber(fields.lower_bracket_duty_percent),
+          upperBracketDutyPercent: finiteEvidenceNumber(fields.upper_bracket_duty_percent),
         });
       }
     }
@@ -221,7 +220,7 @@ export function deriveControlHistorySeries(events) {
           utc: measurementUtc,
           diagnosticUtc: utc,
           cycleId: Number.isInteger(Number(fields.cycle_id)) ? Number(fields.cycle_id) : null,
-          cycleFinishedMonotonicNs: finiteOrNull(fields.cycle_finished_monotonic_ns),
+          cycleFinishedMonotonicNs: finiteEvidenceNumber(fields.cycle_finished_monotonic_ns),
           state: textOrNull(fields.controller_state),
         });
       }
@@ -231,19 +230,19 @@ export function deriveControlHistorySeries(events) {
       series.commands.push({
         sequence,
         utc,
-        requestedDutyPercent: finiteOrNull(fields.requested_duty_percent),
+        requestedDutyPercent: finiteEvidenceNumber(fields.requested_duty_percent),
       });
     }
 
     if (event === "PWM_ACK_QUALIFIED" && fields.owner === STAGE4C_PWM_OWNER) {
-      const requestedDutyPercent = finiteOrNull(fields.requested_duty_percent);
+      const requestedDutyPercent = finiteEvidenceNumber(fields.requested_duty_percent);
       series.acks.push({
         sequence,
         utc,
         requestedDutyPercent,
-        actualDutyPercent: finiteOrNull(fields.actual_duty_percent),
-        compareTicks: finiteOrNull(fields.compare_ticks),
-        periodTicks: finiteOrNull(fields.period_ticks),
+        actualDutyPercent: finiteEvidenceNumber(fields.actual_duty_percent),
+        compareTicks: finiteEvidenceNumber(fields.compare_ticks),
+        periodTicks: finiteEvidenceNumber(fields.period_ticks),
         isOff: requestedDutyPercent === 0,
       });
     }
