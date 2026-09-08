@@ -208,18 +208,20 @@ def create_app(
         monitor_css = f'<link rel="stylesheet" href="{static_prefix}css/recording-monitor.css">'
         load_control_css = f'<link rel="stylesheet" href="{static_prefix}css/load-control/load-control.css">'
         zero_export_controller_css = f'<link rel="stylesheet" href="{static_prefix}css/load-control/zero-export-controller.css">'
+        control_history_css = f'<link rel="stylesheet" href="{static_prefix}css/load-control/control-history.css">'
         monitor_script = f'<script type="module" src="{static_prefix}js/recording-monitor-ui.js"></script>'
         load_control_script = f'<script type="module" src="{static_prefix}js/load-control-ui.js"></script>'
         load_control_stage3b_script = f'<script type="module" src="{static_prefix}js/load-control-stage3b-ui.js"></script>'
         load_control_stage4c_script = f'<script type="module" src="{static_prefix}js/load-control-stage4c-ui.js"></script>'
+        load_control_stage4c_history_script = f'<script type="module" src="{static_prefix}js/load-control-stage4c-history-ui.js"></script>'
         source = source.replace(
             "</head>",
-            f"  {monitor_css}\n  {load_control_css}\n  {zero_export_controller_css}\n</head>",
+            f"  {monitor_css}\n  {load_control_css}\n  {zero_export_controller_css}\n  {control_history_css}\n</head>",
             1,
         )
         source = source.replace(
             "</body>",
-            f"  {monitor_script}\n  {load_control_script}\n  {load_control_stage3b_script}\n  {load_control_stage4c_script}\n</body>",
+            f"  {monitor_script}\n  {load_control_script}\n  {load_control_stage3b_script}\n  {load_control_stage4c_script}\n  {load_control_stage4c_history_script}\n</body>",
             1,
         )
         return web.Response(
