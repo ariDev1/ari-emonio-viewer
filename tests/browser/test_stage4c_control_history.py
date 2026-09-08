@@ -167,3 +167,22 @@ def test_controller_timeline_uses_exact_existing_state_vocabulary() -> None:
         ["ZERO_EXPORT_RESOLUTION_LIMIT", "RESOLUTION_LIMIT", None],
         ["ZERO_EXPORT_SAFE_BLOCK", "BLOCKED_SAFE", "SAMPLE_STALE"],
     ]
+
+
+def test_nearest_evidence_selection_uses_each_records_real_display_timestamp() -> None:
+    events = [
+        _event(60, "2026-09-08T07:00:02.100Z", "ZERO_EXPORT_DECISION", {"cycle_finished_utc": "2026-09-08T07:00:02.000Z", "measured_p_w": -20.0}),
+        _event(61, "2026-09-08T07:00:02.200Z", "PWM_COMMAND_SENT", {"owner": "STAGE4C_ZERO_EXPORT", "requested_duty_percent": 5.0}),
+        _event(62, "2026-09-08T07:00:02.260Z", "PWM_ACK_QUALIFIED", {"owner": "STAGE4C_ZERO_EXPORT", "requested_duty_percent": 5.0, "actual_duty_percent": 4.98}),
+    ]
+    payload = json.dumps(events)
+    result = _run_module(
+        f"[mod.nearestControlEvidence({payload}, Date.parse('2026-09-08T07:00:02.010Z')), mod.nearestControlEvidence({payload}, Date.parse('2026-09-08T07:00:02.215Z'))]"
+    )
+    assert result[0]["sequence"] == 60
+    assert result[0]["utc"] == "2026-09-08T07:00:02.000Z"
+    assert result[0]["diagnosticUtc"] == "2026-09-08T07:00:02.100Z"
+    assert result[0]["fields"]["measured_p_w"] == -20.0
+    assert result[1]["sequence"] == 61
+    assert result[1]["utc"] == "2026-09-08T07:00:02.200Z"
+    assert result[1]["diagnosticUtc"] == "2026-09-08T07:00:02.200Z"
