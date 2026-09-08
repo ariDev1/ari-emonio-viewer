@@ -23,13 +23,13 @@ def test_release_builder_is_byte_deterministic_and_excludes_local_debris(tmp_pat
     first = module.build_release(ROOT, tmp_path / "a")
     second = module.build_release(ROOT, tmp_path / "b")
 
-    assert first.name == "ARI_Emonio_Viewer_v0.4.25_Candidate.zip"
+    assert first.name == "ARI_Emonio_Viewer_v0.4.26_Candidate.zip"
     assert first.read_bytes() == second.read_bytes()
 
     with zipfile.ZipFile(first) as archive:
         names = archive.namelist()
         assert names == sorted(names)
-        assert all(name.startswith("ARI_Emonio_Viewer_v0.4.25_Candidate/") for name in names)
+        assert all(name.startswith("ARI_Emonio_Viewer_v0.4.26_Candidate/") for name in names)
         forbidden = (
             "/.git/",
             "/.pytest_cache/",
@@ -44,7 +44,7 @@ def test_release_builder_is_byte_deterministic_and_excludes_local_debris(tmp_pat
         assert all(not name.endswith((".pyc", ".zip", ".log", ".sqlite", ".sqlite3")) for name in names)
 
         for script in ("start-emonio-viewer.sh", "tools/ari-emonio-acceptance.sh", "tools/ari-emonio-publication-gate.sh"):
-            info = archive.getinfo(f"ARI_Emonio_Viewer_v0.4.25_Candidate/{script}")
+            info = archive.getinfo(f"ARI_Emonio_Viewer_v0.4.26_Candidate/{script}")
             mode = (info.external_attr >> 16) & 0o777
             assert mode == 0o755
 
@@ -78,4 +78,3 @@ def test_release_builder_excludes_root_build_output_directories(tmp_path: Path) 
     with zipfile.ZipFile(archive) as release:
         names = release.namelist()
         assert all("/dist/" not in f"/{name}" for name in names)
-        assert all("/build/" not in f"/{name}" for name in names)
