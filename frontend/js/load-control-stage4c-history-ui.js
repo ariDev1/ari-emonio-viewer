@@ -3,6 +3,7 @@ import {
   CONTROL_HISTORY_MAX_RECORDS,
   CONTROL_HISTORY_WINDOW_MS,
   Stage4CControlHistory,
+  controlEvidenceForSequence,
   deriveControlHistorySeries,
   finiteEvidenceNumber,
   nearestControlEvidence,
@@ -22,6 +23,7 @@ const EVENT_PLOT_HEIGHT = 160;
 const state = {
   history: new Stage4CControlHistory(),
   selectedEvidence: null,
+  selectionLocked: false,
   timer: null,
   windowStartMs: null,
   windowEndMs: null,
@@ -329,12 +331,23 @@ function selectedRequestedDuty(fields) {
   return finiteEvidenceNumber(fields.next_requested_duty_percent);
 }
 
+function inspectorStateText(selected) {
+  if (!selected) {
+    return state.selectionLocked
+      ? "LOCKED · NO EVIDENCE · CLICK AGAIN TO FOLLOW"
+      : "FOLLOWING POINTER · MOVE OVER A PLOT · CLICK TO LOCK";
+  }
+  return state.selectionLocked
+    ? `LOCKED · SEQUENCE ${selected.sequence} · ${selected.event} · CLICK AGAIN TO FOLLOW`
+    : `FOLLOWING POINTER · SEQUENCE ${selected.sequence} · ${selected.event} · CLICK TO LOCK`;
+}
+
 function renderInspector() {
   const selected = state.selectedEvidence;
   const fields = selected?.fields || {};
   const available = Boolean(selected);
 
-  setText("lc-zec-history-inspector-state", available ? `SEQUENCE ${selected.sequence} · ${selected.event}` : "SELECT A PLOT POINT OR MOVE THE CURSOR");
+  setText("lc-zec-history-inspector-state", inspectorStateText(selected));
   setText("lc-zec-history-utc", available ? selected.utc : "UNAVAILABLE");
   setText("lc-zec-history-local", available ? formatLocal(selected.utc) : "UNAVAILABLE");
   setText("lc-zec-history-diagnostic-utc", available ? selected.diagnosticUtc : "UNAVAILABLE");
@@ -384,35 +397,67 @@ function renderHistory(nowMs = Date.now()) {
     state.selectedEvidence = nearestControlEvidence(events, endMs);
   } else if (state.selectedEvidence != null && !events.some((item) => item.sequence === state.selectedEvidence.sequence)) {
     state.selectedEvidence = events.length ? nearestControlEvidence(events, endMs) : null;
+    state.selectionLocked = false;
   }
   renderInspector();
   renderCursor();
 }
 
-function selectionFromPointer(event, svg) {
-  if (state.windowStartMs == null || state.windowEndMs == null) return;
+function selectionFromPointer(event, svg, preferExactSequence = false) {
+  const events = state.history.events();
+  if (preferExactSequence) {
+    const sequence = event.target?.dataset?.sequence;
+    if (sequence != null) {
+      const exact = controlEvidenceForSequence(events, sequence);
+      if (exact != null) {
+        state.selectedEvidence = exact;
+        renderInspector();
+        renderCursor();
+        return true;
+      }
+    }
+  }
+
+  if (state.windowStartMs == null || state.windowEndMs == null) return false;
   const rect = svg.getBoundingClientRect();
-  if (!(rect.width > 0)) return;
+  if (!(rect.width > 0)) return false;
   const plotLeftPx = (PLOT_LEFT / SVG_WIDTH) * rect.width;
   const plotRightPx = (PLOT_RIGHT / SVG_WIDTH) * rect.width;
   const usableWidth = rect.width - plotLeftPx - plotRightPx;
-  if (!(usableWidth > 0)) return;
+  if (!(usableWidth > 0)) return false;
   const localX = event.clientX - rect.left;
   const ratio = Math.max(0, Math.min(1, (localX - plotLeftPx) / usableWidth));
   const targetMs = state.windowStartMs + ratio * (state.windowEndMs - state.windowStartMs);
-  const selected = nearestControlEvidence(state.history.events(), targetMs);
-  if (!selected) return;
+  const selected = nearestControlEvidence(events, targetMs);
+  if (!selected) return false;
   state.selectedEvidence = selected;
   renderInspector();
   renderCursor();
+  return true;
 }
 
 function bindPlotInspection() {
   for (const id of ("lc-zec-history-p-plot", "lc-zec-history-pwm-plot", "lc-zec-history-event-plot")) {
     const svg = element(id);
     if (!svg) continue;
-    svg.addEventListener("pointermove", (event) => selectionFromPointer(event, svg));
-    svg.addEventListener("click", (event) => selectionFromPointer(event, svg));
+    svg.addEventListener("pointermove", (event) => {
+      if (state.selectionLocked) return;
+      selectionFromPointer(event, svg, false);
+    });
+    svg.addEventListener("click", (event) => {
+      if (state.selectionLocked) {
+        state.selectionLocked = false;
+        selectionFromPointer(event, svg, true);
+        renderInspector();
+        renderCursor();
+        return;
+      }
+      if (selectionFromPointer(event, svg, true)) {
+        state.selectionLocked = true;
+        renderInspector();
+        renderCursor();
+      }
+    });
   }
 }
 
@@ -462,7 +507,7 @@ function createUi() {
     <section id="lc-zec-history-inspector" class="control-history-inspector" aria-label="Selected control evidence">
       <div class="control-history-inspector-heading">
         <strong>Exact evidence inspector</strong>
-        <span id="lc-zec-history-inspector-state">SELECT A PLOT POINT OR MOVE THE CURSOR</span>
+        <span id="lc-zec-history-inspector-state">FOLLOWING POINTER · MOVE OVER A PLOT · CLICK TO LOCK</span>
       </div>
       <dl class="control-history-inspector-grid">
         <div><dt>UTC</dt><dd id="lc-zec-history-utc">UNAVAILABLE</dd></div>
