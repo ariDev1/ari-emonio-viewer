@@ -4,6 +4,7 @@ import {
   CONTROL_HISTORY_WINDOW_MS,
   Stage4CControlHistory,
   deriveControlHistorySeries,
+  finiteEvidenceNumber,
   nearestControlEvidence,
 } from "./load-control-stage4c-history.js";
 
@@ -36,19 +37,13 @@ function panelVisible() {
   return Boolean(panel && !panel.hidden);
 }
 
-function finite(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
 function formatNumber(value, decimals = 4) {
-  const number = finite(value);
+  const number = finiteEvidenceNumber(value);
   return number == null ? "UNAVAILABLE" : number.toFixed(decimals);
 }
 
 function formatInteger(value) {
-  const number = Number(value);
-  return Number.isInteger(number) ? String(number) : "UNAVAILABLE";
+  return typeof value === "number" && Number.isInteger(value) ? String(value) : "UNAVAILABLE";
 }
 
 function formatText(value) {
@@ -205,7 +200,7 @@ function drawPwmPlot(series, startMs, endMs) {
   appendSvgText(svg, PLOT_LEFT - 8, offY + 4, "OFF 0 %", "control-history-axis-label", "end");
 
   for (const item of series.commands) {
-    const duty = finite(item.requestedDutyPercent);
+    const duty = finiteEvidenceNumber(item.requestedDutyPercent);
     const x = xForUtc(item.utc, startMs, endMs);
     if (duty == null || x == null) continue;
     const y = yForDuty(duty);
@@ -220,7 +215,7 @@ function drawPwmPlot(series, startMs, endMs) {
   }
 
   for (const item of series.acks) {
-    const requested = finite(item.requestedDutyPercent);
+    const requested = finiteEvidenceNumber(item.requestedDutyPercent);
     const x = xForUtc(item.utc, startMs, endMs);
     if (requested == null || x == null) continue;
     drawPwmMarker(
@@ -231,7 +226,7 @@ function drawPwmPlot(series, startMs, endMs) {
       `${item.utc} · PWM ACK requested=${requested} %`,
       item.sequence,
     );
-    const actual = finite(item.actualDutyPercent);
+    const actual = finiteEvidenceNumber(item.actualDutyPercent);
     if (actual != null) {
       drawPwmMarker(
         svg,
@@ -329,9 +324,9 @@ function renderCursor() {
 }
 
 function selectedRequestedDuty(fields) {
-  const direct = finite(fields.requested_duty_percent);
+  const direct = finiteEvidenceNumber(fields.requested_duty_percent);
   if (direct != null) return direct;
-  return finite(fields.next_requested_duty_percent);
+  return finiteEvidenceNumber(fields.next_requested_duty_percent);
 }
 
 function renderInspector() {
