@@ -66,6 +66,29 @@ function displayUtcOf(item) {
   return diagnosticUtc != null && timestampMsOf(diagnosticUtc) != null ? diagnosticUtc : null;
 }
 
+export function controlEvidenceForSequence(events, targetSequence) {
+  const target = Number(targetSequence);
+  if (!Number.isInteger(target) || target < 0) return null;
+
+  for (const item of Array.isArray(events) ? events : []) {
+    if (!isStage4CControlEvidence(item) || sequenceOf(item) !== target) continue;
+    const event = textOrNull(item?.event);
+    const diagnosticUtc = textOrNull(item?.utc);
+    const utc = displayUtcOf(item);
+    const timestampMs = timestampMsOf(utc);
+    if (event == null || diagnosticUtc == null || utc == null || timestampMs == null) return null;
+    return {
+      sequence: target,
+      event,
+      utc,
+      diagnosticUtc,
+      timestampMs,
+      fields: { ...fieldsOf(item) },
+    };
+  }
+  return null;
+}
+
 export function nearestControlEvidence(events, targetTimestampMs) {
   const targetMs = Number(targetTimestampMs);
   if (!Number.isFinite(targetMs)) return null;
