@@ -56,6 +56,48 @@ function normalizeEvidence(item) {
   };
 }
 
+function displayUtcOf(item) {
+  const event = textOrNull(item?.event);
+  const fields = fieldsOf(item);
+  if (event === "ZERO_EXPORT_DECISION" || event === "ZERO_EXPORT_SETTLING_SAMPLE") {
+    const measurementUtc = textOrNull(fields.cycle_finished_utc);
+    if (measurementUtc != null && timestampMsOf(measurementUtc) != null) return measurementUtc;
+  }
+  const diagnosticUtc = textOrNull(item?.utc);
+  return diagnosticUtc != null && timestampMsOf(diagnosticUtc) != null ? diagnosticUtc : null;
+}
+
+export function nearestControlEvidence(events, targetTimestampMs) {
+  const targetMs = Number(targetTimestampMs);
+  if (!Number.isFinite(targetMs)) return null;
+
+  let selected = null;
+  let selectedDistance = Infinity;
+  for (const item of Array.isArray(events) ? events : []) {
+    if (!isStage4CControlEvidence(item)) continue;
+    const sequence = sequenceOf(item);
+    const event = textOrNull(item?.event);
+    const diagnosticUtc = textOrNull(item?.utc);
+    const utc = displayUtcOf(item);
+    const timestampMs = timestampMsOf(utc);
+    if (sequence == null || event == null || diagnosticUtc == null || utc == null || timestampMs == null) continue;
+
+    const distance = Math.abs(timestampMs - targetMs);
+    if (distance < selectedDistance || (distance === selectedDistance && sequence < selected.sequence)) {
+      selectedDistance = distance;
+      selected = {
+        sequence,
+        event,
+        utc,
+        diagnosticUtc,
+        timestampMs,
+        fields: { ...fieldsOf(item) },
+      };
+    }
+  }
+  return selected;
+}
+
 export class Stage4CControlHistory {
   constructor() {
     this._events = [];
