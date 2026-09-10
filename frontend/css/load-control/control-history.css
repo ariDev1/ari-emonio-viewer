@@ -1,4 +1,9 @@
 .load-control-control-history {
+  --control-history-p: var(--accent);
+  --control-history-request: var(--warning);
+  --control-history-confirmed: var(--good);
+  --control-history-normal: var(--accent);
+  --control-history-danger: var(--danger);
   display: grid;
   gap: 8px;
   padding: 10px 12px;
@@ -109,14 +114,14 @@
 }
 
 .control-history-zero-line {
-  stroke: currentColor;
+  stroke: var(--text);
   stroke-width: 1;
   stroke-opacity: 0.38;
   vector-effect: non-scaling-stroke;
 }
 
 .control-history-off-line {
-  stroke: currentColor;
+  stroke: var(--text);
   stroke-width: 1;
   stroke-opacity: 0.24;
   vector-effect: non-scaling-stroke;
@@ -141,41 +146,42 @@
 }
 
 .control-history-p-point {
-  fill: currentColor;
-  stroke: var(--background, #0b0e13);
+  fill: var(--control-history-p);
+  stroke: var(--surface);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
 .control-history-deadband-tick {
-  stroke: currentColor;
+  stroke: var(--control-history-p);
   stroke-width: 1;
   stroke-opacity: 0.45;
   vector-effect: non-scaling-stroke;
 }
 
 .control-history-settling-tick {
-  stroke: var(--muted);
+  stroke: var(--control-history-normal);
   stroke-width: 1.5;
+  stroke-opacity: 0.72;
   vector-effect: non-scaling-stroke;
 }
 
 .control-history-command {
   fill: none;
-  stroke: currentColor;
+  stroke: var(--control-history-request);
   stroke-width: 1.4;
   vector-effect: non-scaling-stroke;
 }
 
 .control-history-ack-requested {
   fill: none;
-  stroke: currentColor;
+  stroke: var(--control-history-request);
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
 
 .control-history-ack-actual {
-  fill: currentColor;
+  fill: var(--control-history-confirmed);
   stroke: none;
 }
 
@@ -192,23 +198,47 @@
 }
 
 .control-history-controller-event {
-  fill: currentColor;
+  fill: var(--control-history-normal);
   stroke: none;
+}
+
+.control-history-controller-event.control-history-event-warning {
+  fill: var(--control-history-request);
+}
+
+.control-history-controller-event.control-history-event-danger {
+  fill: var(--control-history-danger);
 }
 
 .control-history-pwm-command-event {
   fill: none;
-  stroke: currentColor;
+  stroke: var(--control-history-request);
   stroke-width: 1.4;
 }
 
 .control-history-pwm-ack-event {
-  fill: currentColor;
+  fill: var(--control-history-confirmed);
   stroke: none;
 }
 
+.control-history-hit-target {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12px;
+  pointer-events: stroke;
+  cursor: pointer;
+  vector-effect: non-scaling-stroke;
+}
+
+.control-history-evidence-marker.is-selected {
+  stroke: var(--text);
+  stroke-width: 2.6px;
+  paint-order: stroke fill;
+  vector-effect: non-scaling-stroke;
+}
+
 .control-history-cursor {
-  stroke: currentColor;
+  stroke: var(--text);
   stroke-width: 1;
   stroke-dasharray: 4 3;
   stroke-opacity: 0.72;
