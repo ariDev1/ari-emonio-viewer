@@ -20,6 +20,11 @@ const P_PLOT_HEIGHT = 190;
 const PWM_PLOT_HEIGHT = 190;
 const EVENT_PLOT_HEIGHT = 160;
 const CLICK_MARKER_RADIUS_PX = 10;
+const HISTORY_PLOT_IDS = new Set([
+  "lc-zec-history-p-plot",
+  "lc-zec-history-pwm-plot",
+  "lc-zec-history-event-plot",
+]);
 
 const state = {
   history: new Stage4CControlHistory(),
@@ -344,7 +349,7 @@ function drawEventPlot(series, startMs, endMs) {
 }
 
 function removeCursors() {
-  for (const id of ("lc-zec-history-p-plot", "lc-zec-history-pwm-plot", "lc-zec-history-event-plot")) {
+  for (const id of HISTORY_PLOT_IDS) {
     const svg = element(id);
     if (!svg) continue;
     for (const cursor of svg.querySelectorAll(".control-history-cursor")) cursor.remove();
@@ -353,7 +358,7 @@ function removeCursors() {
 
 function renderSelectionHighlight() {
   const selectedSequence = state.selectedEvidence?.sequence;
-  for (const id of ("lc-zec-history-p-plot", "lc-zec-history-pwm-plot", "lc-zec-history-event-plot")) {
+  for (const id of HISTORY_PLOT_IDS) {
     const svg = element(id);
     if (!svg) continue;
     for (const marker of svg.querySelectorAll(".control-history-evidence-marker")) {
@@ -499,38 +504,57 @@ function selectionFromPointer(event, svg) {
   return true;
 }
 
-function bindPlotInspection() {
-  for (const id of ("lc-zec-history-p-plot", "lc-zec-history-pwm-plot", "lc-zec-history-event-plot")) {
-    const svg = element(id);
-    if (!svg) continue;
-    if (svg.dataset.controlHistoryInspectionBound === "true") continue;
-    svg.dataset.controlHistoryInspectionBound = "true";
-    svg.addEventListener("pointermove", (event) => {
-      if (state.selectionLocked) return;
-      selectionFromPointer(event, svg);
-    });
-    svg.addEventListener("click", (event) => {
-      const nearestSequence = nearestVisibleEvidenceSequence(event, svg);
-      if (nearestSequence != null) {
-        const exact = controlEvidenceForSequence(state.history.events(), nearestSequence);
-        if (exact != null) {
-          const sameLockedSequence = state.selectionLocked && state.selectedEvidence?.sequence === exact.sequence;
-          state.selectedEvidence = exact;
-          state.selectionLocked = !sameLockedSequence;
-          renderInspector();
-          renderCursor();
-          return;
-        }
-      }
+function historyPlotFromTarget(target) {
+  const plot = target?.closest?.(".control-history-plot");
+  return plot && HISTORY_PLOT_IDS.has(plot.id) ? plot : null;
+}
 
-      if (state.selectionLocked) return;
-      if (selectionFromPointer(event, svg)) {
-        state.selectionLocked = true;
-        renderInspector();
-        renderCursor();
-      }
-    });
-  }
+function evidenceSequenceFromTarget(target) {
+  const evidenceTarget = target?.closest?.("[data-sequence]");
+  const sequence = Number(evidenceTarget?.dataset?.sequence);
+  return Number.isInteger(sequence) && sequence >= 0 ? sequence : null;
+}
+
+function selectEvidenceSequence(sequence) {
+  const exact = controlEvidenceForSequence(state.history.events(), sequence);
+  if (exact == null) return false;
+  const sameLockedSequence = state.selectionLocked && state.selectedEvidence?.sequence === exact.sequence;
+  state.selectedEvidence = exact;
+  state.selectionLocked = !sameLockedSequence;
+  renderInspector();
+  renderCursor();
+  return true;
+}
+
+function bindHistoryInspection(section) {
+  if (section.dataset.controlHistoryInspectionBound === "true") return;
+  section.dataset.controlHistoryInspectionBound = "true";
+
+  section.addEventListener("pointermove", (event) => {
+    if (state.selectionLocked) return;
+    const svg = historyPlotFromTarget(event.target);
+    if (!svg) return;
+    selectionFromPointer(event, svg);
+  });
+
+  section.addEventListener("pointerdown", (event) => {
+    if (event.button != null && event.button !== 0) return;
+    const svg = historyPlotFromTarget(event.target);
+    if (!svg) return;
+
+    const exactSequence = evidenceSequenceFromTarget(event.target);
+    if (exactSequence != null && selectEvidenceSequence(exactSequence)) return;
+
+    const nearestSequence = nearestVisibleEvidenceSequence(event, svg);
+    if (nearestSequence != null && selectEvidenceSequence(nearestSequence)) return;
+
+    if (state.selectionLocked) return;
+    if (selectionFromPointer(event, svg)) {
+      state.selectionLocked = true;
+      renderInspector();
+      renderCursor();
+    }
+  });
 }
 
 function createUi() {
@@ -538,7 +562,7 @@ function createUi() {
   if (!slot) return false;
   const existing = element("lc-zec-control-history");
   if (existing) {
-    bindPlotInspection();
+    bindHistoryInspection(existing);
     return true;
   }
 
@@ -609,7 +633,7 @@ function createUi() {
     <div id="lc-zec-history-status" class="load-control-status-text" aria-live="polite"></div>
   `;
   slot.append(section);
-  bindPlotInspection();
+  bindHistoryInspection(section);
   renderHistory(Date.now());
   return true;
 }
