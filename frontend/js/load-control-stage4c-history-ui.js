@@ -105,6 +105,22 @@ function appendTitle(node, text) {
   node.append(title);
 }
 
+function markEvidenceMarker(marker, sequence) {
+  marker.classList.add("control-history-evidence-marker");
+  marker.dataset.sequence = String(sequence);
+}
+
+function appendEvidenceHitTarget(svg, x, y, sequence) {
+  const target = svgElement("circle", "control-history-hit-target");
+  target.setAttribute("cx", String(x));
+  target.setAttribute("cy", String(y));
+  target.setAttribute("r", "3");
+  target.dataset.sequence = String(sequence);
+  target.setAttribute("aria-hidden", "true");
+  svg.append(target);
+  return target;
+}
+
 function plotInnerWidth() {
   return SVG_WIDTH - PLOT_LEFT - PLOT_RIGHT;
 }
@@ -159,9 +175,10 @@ function drawPPlot(series, startMs, endMs) {
     marker.setAttribute("cx", String(x));
     marker.setAttribute("cy", String(y));
     marker.setAttribute("r", "3.3");
-    marker.dataset.sequence = String(item.sequence);
+    markEvidenceMarker(marker, item.sequence);
     appendTitle(marker, `${item.utc} · P=${item.pW} W · ${item.state || item.action || "DECISION"}`);
     svg.append(marker);
+    appendEvidenceHitTarget(svg, x, y, item.sequence);
 
     if (Number.isFinite(item.deadbandW)) {
       const upperY = yForP(item.deadbandW);
@@ -183,9 +200,10 @@ function drawPwmMarker(svg, x, y, className, titleText, sequence) {
   marker.setAttribute("cx", String(x));
   marker.setAttribute("cy", String(y));
   marker.setAttribute("r", "3.5");
-  marker.dataset.sequence = String(sequence);
+  markEvidenceMarker(marker, sequence);
   appendTitle(marker, titleText);
   svg.append(marker);
+  appendEvidenceHitTarget(svg, x, y, sequence);
 }
 
 function drawPwmPlot(series, startMs, endMs) {
@@ -211,9 +229,10 @@ function drawPwmPlot(series, startMs, endMs) {
     marker.setAttribute("y", String(y - 3));
     marker.setAttribute("width", "6");
     marker.setAttribute("height", "6");
-    marker.dataset.sequence = String(item.sequence);
+    markEvidenceMarker(marker, item.sequence);
     appendTitle(marker, `${item.utc} · PWM COMMAND requested=${duty} %`);
     svg.append(marker);
+    appendEvidenceHitTarget(svg, x, y, item.sequence);
   }
 
   for (const item of series.acks) {
@@ -249,14 +268,35 @@ function eventLabel(item) {
   return item.event;
 }
 
+function controlHistoryEventClass(item) {
+  const evidence = `${item.event} ${item.state || ""} ${item.action || ""} ${item.reason || ""}`.toUpperCase();
+  if (
+    evidence.includes("SAFE")
+    || evidence.includes("BLOCK")
+    || evidence.includes("UNCONFIRMED")
+    || evidence.includes("DISCONNECT")
+    || evidence.includes("FAIL")
+    || evidence.includes("INVALID")
+    || evidence.includes("STALE")
+    || evidence.includes("GAP")
+  ) {
+    return "control-history-event-danger";
+  }
+  if (evidence.includes("LIMIT") || evidence.includes("RESOLUTION")) {
+    return "control-history-event-warning";
+  }
+  return "control-history-event-normal";
+}
+
 function drawEventMarker(svg, x, y, className, label, titleText, sequence, showLabel) {
   const marker = svgElement("circle", className);
   marker.setAttribute("cx", String(x));
   marker.setAttribute("cy", String(y));
   marker.setAttribute("r", "3.4");
-  marker.dataset.sequence = String(sequence);
+  markEvidenceMarker(marker, sequence);
   appendTitle(marker, titleText);
   svg.append(marker);
+  appendEvidenceHitTarget(svg, x, y, sequence);
   if (showLabel) {
     appendSvgText(svg, x + 5, y - 5, label, "control-history-event-label");
   }
@@ -282,7 +322,7 @@ function drawEventPlot(series, startMs, endMs) {
       svg,
       x,
       48,
-      "control-history-controller-event",
+      `control-history-controller-event ${controlHistoryEventClass(item)}`,
       label,
       `${item.utc} · ${item.event} · state=${item.state || "UNAVAILABLE"} · reason=${item.reason || "UNAVAILABLE"}`,
       item.sequence,
@@ -310,8 +350,20 @@ function removeCursors() {
   }
 }
 
+function renderSelectionHighlight() {
+  const selectedSequence = state.selectedEvidence?.sequence;
+  for (const id of ("lc-zec-history-p-plot", "lc-zec-history-pwm-plot", "lc-zec-history-event-plot")) {
+    const svg = element(id);
+    if (!svg) continue;
+    for (const marker of svg.querySelectorAll(".control-history-evidence-marker")) {
+      marker.classList.toggle("is-selected", selectedSequence != null && marker.dataset.sequence === String(selectedSequence));
+    }
+  }
+}
+
 function renderCursor() {
   removeCursors();
+  renderSelectionHighlight();
   const selected = state.selectedEvidence;
   if (!selected || state.windowStartMs == null || state.windowEndMs == null) return;
   const x = xForUtc(selected.utc, state.windowStartMs, state.windowEndMs);
@@ -338,7 +390,7 @@ function inspectorStateText(selected) {
       : "FOLLOWING POINTER · MOVE OVER A PLOT · CLICK TO LOCK";
   }
   return state.selectionLocked
-    ? `LOCKED · SEQUENCE ${selected.sequence} · ${selected.event} · CLICK AGAIN TO FOLLOW`
+    ? `LOCKED · SEQUENCE ${selected.sequence} · ${selected.event} · CLICK SAME POINT TO FOLLOW`
     : `FOLLOWING POINTER · SEQUENCE ${selected.sequence} · ${selected.event} · CLICK TO LOCK`;
 }
 
@@ -445,14 +497,21 @@ function bindPlotInspection() {
       selectionFromPointer(event, svg, false);
     });
     svg.addEventListener("click", (event) => {
-      if (state.selectionLocked) {
-        state.selectionLocked = false;
-        selectionFromPointer(event, svg, true);
-        renderInspector();
-        renderCursor();
-        return;
+      const sequence = event.target?.dataset?.sequence;
+      if (sequence != null) {
+        const exact = controlEvidenceForSequence(state.history.events(), sequence);
+        if (exact != null) {
+          const sameLockedSequence = state.selectionLocked && state.selectedEvidence?.sequence === exact.sequence;
+          state.selectedEvidence = exact;
+          state.selectionLocked = !sameLockedSequence;
+          renderInspector();
+          renderCursor();
+          return;
+        }
       }
-      if (selectionFromPointer(event, svg, true)) {
+
+      if (state.selectionLocked) return;
+      if (selectionFromPointer(event, svg, false)) {
         state.selectionLocked = true;
         renderInspector();
         renderCursor();
