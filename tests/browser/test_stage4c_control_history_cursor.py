@@ -121,3 +121,13 @@ def test_click_selects_nearest_visible_marker_not_overlapping_hit_target() -> No
     assert "event.clientY" in source
     assert "const nearestSequence = nearestVisibleEvidenceSequence(event, svg)" in source
     assert "controlEvidenceForSequence(state.history.events(), nearestSequence)" in source
+
+
+def test_existing_history_dom_is_bound_once_when_initialization_reenters() -> None:
+    source = UI_PATH.read_text(encoding="utf-8")
+
+    assert 'const existing = element("lc-zec-control-history")' in source
+    assert "if (existing)" in source
+    assert "bindPlotInspection();" in source
+    assert 'svg.dataset.controlHistoryInspectionBound === "true"' in source
+    assert 'svg.dataset.controlHistoryInspectionBound = "true"' in source
