@@ -10,6 +10,7 @@ import pytest
 
 MODEL_PATH = Path("frontend/js/load-control-stage4c-history.js")
 UI_PATH = Path("frontend/js/load-control-stage4c-history-ui.js")
+CSS_PATH = Path("frontend/css/load-control/control-history.css")
 
 
 def _run_model(expression: str) -> object:
@@ -73,3 +74,38 @@ def test_ui_has_explicit_follow_and_click_lock_cursor_modes() -> None:
     assert "CLICK AGAIN TO FOLLOW" in source
     assert "event.target" in source
     assert "dataset.sequence" in source
+
+
+def test_visible_markers_use_separate_enlarged_pointer_hit_targets() -> None:
+    source = UI_PATH.read_text(encoding="utf-8")
+    css = CSS_PATH.read_text(encoding="utf-8")
+
+    assert "appendEvidenceHitTarget" in source
+    assert "control-history-hit-target" in source
+    assert 'target.dataset.sequence = String(sequence)' in source
+    assert ".control-history-hit-target" in css
+    assert "pointer-events: stroke" in css
+    assert "stroke-width: 12px" in css
+
+
+def test_locked_marker_click_moves_lock_and_same_marker_click_releases_it() -> None:
+    source = UI_PATH.read_text(encoding="utf-8")
+
+    assert "sameLockedSequence" in source
+    assert "state.selectionLocked = !sameLockedSequence" in source
+    assert "if (state.selectionLocked) return" in source
+
+
+def test_control_history_uses_semantic_scientific_colors_and_selection_outline() -> None:
+    css = CSS_PATH.read_text(encoding="utf-8")
+    source = UI_PATH.read_text(encoding="utf-8")
+
+    assert "--control-history-p: var(--accent)" in css
+    assert "--control-history-request: var(--warning)" in css
+    assert "--control-history-confirmed: var(--good)" in css
+    assert "--control-history-danger: var(--danger)" in css
+    assert ".control-history-event-warning" in css
+    assert ".control-history-event-danger" in css
+    assert ".control-history-evidence-marker.is-selected" in css
+    assert "controlHistoryEventClass" in source
+    assert "renderSelectionHighlight" in source
