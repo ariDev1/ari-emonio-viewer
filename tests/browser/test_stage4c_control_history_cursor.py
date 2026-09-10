@@ -62,7 +62,7 @@ def test_exact_marker_sequence_selects_that_record_without_nearest_time_reinterp
     assert result["diagnosticUtc"] == "2026-09-08T07:00:02.100Z"
 
 
-def test_ui_has_explicit_follow_and_click_lock_cursor_modes() -> None:
+def test_ui_has_explicit_follow_and_press_lock_cursor_modes() -> None:
     if not UI_PATH.is_file():
         pytest.fail("Stage4C Control History UI is not implemented")
     source = UI_PATH.read_text(encoding="utf-8")
@@ -87,7 +87,7 @@ def test_visible_markers_use_separate_enlarged_pointer_hit_targets() -> None:
     assert "stroke-width: 12px" in css
 
 
-def test_locked_marker_click_moves_lock_and_same_marker_click_releases_it() -> None:
+def test_locked_marker_press_moves_lock_and_same_marker_press_releases_it() -> None:
     source = UI_PATH.read_text(encoding="utf-8")
 
     assert "sameLockedSequence" in source
@@ -110,24 +110,40 @@ def test_control_history_uses_semantic_scientific_colors_and_selection_outline()
     assert "renderSelectionHighlight" in source
 
 
-def test_click_selects_nearest_visible_marker_not_overlapping_hit_target() -> None:
+def test_interaction_is_delegated_to_stable_history_section_before_redraw_can_cancel_click() -> None:
     source = UI_PATH.read_text(encoding="utf-8")
 
+    assert "function bindHistoryInspection(section)" in source
+    assert 'section.dataset.controlHistoryInspectionBound === "true"' in source
+    assert 'section.dataset.controlHistoryInspectionBound = "true"' in source
+    assert 'section.addEventListener("pointermove"' in source
+    assert 'section.addEventListener("pointerdown"' in source
+    assert 'svg.addEventListener("click"' not in source
+    assert 'svg.addEventListener("pointermove"' not in source
+
+
+def test_exact_browser_target_sequence_precedes_geometric_fallback() -> None:
+    source = UI_PATH.read_text(encoding="utf-8")
+
+    assert "function evidenceSequenceFromTarget(target)" in source
+    assert 'target?.closest?.("[data-sequence]")' in source
+    assert "function historyPlotFromTarget(target)" in source
+    assert 'target?.closest?.(".control-history-plot")' in source
     assert "nearestVisibleEvidenceSequence" in source
     assert 'querySelectorAll(".control-history-evidence-marker")' in source
     assert "marker.getBoundingClientRect()" in source
     assert "Math.hypot" in source
     assert "event.clientX" in source
     assert "event.clientY" in source
-    assert "const nearestSequence = nearestVisibleEvidenceSequence(event, svg)" in source
-    assert "controlEvidenceForSequence(state.history.events(), nearestSequence)" in source
+    exact = source.index("const exactSequence = evidenceSequenceFromTarget(event.target)")
+    fallback = source.index("const nearestSequence = nearestVisibleEvidenceSequence(event, svg)")
+    assert exact < fallback
 
 
-def test_existing_history_dom_is_bound_once_when_initialization_reenters() -> None:
+def test_existing_and_new_history_dom_bind_the_stable_section_once() -> None:
     source = UI_PATH.read_text(encoding="utf-8")
 
     assert 'const existing = element("lc-zec-control-history")' in source
     assert "if (existing)" in source
-    assert "bindPlotInspection();" in source
-    assert 'svg.dataset.controlHistoryInspectionBound === "true"' in source
-    assert 'svg.dataset.controlHistoryInspectionBound = "true"' in source
+    assert "bindHistoryInspection(existing);" in source
+    assert "bindHistoryInspection(section);" in source
