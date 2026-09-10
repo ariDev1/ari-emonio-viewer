@@ -19,6 +19,7 @@ const PLOT_BOTTOM = 28;
 const P_PLOT_HEIGHT = 190;
 const PWM_PLOT_HEIGHT = 190;
 const EVENT_PLOT_HEIGHT = 160;
+const CLICK_MARKER_RADIUS_PX = 10;
 
 const state = {
   history: new Stage4CControlHistory(),
@@ -455,21 +456,31 @@ function renderHistory(nowMs = Date.now()) {
   renderCursor();
 }
 
-function selectionFromPointer(event, svg, preferExactSequence = false) {
-  const events = state.history.events();
-  if (preferExactSequence) {
-    const sequence = event.target?.dataset?.sequence;
-    if (sequence != null) {
-      const exact = controlEvidenceForSequence(events, sequence);
-      if (exact != null) {
-        state.selectedEvidence = exact;
-        renderInspector();
-        renderCursor();
-        return true;
-      }
+function nearestVisibleEvidenceSequence(event, svg) {
+  const pointerX = Number(event.clientX);
+  const pointerY = Number(event.clientY);
+  if (!Number.isFinite(pointerX) || !Number.isFinite(pointerY)) return null;
+
+  let selectedSequence = null;
+  let selectedDistance = Infinity;
+  for (const marker of svg.querySelectorAll(".control-history-evidence-marker")) {
+    const sequence = Number(marker.dataset.sequence);
+    if (!Number.isInteger(sequence) || sequence < 0) continue;
+    const rect = marker.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const distance = Math.hypot(pointerX - centerX, pointerY - centerY);
+    if (distance > CLICK_MARKER_RADIUS_PX) continue;
+    if (distance < selectedDistance || (distance === selectedDistance && (selectedSequence == null || sequence < selectedSequence))) {
+      selectedSequence = sequence;
+      selectedDistance = distance;
     }
   }
+  return selectedSequence;
+}
 
+function selectionFromPointer(event, svg) {
+  const events = state.history.events();
   if (state.windowStartMs == null || state.windowEndMs == null) return false;
   const rect = svg.getBoundingClientRect();
   if (!(rect.width > 0)) return false;
@@ -494,12 +505,12 @@ function bindPlotInspection() {
     if (!svg) continue;
     svg.addEventListener("pointermove", (event) => {
       if (state.selectionLocked) return;
-      selectionFromPointer(event, svg, false);
+      selectionFromPointer(event, svg);
     });
     svg.addEventListener("click", (event) => {
-      const sequence = event.target?.dataset?.sequence;
-      if (sequence != null) {
-        const exact = controlEvidenceForSequence(state.history.events(), sequence);
+      const nearestSequence = nearestVisibleEvidenceSequence(event, svg);
+      if (nearestSequence != null) {
+        const exact = controlEvidenceForSequence(state.history.events(), nearestSequence);
         if (exact != null) {
           const sameLockedSequence = state.selectionLocked && state.selectedEvidence?.sequence === exact.sequence;
           state.selectedEvidence = exact;
@@ -511,7 +522,7 @@ function bindPlotInspection() {
       }
 
       if (state.selectionLocked) return;
-      if (selectionFromPointer(event, svg, false)) {
+      if (selectionFromPointer(event, svg)) {
         state.selectionLocked = true;
         renderInspector();
         renderCursor();
