@@ -72,7 +72,6 @@ def test_ui_has_explicit_follow_and_click_lock_cursor_modes() -> None:
     assert "FOLLOWING POINTER" in source
     assert "LOCKED" in source
     assert "CLICK AGAIN TO FOLLOW" in source
-    assert "event.target" in source
     assert "dataset.sequence" in source
 
 
@@ -109,3 +108,16 @@ def test_control_history_uses_semantic_scientific_colors_and_selection_outline()
     assert ".control-history-evidence-marker.is-selected" in css
     assert "controlHistoryEventClass" in source
     assert "renderSelectionHighlight" in source
+
+
+def test_click_selects_nearest_visible_marker_not_overlapping_hit_target() -> None:
+    source = UI_PATH.read_text(encoding="utf-8")
+
+    assert "nearestVisibleEvidenceSequence" in source
+    assert 'querySelectorAll(".control-history-evidence-marker")' in source
+    assert "marker.getBoundingClientRect()" in source
+    assert "Math.hypot" in source
+    assert "event.clientX" in source
+    assert "event.clientY" in source
+    assert "const nearestSequence = nearestVisibleEvidenceSequence(event, svg)" in source
+    assert "controlEvidenceForSequence(state.history.events(), nearestSequence)" in source
