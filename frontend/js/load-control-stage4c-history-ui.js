@@ -503,6 +503,8 @@ function bindPlotInspection() {
   for (const id of ("lc-zec-history-p-plot", "lc-zec-history-pwm-plot", "lc-zec-history-event-plot")) {
     const svg = element(id);
     if (!svg) continue;
+    if (svg.dataset.controlHistoryInspectionBound === "true") continue;
+    svg.dataset.controlHistoryInspectionBound = "true";
     svg.addEventListener("pointermove", (event) => {
       if (state.selectionLocked) return;
       selectionFromPointer(event, svg);
@@ -533,7 +535,12 @@ function bindPlotInspection() {
 
 function createUi() {
   const slot = element("lc-zero-export-slot");
-  if (!slot || element("lc-zec-control-history")) return Boolean(element("lc-zec-control-history"));
+  if (!slot) return false;
+  const existing = element("lc-zec-control-history");
+  if (existing) {
+    bindPlotInspection();
+    return true;
+  }
 
   const section = document.createElement("section");
   section.id = "lc-zec-control-history";
