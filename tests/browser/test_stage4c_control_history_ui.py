@@ -66,7 +66,7 @@ def test_control_history_ui_states_observational_boundary_and_builds_three_synch
     assert "CONTROL_HISTORY_WINDOW_MS" in source
     assert "CONTROL_HISTORY_MAX_RECORDS" in source
     assert "pointermove" in source
-    assert "click" in source
+    assert "pointerdown" in source
     assert "control-history-cursor" in source
     assert "style=" not in source
     assert "<button" not in source
