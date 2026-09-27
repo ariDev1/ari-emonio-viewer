@@ -18,11 +18,7 @@ FIXED_CT_READS = (
     ("ct_didt", "conf ct_didt"),
 )
 
-# Read-only system-information commands. "info version" is tried first;
-# "info device" is only a fallback source for the same Version: evidence.
 FIRMWARE_INFO_COMMANDS = ("info version", "info device")
-
-# Markers that terminate a command response at the next shell prompt.
 _PROMPT_MARKERS = (b"$ ", b"# ")
 
 IAC = 255
@@ -107,11 +103,6 @@ class _TelnetSocket:
             self._recv_and_consume(max_bytes=max_bytes)
 
     def read_until_text(self, needle: bytes, *, max_bytes: int = 65536) -> bytes:
-        """Consume input until the full needle (e.g. a command echo) arrived.
-
-        ANSI redraw sequences are ignored for matching: the device may split
-        echoed bytes with escape codes.
-        """
         if not needle:
             raise CtConfigurationReadError("Telnet match text must not be empty")
         while True:
@@ -126,62 +117,23 @@ class _TelnetSocket:
         echo: bytes,
         *,
         markers: tuple[bytes, ...] = _PROMPT_MARKERS,
-        grace_s: float = 0.3,
         max_bytes: int = 65536,
     ) -> bytes:
-        """Read a full command response up to the final shell prompt.
+        """Read through the first shell prompt after actual command output.
 
-        The device redraws the prompt with partial input and may re-echo
-        the full command line; both contain prompt markers that must not
-        end the read early. Buffered bytes are never discarded mid-read:
-        echo, output, and prompt may arrive in a single chunk. A response
-        is only accepted when the buffered bytes end with a prompt marker
-        and no further bytes arrive within the grace window.
+        Emonio redraws its interactive prompt continuously. Silence is not a
+        valid response terminator. Ignore prompt redraws and echoed command
+        lines until at least one non-prompt output line is present. Then the
+        following shell prompt completes the response.
         """
-        while echo not in strip_terminal_sequences(bytes(self._clean)):
-            self._recv_and_consume(max_bytes=max_bytes)
-        bare_markers = tuple(marker.rstrip() for marker in markers)
         while True:
             clean = strip_terminal_sequences(bytes(self._clean))
-            if clean.endswith(markers) or clean.rstrip().endswith(bare_markers):
-                if self._quiescent(grace_s):
-                    response = bytes(self._clean)
-                    self._clean.clear()
-                    return response
+            end = _completed_response_prompt_end(clean, echo, markers)
+            if end is not None:
+                response = bytes(self._clean)
+                self._clean.clear()
+                return response
             self._recv_and_consume(max_bytes=max_bytes)
-
-    def diagnostic_snapshot(self, *, max_chars: int = 1000) -> str:
-        """Return bounded, sanitized buffered command-response evidence."""
-        clean = strip_terminal_sequences(bytes(self._clean)).decode("utf-8", errors="replace")
-        visible = clean.replace("\r", "<CR>").replace("\n", "<LF>")
-        visible = " ".join(visible.split())
-        if len(visible) > max_chars:
-            visible = visible[:max_chars] + "..."
-        return visible or "<EMPTY>"
-
-    def _quiescent(self, grace_s: float) -> bool:
-        """Return True when no further bytes arrive within the grace window.
-
-        Uses MSG_PEEK so a negative answer never consumes bytes that belong
-        to subsequent reads.
-        """
-        previous = self._sock.gettimeout()
-        self._sock.settimeout(grace_s)
-        try:
-            try:
-                chunk = self._sock.recv(4096, socket.MSG_PEEK)
-            except socket.timeout:
-                return True
-            except OSError as exc:
-                raise CtConfigurationReadError("Telnet receive failed") from exc
-        finally:
-            try:
-                self._sock.settimeout(previous)
-            except OSError:
-                pass
-        if not chunk:
-            raise CtConfigurationReadError("Emonio closed the Telnet connection")
-        return False
 
     def _recv_and_consume(self, *, max_bytes: int) -> None:
         if len(self._clean) >= max_bytes:
@@ -208,21 +160,17 @@ class _TelnetSocket:
         index = 0
         while index < len(data):
             byte = data[index]
-
             if self._subnegotiation:
                 if self._subnegotiation_iac:
                     self._subnegotiation_iac = False
                     if byte == SE:
                         self._subnegotiation = False
-                    elif byte == IAC:
-                        pass
                     index += 1
                     continue
                 if byte == IAC:
                     self._subnegotiation_iac = True
                 index += 1
                 continue
-
             if self._pending_negotiation is not None:
                 command = self._pending_negotiation
                 self._pending_negotiation = None
@@ -232,7 +180,6 @@ class _TelnetSocket:
                     self._send_negotiation(WONT, byte)
                 index += 1
                 continue
-
             if self._pending_iac:
                 self._pending_iac = False
                 command = byte
@@ -252,18 +199,15 @@ class _TelnetSocket:
                 elif command == IAC:
                     self._clean.append(IAC)
                 continue
-
             if byte == IAC:
                 self._pending_iac = True
                 index += 1
                 continue
-
             self._clean.append(byte)
             index += 1
 
 
 def extract_integer_if_present(response: bytes) -> int | None:
-    """Return one complete standalone integer result without range interpretation."""
     match = re.search(rb"(?:^|[\r\n])[ \t]*([+-]?\d+)[ \t]*(?=[\r\n])", response)
     if match is None:
         return None
@@ -271,11 +215,31 @@ def extract_integer_if_present(response: bytes) -> int | None:
 
 
 _ANSI_CSI = re.compile(rb"\x1b\[[0-9;?]*[A-Za-z]")
+_PROMPT_LINE = re.compile(rb"(?:^|[\r\n])[^\r\n]*[#$] ?")
 
 
 def strip_terminal_sequences(data: bytes) -> bytes:
-    """Remove ANSI escape sequences from interactive Telnet command output."""
     return _ANSI_CSI.sub(b"", data)
+
+
+def _completed_response_prompt_end(
+    clean: bytes, echo: bytes, markers: tuple[bytes, ...]
+) -> int | None:
+    """Return prompt end offset after command output, else None."""
+    if echo not in clean:
+        return None
+    echo_pos = clean.rfind(echo)
+    tail = clean[echo_pos + len(echo):]
+    if not tail:
+        return None
+    prompt_matches = list(_PROMPT_LINE.finditer(tail))
+    for match in prompt_matches:
+        before = tail[:match.start()]
+        lines = [line.strip() for line in re.split(rb"[\r\n]+", before) if line.strip()]
+        output_lines = [line for line in lines if echo not in line and not line.endswith(markers)]
+        if output_lines:
+            return echo_pos + len(echo) + match.end()
+    return None
 
 
 class TelnetCtConfigurationReader:
@@ -293,9 +257,7 @@ class TelnetCtConfigurationReader:
             if exc.state != "READ_ERROR" or exc.stage != "READ":
                 raise
             raise CtConfigurationReadError(
-                str(exc),
-                state="READ_ERROR",
-                stage=stage,
+                str(exc), state="READ_ERROR", stage=stage,
                 user_message=f"CT configuration read failed during {stage}.",
             ) from exc
 
@@ -306,11 +268,6 @@ class TelnetCtConfigurationReader:
     def read_with_firmware(
         self, host: str, password: str
     ) -> tuple[CtConfigurationValues, str | None, str]:
-        """Read CT keys plus best-effort firmware over one Telnet session.
-
-        Returns (values, firmware_version_or_None, firmware_detail). A missing
-        firmware string never fails the CT read; CT failures still raise.
-        """
         session = _TelnetSocket(host, self._port, self._timeout_s)
         try:
             self._login(session, password)
@@ -331,25 +288,16 @@ class TelnetCtConfigurationReader:
         self._stage("PASSWORD", lambda: session.send_line(password))
         login_response = self._stage(
             "AUTH",
-            lambda: session.read_until_any(
-                (b"$ ", b"# ", b"login:", b"Login:", b"incorrect", b"failed")
-            ),
+            lambda: session.read_until_any((b"$ ", b"# ", b"login:", b"Login:", b"incorrect", b"failed")),
         )
         lowered = login_response.lower()
         if b"incorrect" in lowered or b"failed" in lowered or b"login:" in lowered:
             raise CtConfigurationReadError(
-                "Emonio Telnet login failed",
-                state="AUTH_FAILED",
-                stage="AUTH",
-                user_message=(
-                    "Telnet authentication failed for user admin. "
-                    "Check the Emonio admin password."
-                ),
+                "Emonio Telnet login failed", state="AUTH_FAILED", stage="AUTH",
+                user_message="Telnet authentication failed for user admin. Check the Emonio admin password.",
             )
 
     def _read_firmware_best_effort(self, session: _TelnetSocket) -> tuple[str | None, str]:
-        # Firmware evidence must never break the CT read. Any unexpected
-        # failure degrades to "not found", never to an exception.
         try:
             return self._read_firmware_unsafe(session)
         except Exception as exc:
@@ -363,16 +311,9 @@ class TelnetCtConfigurationReader:
             encoded = command.encode("utf-8")
             try:
                 session.send_line(command)
-            except CtConfigurationReadError as exc:
-                return None, f"RESPONSE_NOT_READABLE: send failed: {exc}"
-            try:
                 response = session.read_until_prompt(encoded)
             except CtConfigurationReadError as exc:
-                snapshot = session.diagnostic_snapshot()
-                return None, (
-                    f"RESPONSE_NOT_READABLE: prompt not completed: {exc}; "
-                    f"command={command}; buffered={snapshot}"
-                )
+                return None, f"RESPONSE_NOT_READABLE: {exc}"
             clean = strip_terminal_sequences(response).decode("utf-8", errors="replace")
             last_raw = clean
             version = parse_firmware_version(clean)
