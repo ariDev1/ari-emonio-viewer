@@ -345,13 +345,16 @@ class LoadControlSupervisor:
     def observe_diagnostic(self, event: DiagnosticEvent, *, now_utc: datetime) -> SupervisorDecision:
         if event.device_id != self.config.bound_emonio_device_id:
             return SupervisorDecision(event="CONTROL_DIAGNOSTIC_IGNORED", reason="SOURCE_NOT_BOUND")
+        if self._last_sample is None:
+            self.last_source_cycle_id = event.cycle_id
+            return SupervisorDecision(event="CONTROL_DIAGNOSTIC_OBSERVED")
         if self.last_source_cycle_id is not None and event.cycle_id != self.last_source_cycle_id + 1:
             self.last_source_cycle_id = event.cycle_id
             if self.control_mode is ControlMode.ENABLED:
                 return self._trip_with_safe(
                     TripReason.CONTROL_SAMPLE_SEQUENCE_GAP,
                     now_utc=now_utc,
-                    now_monotonic_ns=0 if self._last_sample is None else self._last_sample.timing.cycle_finished_monotonic_ns,
+                    now_monotonic_ns=self._last_sample.timing.cycle_finished_monotonic_ns,
                 )
         else:
             self.last_source_cycle_id = event.cycle_id
@@ -359,7 +362,7 @@ class LoadControlSupervisor:
             return self._trip_with_safe(
                 TripReason.ACQUISITION_FAILURE,
                 now_utc=now_utc,
-                now_monotonic_ns=0 if self._last_sample is None else self._last_sample.timing.cycle_finished_monotonic_ns,
+                now_monotonic_ns=self._last_sample.timing.cycle_finished_monotonic_ns,
             )
         return SupervisorDecision(event="CONTROL_DIAGNOSTIC_OBSERVED")
 

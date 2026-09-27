@@ -73,6 +73,19 @@ def validate_phase_values(
     pf_reference = None if s == 0.0 else p / s
     warnings: list[str] = []
 
+    for value in (vrms, irms, p, q, s, pf, ui):
+        if not math.isfinite(value):
+            warnings.append("PHASE_NON_FINITE_VALUE")
+            break
+    if vrms < 0.0:
+        warnings.append("PHASE_VRMS_NEGATIVE")
+    if irms < 0.0:
+        warnings.append("PHASE_IRMS_NEGATIVE")
+    if s < 0.0:
+        warnings.append("PHASE_S_NEGATIVE")
+    if not (math.isfinite(pf) and -1.0 <= pf <= 1.0):
+        warnings.append("PHASE_PF_OUT_OF_RANGE")
+
     if tolerances.qualified:
         assert tolerances.abs_power is not None
         assert tolerances.rel_power is not None

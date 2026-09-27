@@ -361,6 +361,10 @@ class Stage3BManualPwmCommandService(Stage3BExplicitCommandService):
 
     async def close(self) -> None:
         await super().close()
+        if self._pwm_owner is not None:
+            try:
+                self.release_pwm_owner(self._pwm_owner)
+            except Exception:
+                self._pwm_owner = None
         self._manual_pwm_state = ManualPwmState.IDLE
-        self._pwm_owner = None
         self._clear_manual_result()

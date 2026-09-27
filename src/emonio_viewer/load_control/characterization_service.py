@@ -492,14 +492,13 @@ class Stage4BCharacterizationService:
         reserved = False
         operation_error: str | None = None
         try:
-            if mode == "MANUAL_CAPTURE":
-                initial = self._qualified_active_pwm(self._manual_pwm.manual_pwm_status())
-
             try:
                 self._manual_pwm.reserve_pwm_owner(CHARACTERIZATION_PWM_OWNER)
             except Stage3AError as exc:
                 raise Stage4BCharacterizationError(str(exc)) from exc
             reserved = True
+            if mode == "MANUAL_CAPTURE":
+                initial = self._qualified_active_pwm(self._manual_pwm.manual_pwm_status())
             self._drain_runtime_queue()
             self._check_abort_requested()
 

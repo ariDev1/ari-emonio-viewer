@@ -201,7 +201,7 @@ class AcquisitionCoordinator:
     def disconnect_device(
         self,
         device_id: str,
-        join_timeout_s: float = 5.0,
+        join_timeout_s: float = 15.0,
     ) -> AcquisitionStatus:
         with self._lock:
             try:
@@ -353,7 +353,7 @@ class AcquisitionCoordinator:
         for worker in workers:
             worker.client.close()
 
-    def stop(self, join_timeout_s: float = 5.0) -> None:
+    def stop(self, join_timeout_s: float = 15.0) -> None:
         self._stop.set()
         with self._lock:
             stops = tuple(self._worker_stops.values())

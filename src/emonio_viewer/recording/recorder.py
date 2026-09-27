@@ -133,7 +133,9 @@ class SessionRecorder:
 
         if sample_time >= self._next_record_utc:
             self._writers.write_measurement(
-                sample_to_csv_row(sample, sample_time.isoformat(), 0.0)
+                sample_to_csv_row(
+                    sample, sample_time.isoformat(), sample.acquisition.schedule_lag_ms
+                )
             )
             self._records += 1
             self._last_recorded_utc = sample_time
@@ -793,7 +795,11 @@ class RecordingManager:
                                 device_id, recorder, event.cycle_id, exc
                             )
                     state = self._armed_triggers.get(device_id)
-                    if state is not None and state.config.mode is TriggerMode.CROSSING:
+                    if (
+                        state is not None
+                        and state.config.mode is TriggerMode.CROSSING
+                        and event.event.startswith("ACQUISITION_")
+                    ):
                         invalidate_crossing_continuity(state)
 
             if failure_event is not None:

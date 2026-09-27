@@ -168,6 +168,14 @@ class AcquisitionWorker:
                 kind=AcquisitionFailureKind.TRANSPORT,
                 detail=str(exc),
             ) from exc
+        except ValueError as exc:
+            self.client.close()
+            raise self._failure(
+                cycle_id=cycle_id,
+                block=name,
+                kind=AcquisitionFailureKind.PROTOCOL,
+                detail=f"invalid request or block: {exc}",
+            ) from exc
 
         measurement = PhaseMeasurement(**values)
         return BlockState(
@@ -178,12 +186,25 @@ class AcquisitionWorker:
             raw=RawBlockEvidence(base_register=base, words=tuple(words)),
         )
 
-    def run_cycle(self, cycle_id: int, schedule_lag_ms: float = 0.0) -> MeasurementSample:
+    def run_cycle(
+        self,
+        cycle_id: int,
+        schedule_lag_ms: float = 0.0,
+        *,
+        abort: threading.Event | None = None,
+    ) -> MeasurementSample:
         start_utc = datetime.now(timezone.utc)
         start_ns = time.monotonic_ns()
 
         blocks: dict[str, BlockState] = {}
         for name, base in BLOCK_BASES.items():
+            if abort is not None and abort.is_set():
+                raise self._failure(
+                    cycle_id=cycle_id,
+                    block=name,
+                    kind=AcquisitionFailureKind.TRANSPORT,
+                    detail="stopping",
+                )
             blocks[name] = self._read_block(name, base, cycle_id)
 
         finish_ns = time.monotonic_ns()
@@ -245,9 +266,24 @@ class AcquisitionWorker:
             schedule_lag_ms = max(0.0, (started - deadline) * 1000.0)
             cycle_id += 1
             try:
-                publish_sample(self.run_cycle(cycle_id, schedule_lag_ms=schedule_lag_ms))
+                publish_sample(
+                    self.run_cycle(cycle_id, schedule_lag_ms=schedule_lag_ms, abort=stop_event)
+                )
             except AcquisitionCycleError as exc:
+                if stop_event.is_set() and exc.failure.detail == "stopping":
+                    break
                 publish_event(exc.failure)
+            except Exception as exc:
+                publish_event(
+                    AcquisitionFailure(
+                        device_id=self.device.id,
+                        cycle_id=cycle_id,
+                        block="WORKER",
+                        kind=AcquisitionFailureKind.TRANSPORT,
+                        detail=f"INTERNAL: {type(exc).__name__}: {exc}",
+                        occurred_utc=datetime.now(timezone.utc),
+                    )
+                )
 
             self._run_pending_device_evidence()
 

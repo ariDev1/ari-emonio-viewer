@@ -97,10 +97,22 @@ def _required_text(body: dict, name: str) -> str:
 
 
 def _required_number(body: dict, name: str) -> float:
+    import math as _math
+
     value = body.get(name)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise web.HTTPBadRequest(text=f"{name} must be numeric")
-    return float(value)
+    number = float(value)
+    if not _math.isfinite(number):
+        raise web.HTTPBadRequest(text=f"{name} must be finite")
+    return number
+
+
+def _required_bounded_number(body: dict, name: str, *, minimum: float, maximum: float) -> float:
+    number = _required_number(body, name)
+    if not (minimum <= number <= maximum):
+        raise web.HTTPBadRequest(text=f"{name} must be in [{minimum}, {maximum}]")
+    return number
 
 
 def _query_integer(
@@ -204,8 +216,12 @@ async def get_discovered_actuators(request: web.Request) -> web.Response:
 
 async def scan_lan_actuators(request: web.Request) -> web.Response:
     body = await _body(request)
-    discovery_window_s = _required_number(body, "discovery_window_s")
-    resolve_timeout_s = _required_number(body, "resolve_timeout_s")
+    discovery_window_s = _required_bounded_number(
+        body, "discovery_window_s", minimum=0.1, maximum=30.0
+    )
+    resolve_timeout_s = _required_bounded_number(
+        body, "resolve_timeout_s", minimum=0.1, maximum=30.0
+    )
     diagnostic_log = _optional_diagnostic_log(request)
     if diagnostic_log is not None:
         diagnostic_log.append(
@@ -322,6 +338,8 @@ async def get_recent_evidence(request: web.Request) -> web.Response:
         limit = int(raw_limit)
     except ValueError as exc:
         raise web.HTTPBadRequest(text="limit must be an integer") from exc
+    if limit < 1 or limit > 1000:
+        raise web.HTTPBadRequest(text="limit must be in [1, 1000]")
     try:
         payload = _service(request).recent_evidence(limit)
     except ValueError as exc:

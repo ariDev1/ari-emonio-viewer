@@ -17,7 +17,12 @@ def create_session_directory(root: Path, device_id: str, started_utc: datetime) 
     stamp = started_utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
     session_id = f"{stamp}_{_safe_device_id(device_id)}"
     path = root / session_id
-    path.mkdir(parents=True, exist_ok=False)
+    try:
+        path.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as exc:
+        # Same-second duplicate start (manual + trigger/monitor retry):
+        # fail with a clear name instead of silently merging sessions.
+        raise FileExistsError(f"recording session already exists: {session_id}") from exc
     return session_id, path
 
 

@@ -79,6 +79,6 @@ def test_near_horizontal_label_layout_moves_q_and_angle_away_from_p_axis() -> No
 
 def test_axis_state_uses_canonical_backend_quadrant_evidence() -> None:
     result = _run_quadrant_module(
-        'mod.computePowerVectorDetails({p: 0, q: 4, s: 4, pf: 0, quadrant: "P_AXIS_POSITIVE_Q"}, false)'
+        'mod.computePowerVectorDetails({p: 0, q: 4, s: 4, pf: 0, quadrant: "Q_AXIS_POSITIVE_Q"}, false)'
     )
-    assert result["quadrant"] == "P_AXIS_POSITIVE_Q"
+    assert result["quadrant"] == "Q_AXIS_POSITIVE_Q"

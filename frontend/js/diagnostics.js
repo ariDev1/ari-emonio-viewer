@@ -70,7 +70,14 @@ export function renderDeviceList(devices) {
   for (const device of devices) {
     const entry = document.createElement("div");
     entry.className = "device-entry";
-    entry.innerHTML = `<strong>${device.device_id}</strong><span class="state-${device.state}">${device.state}</span><span>${Number.isFinite(device.sample_age_s) ? `${device.sample_age_s.toFixed(2)} s` : "no sample"}</span>`;
+    const name = document.createElement("strong");
+    name.textContent = String(device.device_id ?? "—");
+    const state = document.createElement("span");
+    state.className = `state-${String(device.state ?? "unknown")}`;
+    state.textContent = String(device.state ?? "—");
+    const age = document.createElement("span");
+    age.textContent = Number.isFinite(device.sample_age_s) ? `${device.sample_age_s.toFixed(2)} s` : "no sample";
+    entry.append(name, state, age);
     target.appendChild(entry);
   }
 }

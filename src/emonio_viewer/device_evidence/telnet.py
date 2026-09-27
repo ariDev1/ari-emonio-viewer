@@ -74,6 +74,8 @@ class _TelnetSocket:
             pass
 
     def send_line(self, text: str) -> None:
+        if "\r" in text or "\n" in text:
+            raise CtConfigurationReadError("Telnet credential contains line break")
         try:
             self._sock.sendall(text.encode("utf-8") + b"\r\n")
         except OSError as exc:

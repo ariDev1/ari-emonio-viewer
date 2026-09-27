@@ -59,7 +59,7 @@ class ReadOnlyModbusClient:
         sock.sendall(request)
         header = self._recv_exact(sock, 7)
         length = int.from_bytes(header[4:6], "big")
-        if length < 2:
+        if length < 2 or length > 260:
             raise ConnectionError("invalid Modbus/TCP length field")
         body = self._recv_exact(sock, length - 1)
         return parse_read_holding_response(
@@ -83,7 +83,7 @@ class ReadOnlyModbusClient:
         sock.sendall(request)
         header = self._recv_exact(sock, 7)
         length = int.from_bytes(header[4:6], "big")
-        if length < 2:
+        if length < 2 or length > 260:
             raise ConnectionError("invalid Modbus/TCP length field")
         body = self._recv_exact(sock, length - 1)
         return parse_read_discrete_inputs_response(

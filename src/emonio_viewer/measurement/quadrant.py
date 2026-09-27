@@ -6,6 +6,12 @@ class QuadrantState(str, Enum):
     Q2 = "Q2"
     Q3 = "Q3"
     Q4 = "Q4"
+    Q_AXIS_POSITIVE_Q = "Q_AXIS_POSITIVE_Q"
+    Q_AXIS_NEGATIVE_Q = "Q_AXIS_NEGATIVE_Q"
+    P_AXIS_POSITIVE_P = "P_AXIS_POSITIVE_P"
+    P_AXIS_NEGATIVE_P = "P_AXIS_NEGATIVE_P"
+    # Deprecated aliases kept for backward compatibility with recordings
+    # and clients that stored the pre-v0.4.29 swapped labels.
     P_AXIS_POSITIVE_Q = "P_AXIS_POSITIVE_Q"
     P_AXIS_NEGATIVE_Q = "P_AXIS_NEGATIVE_Q"
     Q_AXIS_POSITIVE_P = "Q_AXIS_POSITIVE_P"
@@ -29,13 +35,13 @@ def classify_quadrant(p: float, q: float) -> QuadrantState:
     if p > 0 and q < 0:
         return QuadrantState.Q4
     if p == 0 and q > 0:
-        return QuadrantState.P_AXIS_POSITIVE_Q
+        return QuadrantState.Q_AXIS_POSITIVE_Q
     if p == 0 and q < 0:
-        return QuadrantState.P_AXIS_NEGATIVE_Q
+        return QuadrantState.Q_AXIS_NEGATIVE_Q
     if p > 0 and q == 0:
-        return QuadrantState.Q_AXIS_POSITIVE_P
+        return QuadrantState.P_AXIS_POSITIVE_P
     if p < 0 and q == 0:
-        return QuadrantState.Q_AXIS_NEGATIVE_P
+        return QuadrantState.P_AXIS_NEGATIVE_P
     return QuadrantState.ORIGIN
 
 

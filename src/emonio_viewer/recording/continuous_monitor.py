@@ -406,7 +406,7 @@ class NegativeMonitorRecordingManager(BaseRecordingManager):
                                 )
                             )
                     runtime = self._monitor_runtime.get(device_id)
-                    if runtime is not None:
+                    if runtime is not None and event.event.startswith("ACQUISITION_"):
                         invalidate_monitor_continuity(runtime, MonitorBoundary.GAP)
 
             for failure_event in failure_events:

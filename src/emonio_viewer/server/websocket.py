@@ -25,15 +25,24 @@ async def websocket_measurements(request: web.Request) -> web.WebSocketResponse:
                 continue
             if not isinstance(event, MeasurementSample):
                 continue
-            snapshot = store.get_device(event.identity.device_id)
+            try:
+                snapshot = store.get_device(event.identity.device_id)
+            except KeyError:
+                continue
             acquisition_state = None
             if lifecycle is not None:
-                acquisition_state = lifecycle.status(event.identity.device_id).acquisition_state
+                try:
+                    acquisition_state = lifecycle.status(event.identity.device_id).acquisition_state
+                except KeyError:
+                    acquisition_state = None
             try:
-                await ws.send_json(
-                    sample_to_json(event, snapshot, acquisition_state=acquisition_state)
+                await asyncio.wait_for(
+                    ws.send_json(
+                        sample_to_json(event, snapshot, acquisition_state=acquisition_state)
+                    ),
+                    timeout=5.0,
                 )
-            except ClientConnectionResetError:
+            except (ClientConnectionResetError, ConnectionResetError, asyncio.TimeoutError):
                 break
     finally:
         bus.unsubscribe(subscriber)

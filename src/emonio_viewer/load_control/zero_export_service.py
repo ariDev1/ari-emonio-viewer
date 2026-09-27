@@ -516,6 +516,8 @@ class Stage4CZeroExportControllerService:
                 reason=self._reason,
                 state=self._state.value,
                 safe_confirmed=False,
+                auto_off_sent=False,
+                physical_state="UNKNOWN_REQUIRES_MANUAL_VERIFICATION",
                 **extra_fields,
             )
             return
@@ -576,6 +578,12 @@ class Stage4CZeroExportControllerService:
                     self._state = ZeroExportControllerState.SAFE_UNCONFIRMED
                     self._reason = actuator_reason
                     self._release_owner_best_effort()
+                    self._diagnostic_log.append(
+                        "ZERO_EXPORT_DISABLED_UNCONFIRMED",
+                        reason=self._reason,
+                        auto_off_sent=False,
+                        physical_state="UNKNOWN_REQUIRES_MANUAL_VERIFICATION",
+                    )
                     return self.status()
                 try:
                     status = await self._manual_pwm.run_reserved_pwm(
@@ -673,6 +681,15 @@ class Stage4CZeroExportControllerService:
             self._resolution_limit_direction = None
             self._resolution_limit_last_log_cycle = None
             self._release_owner_best_effort()
+            self._diagnostic_log.append(
+                "ZERO_EXPORT_SAFE_BLOCK",
+                reason=self._reason,
+                state=self._state.value,
+                safe_confirmed=False,
+                auto_off_sent=False,
+                physical_state="UNKNOWN_REQUIRES_MANUAL_VERIFICATION",
+                trigger="EVENT_PIN_CHECK",
+            )
             return
 
         causal_after = self._causal_after_ns

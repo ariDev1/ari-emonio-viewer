@@ -23,6 +23,16 @@ MEASUREMENT_FIELDS = [
     "delta_s",
 ]
 EVENT_FIELDS = ["utc", "event", "severity", "cycle_id", "detail"]
+
+
+def _sanitize_csv_field(value: object) -> object:
+    if not isinstance(value, str) or not value:
+        return value
+    if value[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def _format_numeric(value: float) -> str:
     if not math.isfinite(value):
         raise ValueError("cannot serialize non-finite measurement value")
@@ -53,7 +63,7 @@ class CsvWriters:
         self._measurements.flush()
 
     def write_event(self, row: dict[str, str]) -> None:
-        self.event_writer.writerow(row)
+        self.event_writer.writerow({k: _sanitize_csv_field(v) for k, v in row.items()})
         self._events.flush()
 
     def close(self) -> None:
