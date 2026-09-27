@@ -150,7 +150,7 @@ class _TelnetSocket:
                     return response
             self._recv_and_consume(max_bytes=max_bytes)
 
-    def diagnostic_snapshot(self, *, max_chars: int = 240) -> str:
+    def diagnostic_snapshot(self, *, max_chars: int = 1000) -> str:
         """Return bounded, sanitized buffered command-response evidence."""
         clean = strip_terminal_sequences(bytes(self._clean)).decode("utf-8", errors="replace")
         visible = clean.replace("\r", "<CR>").replace("\n", "<LF>")
