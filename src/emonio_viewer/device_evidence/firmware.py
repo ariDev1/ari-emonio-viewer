@@ -12,9 +12,12 @@ FIRMWARE_PROBE_PATHS = ("/", "/api/device", "/status", "/info")
 _DEFAULT_TIMEOUT_S = 2.0
 _MAX_BODY_BYTES = 256 * 1024
 
-# Matches the device page line "Version: 3.0.80-release" as well as JSON
-# payloads such as {"version": "3.0.80-release"}.
+# Matches the Emonio Telnet line "Firmware: 3.0.80-release (ger)", the
+# device page line "Version: 3.0.80-release", and JSON payloads such as
+# {"version": "3.0.80-release"}. The optional language annotation is not
+# part of the canonical firmware version.
 _VERSION_PATTERNS = (
+    re.compile(r"Firmware\s*:\s*([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?)"),
     re.compile(r"Version\s*:\s*([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?)"),
     re.compile(r'"version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?)"'),
 )
