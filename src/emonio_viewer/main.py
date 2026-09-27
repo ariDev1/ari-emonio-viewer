@@ -166,7 +166,10 @@ async def run_viewer(config_path: Path) -> None:
         ModbusDeviceEvidenceReader(),
         coordinator=coordinator,
     )
-    scope_service = ScopeService(firmware_sink=connector.note_device_firmware)
+    scope_service = ScopeService(
+        firmware_sink=connector.note_device_firmware,
+        firmware_source=lambda device_id: connector.get_device_config(device_id).firmware_version,
+    )
     lifecycle_service = DeviceLifecycleService(
         coordinator,
         recording,
