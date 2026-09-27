@@ -339,9 +339,8 @@ class TelnetCtConfigurationReader:
             )
 
     def _read_firmware_best_effort(self, session: _TelnetSocket) -> tuple[str | None, str]:
-        # Bulletproofing: firmware evidence must never break the CT read,
-        # no matter what the device sends. Any unexpected failure degrades
-        # to "not found", never to an exception.
+        # Firmware evidence must never break the CT read. Any unexpected
+        # failure degrades to "not found", never to an exception.
         try:
             return self._read_firmware_unsafe(session)
         except Exception as exc:
@@ -358,11 +357,7 @@ class TelnetCtConfigurationReader:
             except CtConfigurationReadError as exc:
                 return None, f"RESPONSE_NOT_READABLE: send failed: {exc}"
             try:
-                session.read_until_text(encoded)
-            except CtConfigurationReadError as exc:
-                return None, f"RESPONSE_NOT_READABLE: echo not completed: {exc}"
-            try:
-                response = session.read_until_end()
+                response = session.read_until_prompt(encoded)
             except CtConfigurationReadError as exc:
                 return None, f"RESPONSE_NOT_READABLE: prompt not completed: {exc}"
             clean = strip_terminal_sequences(response).decode("utf-8", errors="replace")
