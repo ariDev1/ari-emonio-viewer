@@ -40,8 +40,13 @@ jobs:
         run: ./tools/ari-emonio-acceptance.sh
 
       - name: Protected scientific path gate
+        # Baseline v0.4.29 (559cebf): intentional scientific-path hardening
+        # (acquisition failure visibility, measurement plausibility warnings,
+        # corrected quadrant axis labels, Modbus length cap). Full acceptance
+        # green. Protected paths must not drift beyond this baseline without
+        # review. Previous baseline: b539efe7 (trusted pre-monitor baseline).
         run: |
-          git diff --exit-code b539efe7eb3a11d53a3b291254ddd0c50a2cf3df HEAD -- \
+          git diff --exit-code 559cebf82146074d1dd60614afc9e5f51c2b8f8b HEAD -- \
             src/emonio_viewer/modbus \
             src/emonio_viewer/measurement \
             src/emonio_viewer/acquisition \
