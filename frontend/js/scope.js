@@ -447,6 +447,14 @@ export function renderScopeStatus(payload) {
   renderScopeDeviceSelector(deviceId);
   setText("scope-summary-device", `${deviceLabel ?? "—"} · ${state}`);
   setText("scope-error", payload?.error ? `ERROR: ${payload.error}` : "");
+  setText(
+    "scope-firmware",
+    payload?.firmware
+      ? payload.firmware
+      : payload?.firmware_detail
+        ? `— (${payload.firmware_detail})`
+        : "—"
+  );
   applyViewButtons(deviceId);
 
   const username = document.getElementById("scope-username");

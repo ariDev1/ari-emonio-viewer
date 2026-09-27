@@ -109,6 +109,8 @@ class ScopeStatus:
     state: ScopeSessionState
     error: str | None
     capture: ScopeCapture | None
+    firmware: str | None = None
+    firmware_detail: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -117,4 +119,6 @@ class ScopeStatus:
             "source": "EMONIO_WEBSOCKET_SCOPE",
             "error": self.error,
             "capture": None if self.capture is None else self.capture.as_dict(),
+            "firmware": self.firmware,
+            "firmware_detail": self.firmware_detail,
         }

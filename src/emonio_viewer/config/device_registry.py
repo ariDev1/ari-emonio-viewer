@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +117,45 @@ class RememberedDeviceRegistry:
             ids.add(device.id)
             hosts.add(device.host)
         return devices
+
+    def update_firmware(self, device_id: str, firmware_version: str) -> bool:
+        """Adopt device-observed firmware for a remembered device.
+
+        Only upgrades an "unknown" value; explicit operator text is never
+        overwritten. Returns True when the file changed.
+        """
+        if not isinstance(device_id, str) or not device_id:
+            return False
+        if not isinstance(firmware_version, str) or not firmware_version:
+            return False
+        devices = list(self.load())
+        changed = False
+        for index, existing in enumerate(devices):
+            if existing.id != device_id:
+                continue
+            if existing.firmware_version != "unknown":
+                return False
+            devices[index] = replace(existing, firmware_version=firmware_version)
+            changed = True
+        if not changed:
+            return False
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "devices": [_device_to_json(item) for item in devices],
+        }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_name(f"{self.path.name}.tmp")
+        try:
+            with temporary.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+        return True
 
     def remember(self, device: DeviceConfig) -> None:
         # Round-trip through the registry schema before changing persistent state.

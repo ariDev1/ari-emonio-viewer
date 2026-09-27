@@ -159,12 +159,14 @@ async def run_viewer(config_path: Path) -> None:
     recording = RecordingManager(recordings_root, config.devices, store, bus, __version__)
     registry = RememberedDeviceRegistry(config_path.parent / "remembered-devices.json")
     connector = DeviceConnector(coordinator, recording, registry=registry)
-    ct_configuration = CtConfigurationService(TelnetCtConfigurationReader())
+    ct_configuration = CtConfigurationService(
+        TelnetCtConfigurationReader(), firmware_sink=connector.note_device_firmware
+    )
     modbus_evidence = ModbusDeviceEvidenceService(
         ModbusDeviceEvidenceReader(),
         coordinator=coordinator,
     )
-    scope_service = ScopeService()
+    scope_service = ScopeService(firmware_sink=connector.note_device_firmware)
     lifecycle_service = DeviceLifecycleService(
         coordinator,
         recording,

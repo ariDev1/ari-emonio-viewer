@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 
 from emonio_viewer.config.model import DeviceConfig
+from emonio_viewer.device_evidence.firmware import FirmwareProbeError, probe_firmware_version
 from emonio_viewer.modbus.transport import ReadOnlyModbusClient
 
 from .coordinator import AcquisitionCoordinator
@@ -64,6 +65,33 @@ class DeviceConnector:
             index += 1
         return f"{base}-{index}"
 
+    async def _probe_firmware_version(self, host: str) -> str:
+        """Best-effort read-only firmware discovery; never fails the connect."""
+        try:
+            return await asyncio.to_thread(probe_firmware_version, host)
+        except FirmwareProbeError:
+            return "unknown"
+        except Exception:
+            return "unknown"
+
+    def note_device_firmware(self, device_id: str, firmware_version: str) -> None:
+        """Adopt device-observed firmware evidence for live display/provenance.
+
+        Best-effort sink for evidence services (SCOPE, Telnet info): upgrades
+        "unknown" values in the coordinator and the remembered registry.
+        Never raises.
+        """
+        try:
+            changed = self._coordinator.update_device_firmware(device_id, firmware_version)
+        except Exception:
+            return
+        if not changed or self._registry is None:
+            return
+        try:
+            self._registry.update_firmware(device_id, firmware_version)
+        except Exception:
+            pass
+
     async def connect(self, target_text: str) -> ConnectionResult:
         try:
             target = parse_target(target_text)
@@ -83,7 +111,7 @@ class DeviceConnector:
             poll_interval_s=self._poll_interval_s,
             timeout_s=self._timeout_s,
             enabled=True,
-            firmware_version="unknown",
+            firmware_version=await self._probe_firmware_version(target.host),
         )
         client = ReadOnlyModbusClient(
             device.host,

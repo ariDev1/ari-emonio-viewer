@@ -25,6 +25,27 @@ class CtConfigurationValues:
 
 
 @dataclass(frozen=True, slots=True)
+class DeviceFirmwareEvidence:
+    """Device-observed firmware version from the read-only Telnet info path."""
+
+    device_id: str
+    observed_utc: datetime
+    firmware: str | None
+    detail: str
+
+    def as_dict(self) -> dict:
+        return {
+            "device_id": self.device_id,
+            "observed_utc": self.observed_utc.isoformat(),
+            "source": "EMONIO_TELNET_INFO",
+            "transport": "TELNET",
+            "interpretation": "DEVICE_OBSERVED_VERSION",
+            "firmware": self.firmware,
+            "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class CtConfigurationEvidence:
     """Observed Emonio CT configuration without physical-orientation claims."""
 

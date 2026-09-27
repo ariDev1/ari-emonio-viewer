@@ -1,4 +1,5 @@
 from concurrent.futures import Future
+from dataclasses import replace
 import threading
 
 from emonio_viewer.config.model import DeviceConfig
@@ -70,6 +71,27 @@ class AcquisitionCoordinator:
             AcquisitionLifecycleState.DISCONNECTED,
         )
         return worker
+
+    def update_device_firmware(self, device_id: str, firmware_version: str) -> bool:
+        """Adopt device-observed firmware evidence for live display/provenance.
+
+        Only upgrades an "unknown" value; explicit operator configuration is
+        never overwritten. Returns True when the value changed.
+        """
+        if not isinstance(firmware_version, str) or not firmware_version:
+            return False
+        with self._lock:
+            try:
+                device = self._devices[device_id]
+                worker = self._workers[device_id]
+            except KeyError:
+                return False
+            if device.firmware_version != "unknown":
+                return False
+            updated = replace(device, firmware_version=firmware_version)
+            self._devices[device_id] = updated
+            worker.device = updated
+            return True
 
     def device_configs(self) -> tuple[DeviceConfig, ...]:
         with self._lock:

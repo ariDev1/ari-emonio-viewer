@@ -18,6 +18,8 @@ class ScopeSessionConflict(ScopeServiceError):
 
 
 ClientFactory = Callable[[str, str, str], Awaitable[EmonioScopeClient]]
+FirmwareSink = Callable[[str, str], None]
+"""Receives device-observed firmware evidence as (device_id, version)."""
 
 
 @dataclass(slots=True)
@@ -30,6 +32,8 @@ class _Runtime:
     capture: ScopeCapture | None = None
     error: str | None = None
     sequence: int = 0
+    firmware: str | None = None
+    firmware_detail: str | None = None
 
 
 class ScopeService:
@@ -39,21 +43,32 @@ class ScopeService:
         client_factory: ClientFactory | None = None,
         interval_s: float = SCOPE_REQUEST_INTERVAL_S,
         listen_s: float = 2.0,
+        firmware_sink: FirmwareSink | None = None,
     ) -> None:
         if interval_s < 0:
             raise ValueError("scope interval must not be negative")
         if listen_s <= 0:
             raise ValueError("scope listen time must be greater than zero")
+        if firmware_sink is not None and not callable(firmware_sink):
+            raise ValueError("firmware_sink must be callable")
         self._client_factory = client_factory or EmonioScopeClient.connect
         self._interval_s = interval_s
         self._listen_s = listen_s
+        self._firmware_sink = firmware_sink
         self._sessions: dict[str, _Runtime] = {}
 
     def status(self, device_id: str) -> ScopeStatus:
         runtime = self._sessions.get(device_id)
         if runtime is None:
             return ScopeStatus(device_id, ScopeSessionState.DISCONNECTED, None, None)
-        return ScopeStatus(device_id, runtime.state, runtime.error, runtime.capture)
+        return ScopeStatus(
+            device_id,
+            runtime.state,
+            runtime.error,
+            runtime.capture,
+            runtime.firmware,
+            runtime.firmware_detail,
+        )
 
     def active_statuses(self) -> tuple[ScopeStatus, ...]:
         active_states = {
@@ -105,7 +120,36 @@ class ScopeService:
         runtime.state = ScopeSessionState.LIVE
         runtime.error = None
         runtime.task = asyncio.create_task(self._run(runtime), name=f"emonio-scope-{device_id}")
+        await self._report_firmware(device_id, client)
         return self.status(device_id)
+
+    async def _report_firmware(self, device_id: str, client: EmonioScopeClient) -> None:
+        """Best-effort firmware evidence; a scope start never fails because of it."""
+        runtime = self._sessions.get(device_id)
+        fetch = getattr(client, "fetch_firmware", None)
+        if not callable(fetch):
+            if runtime is not None:
+                runtime.firmware_detail = "CLIENT_HAS_NO_FIRMWARE_FETCH"
+            return
+        try:
+            version = await asyncio.wait_for(fetch(), timeout=4.0)
+        except Exception as exc:
+            if runtime is not None:
+                runtime.firmware_detail = f"FETCH_FAILED: {type(exc).__name__}: {exc}"
+            return
+        if not isinstance(version, str) or not version:
+            if runtime is not None:
+                runtime.firmware_detail = "FETCH_RETURNED_EMPTY"
+            return
+        if runtime is not None:
+            runtime.firmware = version
+            runtime.firmware_detail = "OBSERVED_VIA_SCOPE_SESSION"
+        if self._firmware_sink is None:
+            return
+        try:
+            self._firmware_sink(device_id, version)
+        except Exception:
+            pass
 
     def hold(self, device_id: str) -> ScopeStatus:
         runtime = self._require_runtime(device_id)

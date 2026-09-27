@@ -52,6 +52,11 @@ export function renderCtEvidence(payload) {
   const evidence = payload.evidence;
   setState(payload.status ?? "OBSERVED", "observed");
   setMessage();
+  if (typeof payload.firmware?.firmware === "string" && payload.firmware.firmware) {
+    setMessage(`FIRMWARE ${payload.firmware.firmware} · OBSERVED VIA TELNET INFO`);
+  } else if (typeof payload.firmware?.detail === "string" && payload.firmware.detail) {
+    setMessage(`FIRMWARE NOT FOUND · ${payload.firmware.detail}`);
+  }
   document.getElementById("ct-source").textContent = evidence.source ?? "—";
   document.getElementById("ct-observed").textContent = evidence.observed_utc ?? "—";
   document.getElementById("ct-physical-status").textContent = evidence.physical_orientation_status ?? "NOT VERIFIED";

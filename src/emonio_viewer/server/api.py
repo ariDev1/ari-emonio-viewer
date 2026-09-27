@@ -369,8 +369,15 @@ async def read_ct_configuration(request):
     finally:
         password = ""
         body.clear()
+    get_firmware = getattr(_ct_configuration(request), "get_firmware", None)
+    firmware = get_firmware(device_id) if callable(get_firmware) else None
     return web.json_response(
-        {"device_id": device_id, "status": "OBSERVED", "evidence": evidence.as_dict()}
+        {
+            "device_id": device_id,
+            "status": "OBSERVED",
+            "evidence": evidence.as_dict(),
+            "firmware": None if firmware is None else firmware.as_dict(),
+        }
     )
 
 
