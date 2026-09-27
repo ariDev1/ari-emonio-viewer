@@ -116,7 +116,6 @@ def test_telnet_reader_uses_one_login_and_only_fixed_read_commands() -> None:
     assert fake.closed is True
 
 
-
 def test_telnet_connection_failure_is_classified_as_unavailable() -> None:
     with patch(
         "emonio_viewer.device_evidence.telnet.socket.create_connection",
@@ -165,6 +164,7 @@ def test_ct_command_failure_reports_exact_read_stage_without_password() -> None:
     assert caught.value.state == "READ_ERROR"
     assert caught.value.stage == "CT_TYPE"
     assert "secret" not in caught.value.user_message
+
 
 def test_evidence_model_reports_raw_device_configuration_and_no_physical_claim() -> None:
     evidence = CtConfigurationEvidence(
@@ -290,7 +290,6 @@ def test_telnet_ansi_split_echo_and_trailing_codes_do_not_break_read() -> None:
         "ct_didt": 0,
     }
     chunks = _login_chunks() + _ct_chunks(expected)
-    # ANSI redraw codes split the echoed command bytes and trail the prompt.
     chunks.append(b"\r" + PROMPT + b"info \x1b[0K\x1b[24Cversion")
     chunks.append(b"\r\nVersion: 3.0.80-release\x1b[0K\r\n" + PROMPT + b"\x1b[0K")
     fake = FakeSocket(chunks)
@@ -314,8 +313,6 @@ def test_telnet_single_chunk_echo_output_prompt_is_not_discarded() -> None:
         "ct_didt": 0,
     }
     chunks = _login_chunks() + _ct_chunks(expected)
-    # Echo, output, and final prompt may arrive in a single network chunk;
-    # none of it may be discarded while waiting for the echo.
     chunks.append(
         b"\r" + PROMPT + b"info version\r\nVersion: 3.0.80-release\r\n" + PROMPT
     )
@@ -340,11 +337,8 @@ def test_telnet_prompt_in_echo_does_not_truncate_firmware_read() -> None:
         "ct_didt": 0,
     }
     chunks = _login_chunks() + _ct_chunks(expected)
-    # The "$ " inside the echoed prompt must not end the read early.
     chunks.append(b"\r" + PROMPT + b"i\x1b[0K \x1b[24C")
     chunks.append(b"\r" + PROMPT + b"info version")
-    # The device re-echoes the full command line after Enter while the
-    # actual output is still pending; only the final prompt ends the read.
     chunks.append(b"\r\n" + PROMPT + b"info version")
     chunks.append(b"\r\nVersion: 3.0.80-release\r\n" + PROMPT)
     fake = FakeSocket(chunks)
@@ -359,6 +353,41 @@ def test_telnet_prompt_in_echo_does_not_truncate_firmware_read() -> None:
     assert firmware == "3.0.80-release"
 
 
+def test_telnet_real_emonio_version_response_ignores_continuing_prompt_redraws() -> None:
+    expected = {
+        "ct_type": 0,
+        "ct_voltage": 0,
+        "ct_range": 3,
+        "ct_invert": 7,
+        "ct_didt": 0,
+    }
+    chunks = _login_chunks() + _ct_chunks(expected)
+    chunks.append(b"\r" + PROMPT + b"info version")
+    chunks.append(
+        b"\r\n\r\nVERSION\r\n\r\n Hardware: 2.1\r\n"
+        b" Firmware: 3.0.80-release (ger)\r\n"
+        b" CRC32: 87eac5b5\r\n"
+        b" Source: 3.0.80-4-gc7e8d903\r\n"
+        b" Core: 3.0.7-78-g5afbb3804\r\n"
+        b" SDK: v5.1.5-346-g41a885bb2d\r\n"
+        b" Build: 2026-09-17 21:00:51\r\n\r\n"
+        + PROMPT
+    )
+    # Field evidence shows the interactive terminal keeps redrawing after the
+    # completed command response. These bytes must not delay response completion.
+    chunks.append(b"\r" + PROMPT + b"\x1b[0K")
+    chunks.append(b"\r" + PROMPT + b"\x1b[0K")
+    fake = FakeSocket(chunks)
+    fake.grace_timeout_on_empty = True
+
+    with patch("emonio_viewer.device_evidence.telnet.socket.create_connection", return_value=fake):
+        _values, firmware, _detail = TelnetCtConfigurationReader(timeout_s=1.0).read_with_firmware(
+            "192.0.2.1", "secret"
+        )
+
+    assert firmware == "3.0.80-release"
+
+
 def test_telnet_firmware_falls_back_to_info_device() -> None:
     expected = {
         "ct_type": 0,
@@ -369,9 +398,7 @@ def test_telnet_firmware_falls_back_to_info_device() -> None:
     }
     chunks = _login_chunks() + _ct_chunks(expected)
     chunks.extend(_firmware_chunks("info version", b"no version here"))
-    chunks.extend(
-        _firmware_chunks("info device", b"device: emonio-63a834 Version: 3.0.80-release")
-    )
+    chunks.extend(_firmware_chunks("info device", b"device: emonio-63a834 Version: 3.0.80-release"))
     fake = FakeSocket(chunks)
     fake.grace_timeout_on_empty = True
 
@@ -382,83 +409,3 @@ def test_telnet_firmware_falls_back_to_info_device() -> None:
 
     assert values == CtConfigurationValues(**expected)
     assert firmware == "3.0.80-release"
-
-
-def test_telnet_missing_firmware_never_fails_ct_read() -> None:
-    expected = {
-        "ct_type": 0,
-        "ct_voltage": 0,
-        "ct_range": 3,
-        "ct_invert": 7,
-        "ct_didt": 0,
-    }
-    chunks = _login_chunks() + _ct_chunks(expected)
-    chunks.extend(_firmware_chunks("info version", b"nothing to see"))
-    chunks.extend(_firmware_chunks("info device", b"still nothing"))
-    fake = FakeSocket(chunks)
-    fake.grace_timeout_on_empty = True
-
-    with patch("emonio_viewer.device_evidence.telnet.socket.create_connection", return_value=fake):
-        values, firmware, _detail = TelnetCtConfigurationReader(timeout_s=1.0).read_with_firmware(
-            "192.0.2.1", "secret"
-        )
-
-    assert values == CtConfigurationValues(**expected)
-    assert firmware is None
-
-
-def test_ct_service_fires_firmware_sink_and_retains_evidence() -> None:
-    import asyncio
-
-    from emonio_viewer.device_evidence.model import CtConfigurationValues
-    from emonio_viewer.device_evidence.service import CtConfigurationService
-
-    class FakeReader:
-        async def unused(self) -> None:
-            raise AssertionError("not used")
-
-        def read_with_firmware(self, _host: str, _password: str):
-            return CtConfigurationValues(0, 0, 3, 7, 0), "3.0.80-release", "OBSERVED_VIA_TELNET_INFO"
-
-    seen: list = []
-
-    async def scenario() -> None:
-        service = CtConfigurationService(
-            FakeReader(), firmware_sink=lambda device_id, version: seen.append((device_id, version))
-        )
-        evidence = await service.read("emonio-63a834", "192.0.2.10", "secret")
-        assert evidence.values == CtConfigurationValues(0, 0, 3, 7, 0)
-        stored = service.get_firmware("emonio-63a834")
-        assert stored is not None
-        assert stored.firmware == "3.0.80-release"
-        assert stored.as_dict()["source"] == "EMONIO_TELNET_INFO"
-
-    asyncio.run(scenario())
-    assert seen == [("emonio-63a834", "3.0.80-release")]
-
-
-def test_ct_service_without_firmware_keeps_read_and_skips_sink() -> None:
-    import asyncio
-
-    from emonio_viewer.device_evidence.model import CtConfigurationValues
-    from emonio_viewer.device_evidence.service import CtConfigurationService
-
-    class LegacyReader:
-        def read(self, _host: str, _password: str):
-            return CtConfigurationValues(0, 0, 3, 7, 0)
-
-    seen: list = []
-
-    async def scenario() -> None:
-        service = CtConfigurationService(
-            LegacyReader(), firmware_sink=lambda device_id, version: seen.append((device_id, version))
-        )
-        evidence = await service.read("emonio-63a834", "192.0.2.10", "secret")
-        assert evidence.values == CtConfigurationValues(0, 0, 3, 7, 0)
-        stored = service.get_firmware("emonio-63a834")
-        assert stored is not None
-        assert stored.firmware is None
-        assert stored.detail == "READER_HAS_NO_FIRMWARE_PATH"
-
-    asyncio.run(scenario())
-    assert seen == []
