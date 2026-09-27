@@ -19,7 +19,8 @@ class ScopeSessionConflict(ScopeServiceError):
 
 ClientFactory = Callable[[str, str, str], Awaitable[EmonioScopeClient]]
 FirmwareSink = Callable[[str, str], None]
-"""Receives device-observed firmware evidence as (device_id, version)."""
+FirmwareSource = Callable[[str], str | None]
+"""Firmware evidence callbacks use (device_id, version) or device_id lookup."""
 
 
 @dataclass(slots=True)
@@ -44,6 +45,7 @@ class ScopeService:
         interval_s: float = SCOPE_REQUEST_INTERVAL_S,
         listen_s: float = 2.0,
         firmware_sink: FirmwareSink | None = None,
+        firmware_source: FirmwareSource | None = None,
     ) -> None:
         if interval_s < 0:
             raise ValueError("scope interval must not be negative")
@@ -51,10 +53,13 @@ class ScopeService:
             raise ValueError("scope listen time must be greater than zero")
         if firmware_sink is not None and not callable(firmware_sink):
             raise ValueError("firmware_sink must be callable")
+        if firmware_source is not None and not callable(firmware_source):
+            raise ValueError("firmware_source must be callable")
         self._client_factory = client_factory or EmonioScopeClient.connect
         self._interval_s = interval_s
         self._listen_s = listen_s
         self._firmware_sink = firmware_sink
+        self._firmware_source = firmware_source
         self._sessions: dict[str, _Runtime] = {}
 
     def status(self, device_id: str) -> ScopeStatus:
@@ -120,8 +125,26 @@ class ScopeService:
         runtime.state = ScopeSessionState.LIVE
         runtime.error = None
         runtime.task = asyncio.create_task(self._run(runtime), name=f"emonio-scope-{device_id}")
-        await self._report_firmware(device_id, client)
+        if not self._use_known_firmware(device_id, runtime):
+            await self._report_firmware(device_id, client)
         return self.status(device_id)
+
+    def _use_known_firmware(self, device_id: str, runtime: _Runtime) -> bool:
+        """Use existing device evidence before starting another firmware probe."""
+        if self._firmware_source is None:
+            return False
+        try:
+            version = self._firmware_source(device_id)
+        except Exception:
+            return False
+        if not isinstance(version, str):
+            return False
+        version = version.strip()
+        if not version or version.lower() == "unknown":
+            return False
+        runtime.firmware = version
+        runtime.firmware_detail = "KNOWN_DEVICE_EVIDENCE"
+        return True
 
     async def _report_firmware(self, device_id: str, client: EmonioScopeClient) -> None:
         """Best-effort firmware evidence; a scope start never fails because of it."""
