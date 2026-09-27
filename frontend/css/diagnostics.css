@@ -4,7 +4,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   margin: 0 0 8px;
-  background: rgba(43, 55, 69, 0.55);
+  background: var(--grid-gap);
 }
 .diagnostic-cell { min-width: 0; padding: 5px 7px; background: var(--surface-2); }
 .diagnostic-cell dt { color: var(--muted); font-size: 0.55rem; text-transform: uppercase; letter-spacing: 0.06em; }

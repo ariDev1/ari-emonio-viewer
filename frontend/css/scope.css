@@ -20,7 +20,7 @@
   align-items: end;
   padding: 7px 8px;
   border: 1px solid var(--border);
-  background: #0d141b;
+  background: var(--inset);
 }
 
 .scope-command-device,
@@ -47,7 +47,7 @@
   min-height: 27px;
   padding: 4px 24px 4px 7px;
   border: 1px solid var(--border);
-  background: #101820;
+  background: var(--inset);
   color: var(--text);
   font-family: var(--mono);
   font-size: 0.66rem;
@@ -71,7 +71,7 @@
   justify-content: center;
   padding: 3px 7px;
   border: 1px solid var(--border);
-  background: #101820;
+  background: var(--inset);
   color: var(--muted);
   font-family: var(--mono);
   font-size: 0.62rem;
@@ -79,16 +79,16 @@
 }
 
 .scope-state-badge[data-state="LIVE"] {
-  border-color: #4cbf8a;
-  color: #79e5ad;
+  border-color: var(--scope-ok-border);
+  color: var(--scope-ok-text);
 }
 .scope-state-badge[data-state="HOLD"] {
-  border-color: #b99a45;
-  color: #e2c361;
+  border-color: var(--scope-hold-border);
+  color: var(--scope-hold-text);
 }
 .scope-state-badge[data-state="CONNECTING"] {
-  border-color: #4f9fcb;
-  color: #70d7ff;
+  border-color: var(--scope-connect-border);
+  color: var(--accent);
 }
 .scope-state-badge[data-state="ERROR"],
 .scope-state-badge[data-state="UNAVAILABLE"] {
@@ -144,7 +144,7 @@
   min-height: 22px;
   padding: 4px 8px;
   border-left: 2px solid var(--danger);
-  background: rgba(174, 70, 70, 0.08);
+  background: var(--danger-soft);
   color: var(--danger);
   font-family: var(--mono);
   font-size: 0.6rem;
@@ -161,7 +161,7 @@
   gap: 9px;
   padding: 4px 8px;
   border: 1px solid var(--border);
-  background: #0b1218;
+  background: var(--inset);
   overflow: hidden;
 }
 
@@ -189,9 +189,9 @@
   min-height: 21px;
   align-items: center;
   padding: 2px 6px;
-  border: 1px solid #273746;
-  background: #101923;
-  color: #a9bac9;
+  border: 1px solid var(--border);
+  background: var(--inset);
+  color: var(--muted);
   white-space: nowrap;
 }
 
@@ -229,7 +229,7 @@
 
 .scope-mode-button.is-active {
   border-color: var(--accent);
-  background: rgba(80, 183, 219, 0.1);
+  background: var(--accent-soft-2);
   color: var(--accent);
   box-shadow: inset 0 -2px 0 var(--accent);
 }
@@ -243,7 +243,7 @@
   overflow: hidden;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  background: #0d141b;
+  background: var(--inset);
 }
 
 .scope-evidence-strip > span {
@@ -279,9 +279,9 @@
   position: relative;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid #314253;
-  background: #081017;
-  box-shadow: inset 0 0 0 1px rgba(113, 151, 180, 0.04);
+  border: 1px solid var(--border-strong);
+  background: var(--inset);
+  box-shadow: inset 0 0 0 1px var(--plot-frame);
 }
 
 #scope-plot {
@@ -300,8 +300,8 @@
   align-items: center;
   gap: 8px;
   padding: 4px 7px;
-  border: 1px solid rgba(96, 117, 138, 0.55);
-  background: rgba(8, 16, 23, 0.9);
+  border: 1px solid var(--legend-border);
+  background: var(--legend-bg);
   font-family: var(--mono);
   font-size: 0.58rem;
   pointer-events: none;
@@ -310,9 +310,9 @@
 .scope-legend-phase {
   font-weight: 800;
 }
-.scope-legend-a { color: #70d7ff; }
-.scope-legend-b { color: #76e2a0; }
-.scope-legend-c { color: #ffd166; }
+.scope-legend-a { color: var(--phase-a); }
+.scope-legend-b { color: var(--phase-b); }
+.scope-legend-c { color: var(--phase-c); }
 
 .scope-legend-signal {
   display: inline-flex;
@@ -324,7 +324,7 @@
 .scope-legend-line {
   display: inline-block;
   width: 18px;
-  border-top: 1.5px solid #a9bac9;
+  border-top: 1.5px solid var(--muted);
 }
 .scope-legend-line-i {
   border-top-style: dashed;
@@ -337,23 +337,23 @@
 }
 
 .scope-grid-major {
-  stroke: #2e4353;
+  stroke: var(--plot-grid);
   stroke-width: 1;
 }
 
 .scope-grid-minor {
-  stroke: #1a2a35;
+  stroke: var(--plot-grid-minor);
   stroke-width: 0.75;
 }
 
 .scope-zero-axis {
-  stroke: #7b92a6;
+  stroke: var(--plot-zero);
   stroke-width: 1.1;
 }
 
 .scope-axis-label,
 .scope-y-label {
-  fill: #8095a7;
+  fill: var(--muted);
   font-family: var(--mono);
   font-size: 11px;
 }
@@ -364,12 +364,12 @@
 
 .scope-y-label-voltage {
   text-anchor: end;
-  fill: #9dcde2;
+  fill: var(--trace-u-label);
 }
 
 .scope-y-label-current {
   text-anchor: start;
-  fill: #c7b783;
+  fill: var(--trace-i-label);
 }
 
 .scope-y-label-power {
@@ -384,9 +384,9 @@
   stroke-linecap: round;
 }
 
-.scope-phase-a { stroke: #70d7ff; }
-.scope-phase-b { stroke: #76e2a0; }
-.scope-phase-c { stroke: #ffd166; }
+.scope-phase-a { stroke: var(--phase-a); }
+.scope-phase-b { stroke: var(--phase-b); }
+.scope-phase-c { stroke: var(--phase-c); }
 .scope-signal-i { stroke-dasharray: 5 3; }
 
 .scope-science-note {
@@ -435,7 +435,7 @@
 .scope-metadata-title,
 .scope-metadata-phase {
   min-width: 0;
-  background: #0d141b;
+  background: var(--inset);
 }
 
 .scope-metadata-title {

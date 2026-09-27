@@ -54,6 +54,14 @@ def create_app(
 
     static_prefix = f"/static/{__version__}/"
 
+    async def _no_store_static(
+        request: web.Request, response: web.StreamResponse
+    ) -> None:
+        if request.path.startswith(static_prefix):
+            response.headers["Cache-Control"] = "no-store"
+
+    app.on_response_prepare.append(_no_store_static)
+
     async def index(_request: web.Request) -> web.Response:
         source = (frontend_dir / "index.html").read_text(encoding="utf-8")
         source = source.replace(

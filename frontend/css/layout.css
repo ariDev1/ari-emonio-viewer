@@ -92,7 +92,7 @@
   min-width: 156px;
   padding: 4px 7px;
   border: 1px solid var(--border);
-  background: #0e141b;
+  background: var(--inset);
   color: var(--muted);
   font-family: var(--mono);
   font-size: 0.54rem;
@@ -140,7 +140,7 @@
   overflow: auto;
   border: 1px solid var(--border-strong);
   background: var(--surface);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--drawer-shadow);
 }
 .utility-drawer[hidden] { display: none; }
 .utility-drawer-header {

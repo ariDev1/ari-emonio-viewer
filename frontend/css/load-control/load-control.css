@@ -218,13 +218,13 @@
 
 .load-control-primary-status > div[data-tone="warn"],
 .load-control-readiness[data-tone="warn"] {
-  border-color: #d6a950;
-  background: rgb(214 169 80 / 0.09);
+  border-color: var(--warn-tone-border);
+  background: var(--warn-tone-bg);
 }
 
 .load-control-primary-status > div[data-tone="warn"] strong,
 .load-control-readiness[data-tone="warn"] strong {
-  color: #edc778;
+  color: var(--warn-tone-text);
 }
 
 .load-control-primary-status > div[data-tone="error"],

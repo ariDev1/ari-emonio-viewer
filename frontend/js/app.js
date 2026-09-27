@@ -26,6 +26,7 @@ import {
 import { renderQuadrant, resetQuadrantScale } from "./quadrant.js";
 import { RecordingState } from "./recording-state.js";
 import { initializeUtilityDrawers } from "./workstation.js";
+import { initializeThemeToggle } from "./theme.js";
 import { initializeScopeControls, refreshScopeStatus } from "./scope.js";
 
 let runtimeConfig = null;
@@ -744,6 +745,7 @@ function initializeRecordingControls() {
 }
 
 async function main() {
+  initializeThemeToggle();
   initializeMeasurementPanels();
   initializeTargetControls();
   initializeDeviceLifecycleControl();

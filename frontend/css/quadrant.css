@@ -11,8 +11,8 @@
   max-height: 100%;
   justify-self: center;
 }
-.plot-axis { stroke: #60758a; stroke-width: 1; vector-effect: non-scaling-stroke; }
-.plot-axis.zero-axis { stroke: #7b91a5; }
+.plot-axis { stroke: var(--plot-axis); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.plot-axis.zero-axis { stroke: var(--plot-zero); }
 .axis-label, .quadrant-label, .plot-scale-text, .plot-legend-label {
   fill: var(--muted);
   font-family: var(--mono);
@@ -25,24 +25,24 @@
   text-anchor: end;
 }
 .plot-legend-label { font-size: 11px; }
-.plot-legend-item[data-phase="A"] { color: #70d7ff; }
-.plot-legend-item[data-phase="B"] { color: #76e2a0; }
-.plot-legend-item[data-phase="C"] { color: #ffd166; }
-.plot-legend-item[data-phase="T"] { color: #ff8bd1; }
+.plot-legend-item[data-phase="A"] { color: var(--phase-a); }
+.plot-legend-item[data-phase="B"] { color: var(--phase-b); }
+.plot-legend-item[data-phase="C"] { color: var(--phase-c); }
+.plot-legend-item[data-phase="T"] { color: var(--phase-t); }
 .plot-legend-dot { fill: currentColor; }
 
 .plot-vector-group {
   --plot-phase-color: var(--text);
-  --plot-p-color: #ffb454;
-  --plot-q-color: #4fd1c5;
-  --plot-angle-color: #c6a0ff;
-  --plot-helper-color: #60758a;
+  --plot-p-color: var(--plot-p);
+  --plot-q-color: var(--plot-q);
+  --plot-angle-color: var(--plot-angle);
+  --plot-helper-color: var(--plot-axis);
   color: var(--plot-phase-color);
 }
-.plot-vector-group[data-phase="A"] { --plot-phase-color: #70d7ff; }
-.plot-vector-group[data-phase="B"] { --plot-phase-color: #76e2a0; }
-.plot-vector-group[data-phase="C"] { --plot-phase-color: #ffd166; }
-.plot-vector-group[data-phase="T"] { --plot-phase-color: #ff8bd1; }
+.plot-vector-group[data-phase="A"] { --plot-phase-color: var(--phase-a); }
+.plot-vector-group[data-phase="B"] { --plot-phase-color: var(--phase-b); }
+.plot-vector-group[data-phase="C"] { --plot-phase-color: var(--phase-c); }
+.plot-vector-group[data-phase="T"] { --plot-phase-color: var(--phase-t); }
 
 .plot-vector {
   stroke: var(--plot-phase-color);
@@ -52,7 +52,7 @@
 .plot-arrowhead { fill: var(--plot-phase-color); }
 .plot-vector-tip {
   fill: var(--plot-phase-color);
-  stroke: #071016;
+  stroke: var(--surface);
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }

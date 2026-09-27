@@ -4,7 +4,7 @@
   min-width: 0;
   padding: 8px;
   border: 1px solid var(--border-strong);
-  background: #0d131a;
+  background: var(--inset);
 }
 
 .recording-monitor-header {

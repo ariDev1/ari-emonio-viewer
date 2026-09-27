@@ -35,7 +35,7 @@
 
 .density-cell {
   fill: var(--accent);
-  stroke: rgba(237, 243, 248, 0.28);
+  stroke: var(--density-cell-stroke);
   stroke-width: 0.5;
   vector-effect: non-scaling-stroke;
 }
@@ -58,14 +58,14 @@
 .density-band-8 { opacity: 0.98; }
 
 .density-axis {
-  stroke: #53697d;
+  stroke: var(--plot-axis);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
 
 .density-zero-axis {
-  stroke: #8da1b3;
+  stroke: var(--plot-zero);
 }
 
 .density-axis-label,

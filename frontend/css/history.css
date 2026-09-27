@@ -48,10 +48,10 @@
   padding: 4px 9px;
   font-family: var(--mono);
   font-size: 0.66rem;
-  background: #0e141b;
+  background: var(--inset);
   border-color: var(--border);
 }
-.history-selector-button.is-active { color: var(--text); border-color: var(--accent); background: rgba(112, 215, 255, 0.08); }
+.history-selector-button.is-active { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
 
 .history-workspace {
   display: grid;
@@ -66,7 +66,7 @@
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--border);
-  background: #0e141b;
+  background: var(--inset);
 }
 .history-plot-card-active { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
 .history-plot-title { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; padding: 5px 7px 0; }
@@ -76,14 +76,14 @@
 .history-plot:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
 .history-plot-active { height: 100%; min-height: 150px; }
 
-.history-grid-lines line { stroke: #2a3744; stroke-width: 1; vector-effect: non-scaling-stroke; }
-.history-grid-lines .history-zero-line { stroke: #7b91a5; }
+.history-grid-lines line { stroke: var(--plot-grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.history-grid-lines .history-zero-line { stroke: var(--plot-zero); }
 .history-axis-label, .history-legend-label, .history-waiting { fill: var(--muted); font-family: var(--mono); font-size: 10px; }
 .history-waiting { font-size: 12px; letter-spacing: 0.08em; }
-.history-legend-item[data-phase="A"], .history-series[data-phase="A"] { color: #70d7ff; }
-.history-legend-item[data-phase="B"], .history-series[data-phase="B"] { color: #76e2a0; }
-.history-legend-item[data-phase="C"], .history-series[data-phase="C"] { color: #ffd166; }
-.history-legend-item[data-phase="T"], .history-series[data-phase="T"] { color: #ff8bd1; }
+.history-legend-item[data-phase="A"], .history-series[data-phase="A"] { color: var(--phase-a); }
+.history-legend-item[data-phase="B"], .history-series[data-phase="B"] { color: var(--phase-b); }
+.history-legend-item[data-phase="C"], .history-series[data-phase="C"] { color: var(--phase-c); }
+.history-legend-item[data-phase="T"], .history-series[data-phase="T"] { color: var(--phase-t); }
 .history-legend-dot, .history-sample-point { fill: currentColor; }
 .history-sample-point { opacity: 0.9; }
 .history-series[data-phase="T"] .history-sample-point { r: 2.5px; }
@@ -108,7 +108,7 @@
 .history-inspector-heading h3 { margin: 1px 0 0; font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.05em; }
 .history-inspector-actions { display: flex; align-items: flex-start; justify-content: flex-end; gap: 6px; min-width: 0; }
 #history-inspector-state { color: var(--muted); font-family: var(--mono); font-size: 0.54rem; letter-spacing: 0.04em; text-align: right; }
-.history-inspector-copy { min-height: 21px; padding: 2px 7px; flex: none; color: var(--muted); background: #0e141b; border-color: var(--border); font-family: var(--mono); font-size: 0.52rem; letter-spacing: 0.06em; }
+.history-inspector-copy { min-height: 21px; padding: 2px 7px; flex: none; color: var(--muted); background: var(--inset); border-color: var(--border); font-family: var(--mono); font-size: 0.52rem; letter-spacing: 0.06em; }
 .history-inspector-copy[data-copy-state="success"] { color: var(--good); border-color: var(--good); }
 .history-inspector-copy[data-copy-state="error"] { color: var(--danger); border-color: var(--danger); }
 .history-inspector-meta {
@@ -124,7 +124,7 @@
   gap: 1px;
   min-width: 0;
   padding: 4px 6px;
-  background: #0e141b;
+  background: var(--inset);
   color: var(--muted);
   font-size: 0.5rem;
   letter-spacing: 0.07em;
@@ -140,7 +140,7 @@
   min-height: 0;
   overflow: hidden;
 }
-.history-inspector-phase-card { min-width: 0; border: 1px solid rgba(43,55,69,0.6); background: #0e141b; padding: 4px 5px; }
+.history-inspector-phase-card { min-width: 0; border: 1px solid var(--grid-gap); background: var(--inset); padding: 4px 5px; }
 .history-inspector-phase-card h4 { margin: 0 0 3px; font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.08em; }
 .history-inspector-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 6px; margin: 0; }
 .history-inspector-values > div { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 3px; min-width: 0; align-items: baseline; }

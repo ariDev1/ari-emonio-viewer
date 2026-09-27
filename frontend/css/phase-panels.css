@@ -45,13 +45,13 @@
   align-items: baseline;
   min-width: 0;
   min-height: 20px;
-  border-bottom: 1px solid rgba(68, 86, 106, 0.28);
+  border-bottom: 1px solid var(--row-divider);
 }
 
 /* Right measurement column */
 .measurement-row:nth-child(n + 6) {
   padding-left: 8px;
-  border-left: 1px solid rgba(68, 86, 106, 0.28);
+  border-left: 1px solid var(--row-divider);
 }
 
 /* Remove the bottom line from both columns */

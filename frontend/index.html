@@ -4,6 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ARI Emonio Viewer</title>
+  <script>
+    try {
+      var storedTheme = localStorage.getItem("ari-emonio-viewer-theme");
+      if (storedTheme === "light" || storedTheme === "dark" || storedTheme === "instrument") {
+        document.documentElement.dataset.theme = storedTheme;
+      }
+    } catch (error) { /* storage unavailable: dark default applies */ }
+  </script>
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/layout.css">
   <link rel="stylesheet" href="/static/css/phase-panels.css">
@@ -51,6 +59,11 @@
           <strong id="scope-summary-state">DISCONNECTED</strong>
           <span id="scope-summary-device">—</span>
           <span>WAVEFORM</span>
+        </button>
+        <button id="theme-toggle" class="utility-status-button" type="button" aria-pressed="false" aria-label="Toggle display theme">
+          <span class="utility-status-label">THEME</span>
+          <strong id="theme-toggle-state">DARK</strong>
+          <span>DISPLAY</span>
         </button>
       </div>
     </header>
@@ -453,6 +466,10 @@
     </div>
   </aside>
 
+  <script type="module">
+    import { initializeThemeToggle } from "/static/js/theme.js";
+    initializeThemeToggle();
+  </script>
   <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>
