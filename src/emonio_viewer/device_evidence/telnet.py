@@ -150,6 +150,15 @@ class _TelnetSocket:
                     return response
             self._recv_and_consume(max_bytes=max_bytes)
 
+    def diagnostic_snapshot(self, *, max_chars: int = 240) -> str:
+        """Return bounded, sanitized buffered command-response evidence."""
+        clean = strip_terminal_sequences(bytes(self._clean)).decode("utf-8", errors="replace")
+        visible = clean.replace("\r", "<CR>").replace("\n", "<LF>")
+        visible = " ".join(visible.split())
+        if len(visible) > max_chars:
+            visible = visible[:max_chars] + "..."
+        return visible or "<EMPTY>"
+
     def _quiescent(self, grace_s: float) -> bool:
         """Return True when no further bytes arrive within the grace window.
 
@@ -359,7 +368,11 @@ class TelnetCtConfigurationReader:
             try:
                 response = session.read_until_prompt(encoded)
             except CtConfigurationReadError as exc:
-                return None, f"RESPONSE_NOT_READABLE: prompt not completed: {exc}"
+                snapshot = session.diagnostic_snapshot()
+                return None, (
+                    f"RESPONSE_NOT_READABLE: prompt not completed: {exc}; "
+                    f"command={command}; buffered={snapshot}"
+                )
             clean = strip_terminal_sequences(response).decode("utf-8", errors="replace")
             last_raw = clean
             version = parse_firmware_version(clean)
