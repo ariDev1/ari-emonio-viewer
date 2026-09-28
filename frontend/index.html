@@ -12,6 +12,9 @@
       }
     } catch (error) { /* storage unavailable: dark default applies */ }
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/layout.css">
   <link rel="stylesheet" href="/static/css/phase-panels.css">
@@ -60,10 +63,11 @@
           <span id="scope-summary-device">—</span>
           <span>WAVEFORM</span>
         </button>
-        <button id="theme-toggle" class="utility-status-button" type="button" aria-pressed="false" aria-label="Toggle display theme">
-          <span class="utility-status-label">THEME</span>
-          <strong id="theme-toggle-state">DARK</strong>
-          <span>DISPLAY</span>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Theme: Dark. Switch to Light" title="Theme: Dark · Next: Light">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.7"/>
+            <path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor"/>
+          </svg>
         </button>
       </div>
     </header>

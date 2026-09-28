@@ -32,11 +32,13 @@
 }
 
 .status-bar {
+  position: relative;
+  border: 0;
   display: grid;
   grid-template-columns: max-content max-content 1fr;
   align-items: center;
   gap: 24px;
-  padding: 6px 10px;
+  padding: 6px 56px 6px 10px;
 }
 
 .status-title {
@@ -101,18 +103,32 @@
 .utility-status-button strong { color: var(--text); font-size: 0.62rem; }
 .utility-status-button.is-open { border-color: var(--accent); }
 .utility-status-label { color: var(--accent); font-weight: 800; letter-spacing: 0.08em; }
+.theme-toggle {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--inset);
+  color: var(--accent);
+}
+.theme-toggle svg { display: block; }
 
 .target-strip {
   display: grid;
-  grid-template-columns: auto minmax(260px, 1fr) 92px minmax(110px, auto) auto minmax(150px, 240px) minmax(150px, auto);
+  grid-template-columns: auto minmax(0, 32ch) 92px minmax(110px, 1fr) auto minmax(150px, 240px) minmax(150px, auto);
   gap: 8px;
   align-items: center;
   padding: 5px 8px;
 }
 .target-strip label { color: var(--muted); font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em; }
 .target-strip input,
-.target-strip select,
-.target-strip button { min-height: 30px; padding: 4px 8px; font-family: var(--mono); }
+.target-strip select { min-height: 30px; padding: 4px 8px; font-family: var(--mono); }
+.target-strip button { min-height: 29px; padding: 4px 7px; font-family: var(--mono); font-size: 0.64rem; }
 .target-status { font-family: var(--mono); font-size: 0.66rem; color: var(--muted); white-space: nowrap; }
 .target-status.connected { color: var(--good); }
 .target-status.error { color: var(--danger); }
@@ -168,7 +184,7 @@
   .status-bar { align-items: flex-start; grid-template-columns: 1fr; }
   .status-items { grid-template-columns: repeat(4, minmax(70px, 1fr)); width: 100%; }
   .utility-status-controls { grid-column: auto; }
-  .target-strip { grid-template-columns: auto minmax(180px, 1fr) 88px; }
+  .target-strip { grid-template-columns: auto minmax(0, 32ch) 88px; }
   .target-status { grid-column: 1 / -1; }
   .active-device-label { display: none; }
   #device-selector { grid-column: 1 / -1; }
@@ -188,6 +204,7 @@
 @media (max-width: 560px) {
   .status-items { grid-template-columns: repeat(2, minmax(90px, 1fr)); }
   .target-strip { grid-template-columns: 1fr; }
+  #device-target { max-width: 32ch; }
   .phase-grid { grid-template-columns: 1fr; }
   .utility-status-controls { flex-direction: column; }
 }

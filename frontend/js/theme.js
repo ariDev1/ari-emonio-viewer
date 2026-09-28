@@ -26,9 +26,9 @@ export function applyTheme(theme) {
   }
   const button = document.getElementById("theme-toggle");
   if (button) {
-    const label = button.querySelector("#theme-toggle-state");
-    if (label) label.textContent = LABELS[resolved];
-    button.setAttribute("aria-pressed", String(resolved !== THEMES[0]));
+    const next = nextTheme(resolved);
+    button.setAttribute("aria-label", `Theme: ${LABELS[resolved]}. Switch to ${LABELS[next]}`);
+    button.title = `Theme: ${LABELS[resolved]} · Next: ${LABELS[next]}`;
   }
   return resolved;
 }
@@ -38,6 +38,6 @@ export function initializeThemeToggle() {
   globalThis.__ariThemeToggleInitialized = true;
   applyTheme(currentTheme());
   document.getElementById("theme-toggle")?.addEventListener("click", () => {
-    applyTheme(nextTheme(currentTheme()));
+    applyTheme(nextTheme(document.documentElement.dataset.theme || currentTheme()));
   });
 }
