@@ -2,7 +2,10 @@
 
 **Purpose:** Additional technical information for electrical engineers, researchers, and scientific users.
 
-**Current trusted field baseline:** v0.4.7  
+**Current trusted field baseline:** v0.4.14
+
+**Current testing branch:** v0.4.29 Testing
+
 **Tested Emonio P3 firmware:** `3.0.79-release`
 
 ---
@@ -563,6 +566,8 @@ Recorded measurements come from the canonical measurement stream.
 
 Recording does not create a second measurement algorithm.
 
+The condition monitor can start and stop a monitor-owned recording from selected canonical phase conditions. It preserves continuity boundaries: a condition found after a gap or reconnect is not reported as an exact crossing. Manual recording remains separate from monitor-owned recording.
+
 Acquisition failures are published as explicit diagnostic events.
 
 A diagnostic event can contain device identity, cycle identity, time, affected block, failure type, and detail.
@@ -745,7 +750,21 @@ The software therefore preserves evidence before interpretation.
 
 ---
 
-## 25. Acceptance and Current Baseline
+## 25. Current Viewer Interface
+
+The browser displays live Phase A, B, C, and meter-reported TOTAL values alongside four-quadrant vectors, exact-sample history, P-Q density, device evidence, diagnostics, recording controls, and a separate SCOPE drawer. The selected Emonio can be connected, disconnected, or reconnected without changing the identity of previously acquired samples.
+
+The status header has no outer border. Its theme control is a compact half-filled-circle icon in the upper-right corner; it cycles through Dark, Light, and Instrument. The current and next themes are available through the control's accessible label and tooltip. The choice is remembered in browser local storage when available.
+
+The Emonio target field is sized for approximately 30 characters on wider screens and remains responsive on smaller screens. CONNECT and the device lifecycle button use the same typography and dimensions as the RECORD button.
+
+Measurement and control typography prefers JetBrains Mono, with a local monospace fallback. The web font is loaded from Google Fonts when available; longer-form interface text retains the system sans-serif stack. Typography and theme affect presentation only, not the stored measurement values.
+
+Load-control features are separate from the read-only Modbus measurement path. They include actuator discovery and qualification, manual PWM commands, power observation and characterization, and a bounded zero-export controller that uses canonical phase $P$ as feedback. Actuator command and acknowledgement evidence is handled independently of meter acquisition; see `src/emonio_viewer/load_control/` and the corresponding server and frontend modules.
+
+---
+
+## 26. Acceptance and Current Baseline
 
 The repository includes:
 
@@ -771,8 +790,10 @@ Real-device testing is also part of project qualification.
 The current trusted field baseline is:
 
 ```text
-ARI Emonio Viewer v0.4.7
+ARI Emonio Viewer v0.4.14
 ```
+
+The `testing` branch is v0.4.29 Testing; automated acceptance does not itself establish a new field baseline.
 
 The tested Emonio P3 firmware is:
 
@@ -782,7 +803,7 @@ The tested Emonio P3 firmware is:
 
 ---
 
-## 26. Project Structure
+## 27. Project Structure
 
 Important source areas include:
 
@@ -803,7 +824,10 @@ src/emonio_viewer/device_evidence/
     Read-only device evidence
 
 src/emonio_viewer/recording/
-    Per-device recording
+    Per-device recording and condition monitoring
+
+src/emonio_viewer/load_control/
+    Actuator qualification, PWM, observation, and zero-export control
 
 src/emonio_viewer/diagnostics/
     Runtime diagnostics
@@ -812,13 +836,13 @@ src/emonio_viewer/runtime/
     Runtime state and event distribution
 
 src/emonio_viewer/server/
-    Local API and WebSocket service
+    Local API, WebSocket service, and load-control routes
 
 frontend/js/
     Viewer behavior and scientific visualization
 
 frontend/css/
-    Structured presentation rules
+    Structured presentation rules and theme palettes
 
 tests/
     Unit, integration, frontend, and regression tests
@@ -836,7 +860,7 @@ Recording does not redefine measurements.
 
 ---
 
-## 27. Summary
+## 28. Summary
 
 ARI Emonio Viewer is a local scientific measurement viewer for Emonio P3 devices.
 
