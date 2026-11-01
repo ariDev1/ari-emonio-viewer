@@ -1,5 +1,6 @@
 from dataclasses import replace
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from emonio_viewer.config.model import RecordingConfig, RuntimeConfig, ViewerConfig
+from emonio_viewer.acquisition.worker import AcquisitionFailure, AcquisitionFailureKind
 from emonio_viewer.runtime.events import RuntimeEventBus
 from emonio_viewer.runtime.store import RuntimeStore
 from emonio_viewer.server.app import create_app
@@ -95,6 +97,37 @@ def test_diagnostics_report_device_firmware_and_verified_register_map(tmp_path, 
     assert status == 200
     assert payload["firmware_version"] == device_config.firmware_version
     assert payload["register_map_id"] == "P3-3.0.79-verified"
+
+
+def test_diagnostics_expose_bounded_last_failure_without_changing_cycle_counts(
+    tmp_path, real_sample, device_config,
+) -> None:
+    app, _ = build_app(tmp_path, real_sample, device_config)
+    from emonio_viewer.server.keys import RUNTIME_STORE_KEY
+
+    store = app[RUNTIME_STORE_KEY]
+    failure = AcquisitionFailure(
+        device_id=device_config.id,
+        cycle_id=2,
+        block="A",
+        kind=AcquisitionFailureKind.TRANSPORT,
+        detail="Connection reset by peer" + "x" * 600,
+        occurred_utc=datetime(2026, 8, 27, tzinfo=timezone.utc),
+    )
+    store.publish_failure(failure, connections_opened=2)
+
+    status, payload = asyncio.run(get_json(app, f"/api/v1/diagnostics/{device_config.id}"))
+
+    assert status == 200
+    assert payload["invalid_cycles"] == 1
+    assert payload["last_failure"] == {
+        "cycle_id": 2,
+        "block": "A",
+        "kind": "TRANSPORT",
+        "detail": failure.detail[:512],
+        "detail_truncated": True,
+        "occurred_utc": failure.occurred_utc.isoformat(),
+    }
 
 
 

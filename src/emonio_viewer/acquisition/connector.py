@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import socket
 
 from emonio_viewer.config.model import DeviceConfig
 from emonio_viewer.device_evidence.firmware import FirmwareProbeError, probe_firmware_version
@@ -43,6 +44,7 @@ class DeviceConnector:
         self._unit_id = unit_id
         self._poll_interval_s = poll_interval_s
         self._timeout_s = timeout_s
+        self._connect_lock = asyncio.Lock()
 
     def device_configs(self) -> tuple[DeviceConfig, ...]:
         return self._coordinator.device_configs()
@@ -53,6 +55,30 @@ class DeviceConnector:
     def _existing(self, name: str, host: str) -> DeviceConfig | None:
         for device in self.device_configs():
             if device.host == host or device.name == name:
+                return device
+        return None
+
+    @staticmethod
+    def _addresses(host: str, port: int) -> set[str]:
+        try:
+            return {
+                address[0]
+                for _, _, _, _, address in socket.getaddrinfo(
+                    host, port, type=socket.SOCK_STREAM
+                )
+            }
+        except OSError:
+            return set()
+
+    async def _address_alias(self, host: str) -> DeviceConfig | None:
+        addresses = await asyncio.to_thread(self._addresses, host, self._port)
+        if not addresses:
+            return None
+        for device in self.device_configs():
+            if device.port != self._port:
+                continue
+            configured = await asyncio.to_thread(self._addresses, device.host, device.port)
+            if addresses & configured:
                 return device
         return None
 
@@ -93,6 +119,11 @@ class DeviceConnector:
             pass
 
     async def connect(self, target_text: str) -> ConnectionResult:
+        # Qualify and register atomically within this Viewer process.
+        async with self._connect_lock:
+            return await self._connect(target_text)
+
+    async def _connect(self, target_text: str) -> ConnectionResult:
         try:
             target = parse_target(target_text)
         except TargetInputError:
@@ -101,6 +132,12 @@ class DeviceConnector:
         existing = self._existing(target.name, target.host)
         if existing is not None:
             return ConnectionResult(existing, True)
+
+        alias = await self._address_alias(target.host)
+        if alias is not None:
+            raise TargetConnectionError(
+                f"target address is already configured as {alias.id}; use its configured host"
+            )
 
         device = DeviceConfig(
             id=self._unique_id(target.name),

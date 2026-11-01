@@ -51,6 +51,8 @@ def _is_public_file(root: Path, path: Path) -> bool:
     relative = path.relative_to(root)
     if any(part in FORBIDDEN_PARTS for part in relative.parts):
         return False
+    if any(part.endswith(".egg-info") for part in relative.parts):
+        return False
     if relative.parts and relative.parts[0] in FORBIDDEN_ROOT_DIRS:
         return False
     if relative in FORBIDDEN_EXACT:

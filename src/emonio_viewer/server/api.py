@@ -240,6 +240,18 @@ async def get_diagnostics(request):
             "event_deliveries_dropped": request.app[EVENT_BUS_KEY].dropped_deliveries(
                 snapshot.device_id
             ),
+            "last_failure": (
+                None
+                if snapshot.last_failure is None
+                else {
+                    "cycle_id": snapshot.last_failure.cycle_id,
+                    "block": snapshot.last_failure.block,
+                    "kind": snapshot.last_failure.kind.value,
+                    "detail": snapshot.last_failure.detail,
+                    "detail_truncated": snapshot.last_failure_detail_truncated,
+                    "occurred_utc": snapshot.last_failure.occurred_utc.isoformat(),
+                }
+            ),
         }
     )
     return web.json_response(payload)

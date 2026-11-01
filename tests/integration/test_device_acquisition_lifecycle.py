@@ -264,6 +264,10 @@ def test_failed_reconnect_keeps_last_exact_sample_and_closes_candidate(
         assert after.last_sample is before.last_sample
         assert after.cycles_valid == before.cycles_valid
         assert after.cycles_invalid == before.cycles_invalid
+        assert after.metrics.qualification_failures == before.metrics.qualification_failures + 1
+        assert after.last_failure is not None
+        assert after.last_failure.kind.value == "PROTOCOL"
+        assert "exception code 2" in after.last_failure.detail
     finally:
         coordinator.stop()
         coordinator.close_clients()

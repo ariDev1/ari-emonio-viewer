@@ -1,5 +1,6 @@
 from concurrent.futures import Future
 from dataclasses import replace
+from datetime import datetime, timezone
 import threading
 
 from emonio_viewer.config.model import DeviceConfig
@@ -11,7 +12,7 @@ from emonio_viewer.runtime.events import DiagnosticEvent, RuntimeEventBus, Sever
 from emonio_viewer.runtime.store import RuntimeStore
 
 from .lifecycle import AcquisitionLifecycleState, AcquisitionStatus, AcquisitionTransitionError
-from .worker import AcquisitionCycleError, AcquisitionFailure, AcquisitionWorker
+from .worker import AcquisitionCycleError, AcquisitionFailure, AcquisitionFailureKind, AcquisitionWorker
 
 
 class AcquisitionCoordinator:
@@ -327,6 +328,19 @@ class AcquisitionCoordinator:
             sample = worker.run_cycle(qualification_cycle_id, 0.0)
         except (AcquisitionCycleError, OSError) as exc:
             worker.client.close()
+            failure = (
+                exc.failure
+                if isinstance(exc, AcquisitionCycleError)
+                else AcquisitionFailure(
+                    device_id=device_id,
+                    cycle_id=qualification_cycle_id,
+                    block="CONNECT",
+                    kind=AcquisitionFailureKind.TRANSPORT,
+                    detail=str(exc) or type(exc).__name__,
+                    occurred_utc=datetime.now(timezone.utc),
+                )
+            )
+            self._store.record_qualification_failure(failure)
             detail = str(exc) or type(exc).__name__
             failed = AcquisitionStatus(
                 device_id,

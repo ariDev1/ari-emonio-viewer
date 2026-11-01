@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 
 import pytest
 
@@ -241,6 +242,53 @@ def test_existing_target_returns_registration_without_new_probe_or_worker(fake_e
         assert coordinator.device_configs() == configs_before
     finally:
         coordinator.stop()
+
+
+def test_ip_alias_of_existing_hostname_does_not_open_second_client(fake_emonio, device_config) -> None:
+    configured = replace(device_config, host="localhost")
+    coordinator = AcquisitionCoordinator((configured,), RuntimeStore(), RuntimeEventBus())
+    connector = DeviceConnector(
+        coordinator,
+        FakeRecordingRegistry(),
+        port=fake_emonio.port,
+        poll_interval_s=0.05,
+        timeout_s=0.1,
+    )
+
+    with pytest.raises(TargetConnectionError, match="already configured"):
+        asyncio.run(connector.connect("127.0.0.1"))
+
+    assert fake_emonio.connection_count == 0
+    assert tuple(device.id for device in coordinator.device_configs()) == (configured.id,)
+
+
+def test_concurrent_connect_requests_register_one_client(fake_emonio) -> None:
+    coordinator = AcquisitionCoordinator((), RuntimeStore(), RuntimeEventBus())
+    connector = DeviceConnector(
+        coordinator,
+        FakeRecordingRegistry(),
+        port=fake_emonio.port,
+        poll_interval_s=0.05,
+        timeout_s=0.1,
+    )
+
+    async def slow_probe(_host):
+        await asyncio.sleep(0.02)
+        return "unknown"
+
+    connector._probe_firmware_version = slow_probe
+
+    async def connect_both():
+        return await asyncio.gather(
+            connector.connect(fake_emonio.host),
+            connector.connect(fake_emonio.host),
+        )
+
+    first, second = asyncio.run(connect_both())
+
+    assert first.device == second.device
+    assert (first.already_connected, second.already_connected) == (False, True)
+    assert fake_emonio.connection_count == 1
 
 
 def test_http_existing_target_reports_actual_lifecycle_and_measurement_state(

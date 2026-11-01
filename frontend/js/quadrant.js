@@ -1,7 +1,7 @@
 let currentLimit = null;
 let shrinkVotes = 0;
 let latestSample = null;
-let selectedPhaseKey = "phase_a";
+let selectedPhaseKey = "total";
 let selectorInitialized = false;
 
 export const SCALE_MARGIN = 1.12;

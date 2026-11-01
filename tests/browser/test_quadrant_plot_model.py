@@ -34,6 +34,58 @@ def test_plot_model_exposes_four_selectable_phase_views() -> None:
     ]
 
 
+def test_startup_selects_canonical_total_and_keeps_manual_phase_selection() -> None:
+    result = _run_quadrant_module(r'''(() => {
+      const nodes = new Map();
+      function element() {
+        return {
+          attrs: {}, dataset: {}, children: [], textContent: "",
+          classList: { toggle() {}, add() {} },
+          setAttribute(key, value) { this.attrs[key] = value; },
+          appendChild(child) { this.children.push(child); },
+          replaceChildren(...children) { this.children = children; },
+          addEventListener(key, callback) { this[key] = callback; },
+        };
+      }
+      globalThis.document = {
+        getElementById(id) {
+          if (!nodes.has(id)) nodes.set(id, element());
+          return nodes.get(id);
+        },
+        querySelector(selector) {
+          if (!nodes.has(selector)) nodes.set(selector, element());
+          return nodes.get(selector);
+        },
+        createElementNS() { return element(); },
+      };
+      const block = (p, q) => ({ p, q, s: Math.hypot(p, q), pf: 0.5 });
+      const sample = {
+        phase_a: block(100, 20), phase_b: block(20, 10),
+        phase_c: block(30, 10), total: block(-200, 100),
+      };
+      mod.renderQuadrant(sample);
+      const title = document.getElementById("quadrant-title").textContent;
+      const initial = document.getElementById("pq-vectors").children[0];
+      const totalP = initial.children.find((child) => child.attrs.class === "plot-detail-value").textContent;
+      const totalPressed = document.querySelector('#pq-legend [data-phase="T"]').attrs["aria-pressed"];
+      document.querySelector('#pq-legend [data-phase="A"]').click();
+      mod.renderQuadrant(sample);
+      return {
+        title, phase: initial.dataset.phase, totalP, totalPressed,
+        manualTitle: document.getElementById("quadrant-title").textContent,
+        manualPhase: document.getElementById("pq-vectors").children[0].dataset.phase,
+      };
+    })()''')
+    assert result == {
+        "title": "Total power vector",
+        "phase": "T",
+        "totalP": "-200.0000 W",
+        "totalPressed": "true",
+        "manualTitle": "Phase A power vector",
+        "manualPhase": "A",
+    }
+
+
 def test_phase_detail_rows_show_p_q_s_phi_pf_and_quadrant() -> None:
     result = _run_quadrant_module(
         "mod.buildPowerDetailRows(mod.computePowerVectorDetails({p: 3, q: 4, s: 5, pf: 0.6}, false))"

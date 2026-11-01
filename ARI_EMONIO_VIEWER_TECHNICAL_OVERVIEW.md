@@ -4,7 +4,7 @@
 
 **Current trusted field baseline:** v0.4.14
 
-**Current testing branch:** v0.4.29 Testing
+**Current testing branch:** v0.4.30 Testing
 
 **Tested Emonio P3 firmware:** `3.0.79-release`
 
@@ -793,7 +793,7 @@ The current trusted field baseline is:
 ARI Emonio Viewer v0.4.14
 ```
 
-The `testing` branch is v0.4.29 Testing; automated acceptance does not itself establish a new field baseline.
+The `testing` branch is v0.4.30 Testing; automated acceptance does not itself establish a new field baseline.
 
 The tested Emonio P3 firmware is:
 

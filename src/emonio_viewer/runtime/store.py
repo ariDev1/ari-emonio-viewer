@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import threading
 import time
 
@@ -8,6 +8,9 @@ from emonio_viewer.acquisition.worker import AcquisitionFailure, AcquisitionFail
 from emonio_viewer.config.model import DeviceConfig
 from emonio_viewer.diagnostics.metrics import DeviceMetrics, MetricsSnapshot
 from emonio_viewer.measurement.model import MeasurementSample, SampleQuality
+
+
+MAX_FAILURE_DETAIL_LENGTH = 512
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +22,8 @@ class DeviceSnapshot:
     cycles_valid: int
     cycles_invalid: int
     metrics: MetricsSnapshot
+    last_failure: AcquisitionFailure | None
+    last_failure_detail_truncated: bool
 
 
 @dataclass(slots=True)
@@ -28,6 +33,8 @@ class _DeviceRuntime:
     metrics: DeviceMetrics
     last_sample: MeasurementSample | None = None
     last_sample_monotonic: float | None = None
+    last_failure: AcquisitionFailure | None = None
+    last_failure_detail_truncated: bool = False
 
 
 class RuntimeStore:
@@ -66,6 +73,7 @@ class RuntimeStore:
     def publish_failure(self, failure: AcquisitionFailure, connections_opened: int) -> None:
         with self._lock:
             runtime = self._devices[failure.device_id]
+            self._retain_failure(runtime, failure)
             if failure.kind is AcquisitionFailureKind.TIMEOUT:
                 runtime.metrics.record_timeout()
             elif failure.kind is AcquisitionFailureKind.PROTOCOL:
@@ -76,6 +84,20 @@ class RuntimeStore:
                 runtime.metrics.invalid_cycles += 1
             runtime.metrics.set_connections_opened(connections_opened)
             runtime.machine.apply(DeviceEvent.CYCLE_FAILED)
+
+    @staticmethod
+    def _retain_failure(runtime: _DeviceRuntime, failure: AcquisitionFailure) -> None:
+        runtime.last_failure_detail_truncated = len(failure.detail) > MAX_FAILURE_DETAIL_LENGTH
+        runtime.last_failure = replace(
+            failure, detail=failure.detail[:MAX_FAILURE_DETAIL_LENGTH]
+        )
+
+    def record_qualification_failure(self, failure: AcquisitionFailure) -> None:
+        """Record a failed manual reconnect without creating a failed poll cycle."""
+        with self._lock:
+            runtime = self._devices[failure.device_id]
+            runtime.metrics.qualification_failures += 1
+            self._retain_failure(runtime, failure)
 
     def list_devices(self) -> tuple[DeviceSnapshot, ...]:
         with self._lock:
@@ -106,4 +128,6 @@ class RuntimeStore:
                 cycles_valid=metrics.valid_cycles,
                 cycles_invalid=metrics.invalid_cycles,
                 metrics=metrics,
+                last_failure=runtime.last_failure,
+                last_failure_detail_truncated=runtime.last_failure_detail_truncated,
             )

@@ -16,6 +16,7 @@ class MetricsSnapshot:
     protocol_errors: int
     decode_errors: int
     reconnects: int
+    qualification_failures: int
     latency_statistics_scope: str
     latency_window_samples: int
     latency_window_capacity: int
@@ -34,6 +35,7 @@ class DeviceMetrics:
         self.protocol_errors = 0
         self.decode_errors = 0
         self.reconnects = 0
+        self.qualification_failures = 0
         self._connections_opened = 0
         self._latencies: deque[float] = deque(maxlen=LATENCY_WINDOW_SIZE)
         self._schedule_lag_ms = 0.0
@@ -81,6 +83,7 @@ class DeviceMetrics:
             protocol_errors=self.protocol_errors,
             decode_errors=self.decode_errors,
             reconnects=self.reconnects,
+            qualification_failures=self.qualification_failures,
             latency_statistics_scope=LATENCY_STATISTICS_SCOPE,
             latency_window_samples=len(self._latencies),
             latency_window_capacity=LATENCY_WINDOW_SIZE,

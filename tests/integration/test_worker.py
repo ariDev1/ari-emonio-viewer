@@ -1,6 +1,10 @@
 import pytest
 
-from emonio_viewer.acquisition.worker import AcquisitionCycleError, AcquisitionWorker
+from emonio_viewer.acquisition.worker import (
+    AcquisitionCycleError,
+    AcquisitionFailureKind,
+    AcquisitionWorker,
+)
 from emonio_viewer.modbus.transport import ReadOnlyModbusClient
 
 
@@ -50,3 +54,22 @@ def test_failed_cycle_does_not_retry_inside_same_cycle(fake_emonio, device_confi
     assert sample.identity.cycle_id == 2
     assert fake_emonio.connection_count == 2
     assert fake_emonio.requested_bases[-4:] == [0, 100, 200, 300]
+
+
+def test_connection_reset_is_transport_failure_and_next_cycle_recovers(
+    fake_emonio, device_config,
+) -> None:
+    fake_emonio.fail_next_read(base=0, mode="reset")
+    worker = build_worker(fake_emonio, device_config)
+
+    with pytest.raises(AcquisitionCycleError) as raised:
+        worker.run_cycle(1)
+
+    assert raised.value.failure.block == "A"
+    assert raised.value.failure.kind is AcquisitionFailureKind.TRANSPORT
+    assert worker.client_is_connected is False
+    assert fake_emonio.requested_bases == [0]
+
+    sample = worker.run_cycle(2)
+    assert sample.identity.cycle_id == 2
+    assert fake_emonio.connection_count == 2
