@@ -64,6 +64,19 @@ function cacheBackendDeviceState(device) {
   backendDeviceState.set(device.device_id, { ...previous, ...device });
 }
 
+function renderBackgroundAcquisitionReminder() {
+  const reminder = document.getElementById("background-acquisition-reminder");
+  if (!reminder) return;
+  const count = [...backendDeviceState.values()].filter(
+    (device) => device.device_id !== selectedDevice && device.acquisition_state === "RUNNING"
+  ).length;
+  const text = count
+    ? `${count} other Emonio${count === 1 ? " is" : "s are"} acquiring in the background. Disconnect unused devices before using another Viewer.`
+    : "";
+  if (reminder.textContent !== text) reminder.textContent = text;
+  reminder.hidden = count === 0;
+}
+
 function lifecycleStateFor(deviceId) {
   return backendDeviceState.get(deviceId)?.acquisition_state ?? null;
 }
@@ -540,6 +553,10 @@ async function refreshBackendState() {
     const [devices, diagnostics] = await Promise.all([getDevices(), getDiagnostics(deviceId)]);
     if (!selectionResponseIsCurrent(deviceId, generation)) return false;
     for (const device of devices) cacheBackendDeviceState(device);
+    for (const cachedId of backendDeviceState.keys()) {
+      if (!devices.some((device) => device.device_id === cachedId)) backendDeviceState.delete(cachedId);
+    }
+    renderBackgroundAcquisitionReminder();
     const selected = devices.find((device) => device.device_id === deviceId);
     populateDeviceSelector();
     renderBackendStatus(selected);
@@ -585,6 +602,7 @@ async function selectDevice(deviceId) {
   const deviceChanged = selectedDevice !== deviceId;
   const generation = ++selectionGeneration;
   selectedDevice = deviceId;
+  renderBackgroundAcquisitionReminder();
   if (deviceChanged) resetQuadrantScale();
   populateDeviceSelector();
   applySelectedDeviceConfig();
@@ -593,6 +611,7 @@ async function selectDevice(deviceId) {
     if (payload.sample) appendHistoryPayload(payload);
     if (!selectionResponseIsCurrent(deviceId, generation)) return false;
     cacheBackendDeviceState(payload);
+    renderBackgroundAcquisitionReminder();
     populateDeviceSelector();
     renderLifecycleControl(payload.acquisition_state);
     if (payload.sample) {

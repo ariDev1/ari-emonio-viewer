@@ -14,6 +14,10 @@ def _run_app_module(expression: str, *, api_mode: str) -> object:
     source = source.replace("async function selectDevice(deviceId)", "export async function selectDevice(deviceId)")
     source = source.replace("async function refreshBackendState()", "export async function refreshBackendState()")
     source = source.replace(
+        "function renderBackgroundAcquisitionReminder()",
+        "export function renderBackgroundAcquisitionReminder()",
+    )
+    source = source.replace(
         "async function executeSelectedDeviceLifecycle()",
         "export async function executeSelectedDeviceLifecycle()",
     )
@@ -161,6 +165,83 @@ def test_delayed_old_device_selection_cannot_overwrite_new_selected_measurement(
     )
     assert result["renders"] == ["B"]
     assert sorted(result["history"]) == ["A", "B"]
+
+
+def test_background_acquisition_reminder_counts_only_other_running_devices() -> None:
+    result = _run_app_module(
+        r'''(async () => {
+          mod.__setSelectedDeviceForTest("A");
+          mod.cacheBackendDeviceState({device_id:"A", acquisition_state:"RUNNING"});
+          mod.cacheBackendDeviceState({device_id:"B", acquisition_state:"RUNNING"});
+          mod.cacheBackendDeviceState({device_id:"C", acquisition_state:"OFFLINE"});
+          mod.renderBackgroundAcquisitionReminder();
+          const node = document.getElementById("background-acquisition-reminder");
+          const one = {hidden:node.hidden, text:node.textContent};
+          mod.cacheBackendDeviceState({device_id:"C", acquisition_state:"RUNNING"});
+          mod.renderBackgroundAcquisitionReminder();
+          const two = {hidden:node.hidden, text:node.textContent};
+          mod.__setSelectedDeviceForTest("B");
+          mod.cacheBackendDeviceState({device_id:"A", acquisition_state:"DISCONNECTED"});
+          mod.cacheBackendDeviceState({device_id:"C", acquisition_state:"DISCONNECTED"});
+          mod.renderBackgroundAcquisitionReminder();
+          const none = {hidden:node.hidden, text:node.textContent};
+          return {one, two, none};
+        })()''',
+        api_mode="device",
+    )
+    assert result == {
+        "one": {"hidden": False, "text": "1 other Emonio is acquiring in the background. Disconnect unused devices before using another Viewer."},
+        "two": {"hidden": False, "text": "2 other Emonios are acquiring in the background. Disconnect unused devices before using another Viewer."},
+        "none": {"hidden": True, "text": ""},
+    }
+
+
+def test_backend_refresh_updates_reminder_and_does_not_repeat_unchanged_text() -> None:
+    result = _run_app_module(
+        r'''(async () => {
+          mod.__setSelectedDeviceForTest("A");
+          const reminder = document.getElementById("background-acquisition-reminder");
+          let writes = 0;
+          let text = "";
+          Object.defineProperty(reminder, "textContent", {
+            get() { return text; },
+            set(value) { text = value; writes++; },
+          });
+          const first = mod.refreshBackendState();
+          globalThis.__deviceListRequests[0]([
+            {device_id:"A", acquisition_state:"RUNNING"},
+            {device_id:"B", acquisition_state:"RUNNING", state:"OFFLINE"},
+          ]);
+          globalThis.__diagnosticRequests[0].resolve({device_id:"A"});
+          await first;
+          const initial = {text, hidden:reminder.hidden, writes};
+          const second = mod.refreshBackendState();
+          globalThis.__deviceListRequests[1]([
+            {device_id:"A", acquisition_state:"RUNNING"},
+            {device_id:"B", acquisition_state:"RUNNING", state:"OFFLINE"},
+          ]);
+          globalThis.__diagnosticRequests[1].resolve({device_id:"A"});
+          await second;
+          const unchangedWrites = writes;
+          const third = mod.refreshBackendState();
+          globalThis.__deviceListRequests[2]([
+            {device_id:"A", acquisition_state:"RUNNING"},
+          ]);
+          globalThis.__diagnosticRequests[2].resolve({device_id:"A"});
+          await third;
+          return {initial, unchangedWrites, final:{text, hidden:reminder.hidden, writes}};
+        })()''',
+        api_mode="backend",
+    )
+    assert result == {
+        "initial": {
+            "text": "1 other Emonio is acquiring in the background. Disconnect unused devices before using another Viewer.",
+            "hidden": False,
+            "writes": 1,
+        },
+        "unchangedWrites": 1,
+        "final": {"text": "", "hidden": True, "writes": 2},
+    }
 
 
 def test_delayed_backend_diagnostics_response_cannot_cross_device_selection_generation() -> None:

@@ -15,6 +15,14 @@ def test_frontend_exposes_explicit_acquisition_lifecycle_controls() -> None:
     assert "RECONNECT EMONIO" in app
 
 
+def test_background_acquisition_reminder_is_accessible_and_in_target_strip() -> None:
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    css = Path("frontend/css/layout.css").read_text(encoding="utf-8")
+    assert 'id="background-acquisition-reminder"' in html
+    assert 'role="status"' in html
+    assert '.background-acquisition-reminder' in css
+
+
 def test_lifecycle_api_preserves_structured_failure_payload() -> None:
     api = Path("frontend/js/api.js").read_text(encoding="utf-8")
 
